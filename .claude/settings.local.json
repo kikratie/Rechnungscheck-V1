@@ -3,7 +3,24 @@
     "allow": [
       "Bash(dir:*)",
       "Bash(test:*)",
-      "Bash(docker ps:*)"
+      "Bash(docker ps:*)",
+      "Bash(docker compose up:*)",
+      "Bash(npm run db:migrate:*)",
+      "Bash(npx prisma migrate dev:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker restart:*)",
+      "Bash(npx tsx:*)",
+      "Bash(npm run dev)",
+      "Bash(npm install)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(start http://localhost:5174)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(ss:*)",
+      "Bash(taskkill:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
