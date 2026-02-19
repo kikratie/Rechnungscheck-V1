@@ -1,0 +1,395 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// MULTI-TENANCY & AUTH
+// ============================================================
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  taxId     String?
+  uidNumber String?
+  address   Json?
+  settings  Json     @default("{}")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users          User[]
+  invoices       Invoice[]
+  bankStatements BankStatement[]
+  matchings      Matching[]
+  exportConfigs  ExportConfig[]
+  auditLogs      AuditLog[]
+
+  @@map("tenants")
+}
+
+model User {
+  id          String    @id @default(uuid())
+  tenantId    String
+  email       String
+  passwordHash String
+  firstName   String
+  lastName    String
+  role        UserRole  @default(ACCOUNTANT)
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  auditLogs AuditLog[] @relation("AuditUser")
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  ACCOUNTANT
+  TAX_ADVISOR
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ============================================================
+// INVOICES & AI PROCESSING
+// ============================================================
+
+model Invoice {
+  id               String   @id @default(uuid())
+  tenantId         String
+
+  // Dokument-Metadaten
+  originalFileName String
+  storagePath      String
+  storageHash      String
+  mimeType         String
+  fileSizeBytes    Int
+
+  // AI-extrahierte Daten
+  vendorName    String?
+  vendorUid     String?
+  vendorAddress Json?
+  invoiceNumber String?
+  invoiceDate   DateTime?
+  dueDate       DateTime?
+  netAmount     Decimal?  @db.Decimal(12, 2)
+  vatAmount     Decimal?  @db.Decimal(12, 2)
+  grossAmount   Decimal?  @db.Decimal(12, 2)
+  currency      String    @default("EUR")
+  vatRate       Decimal?  @db.Decimal(5, 2)
+
+  // AI-Klassifikation
+  accountNumber String?
+  costCenter    String?
+  category      String?
+
+  // Validierung
+  validationStatus    ValidationStatus    @default(PENDING)
+  validationDetails   Json                @default("[]")
+  uidValidationStatus UidValidationStatus @default(NOT_CHECKED)
+  uidValidationDate   DateTime?
+
+  // AI-Verarbeitungsstatus
+  processingStatus ProcessingStatus @default(UPLOADED)
+  aiConfidence     Decimal?         @db.Decimal(5, 4)
+  aiRawResponse    Json?
+  processingError  String?
+
+  // Duplikaterkennung
+  isDuplicate   Boolean @default(false)
+  duplicateOfId String?
+
+  // Workflow
+  isLocked       Boolean   @default(false)
+  lockedAt       DateTime?
+  lockedByUserId String?
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  lineItems        InvoiceLineItem[]
+  matchings        Matching[]
+  documentVersions DocumentVersion[]
+
+  @@index([tenantId])
+  @@index([tenantId, vendorName])
+  @@index([tenantId, invoiceNumber])
+  @@index([tenantId, invoiceDate])
+  @@index([tenantId, validationStatus])
+  @@index([tenantId, processingStatus])
+  @@index([storageHash])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  position    Int
+  description String?
+  quantity    Decimal? @db.Decimal(10, 3)
+  unit        String?
+  unitPrice   Decimal? @db.Decimal(12, 2)
+  netAmount   Decimal? @db.Decimal(12, 2)
+  vatRate     Decimal? @db.Decimal(5, 2)
+  vatAmount   Decimal? @db.Decimal(12, 2)
+  grossAmount Decimal? @db.Decimal(12, 2)
+  accountNumber String?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+model DocumentVersion {
+  id              String   @id @default(uuid())
+  invoiceId       String
+  version         Int
+  storagePath     String
+  storageHash     String
+  changeReason    String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@unique([invoiceId, version])
+  @@index([invoiceId])
+  @@map("document_versions")
+}
+
+enum ProcessingStatus {
+  UPLOADED
+  PROCESSING
+  PROCESSED
+  REVIEW_REQUIRED
+  APPROVED
+  EXPORTED
+  ERROR
+}
+
+enum ValidationStatus {
+  PENDING
+  VALID
+  WARNING
+  INVALID
+}
+
+enum UidValidationStatus {
+  NOT_CHECKED
+  VALID
+  INVALID
+  SERVICE_UNAVAILABLE
+}
+
+// ============================================================
+// BANK STATEMENTS & TRANSACTIONS
+// ============================================================
+
+model BankStatement {
+  id               String   @id @default(uuid())
+  tenantId         String
+
+  originalFileName String
+  storagePath      String
+  storageHash      String
+  fileFormat       String
+
+  bankName       String?
+  iban           String?
+  bic            String?
+  statementDate  DateTime?
+  periodFrom     DateTime?
+  periodTo       DateTime?
+  openingBalance Decimal? @db.Decimal(12, 2)
+  closingBalance Decimal? @db.Decimal(12, 2)
+
+  processingStatus ProcessingStatus @default(UPLOADED)
+  processingError  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id])
+  transactions BankTransaction[]
+
+  @@index([tenantId])
+  @@map("bank_statements")
+}
+
+model BankTransaction {
+  id              String @id @default(uuid())
+  bankStatementId String
+
+  transactionDate DateTime
+  valueDate       DateTime?
+  amount          Decimal  @db.Decimal(12, 2)
+  currency        String   @default("EUR")
+  counterpartName String?
+  counterpartIban String?
+  reference       String?
+  bookingText     String?
+
+  isMatched Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  bankStatement BankStatement @relation(fields: [bankStatementId], references: [id], onDelete: Cascade)
+  matchings     Matching[]
+
+  @@index([bankStatementId])
+  @@index([transactionDate])
+  @@index([amount])
+  @@map("bank_transactions")
+}
+
+// ============================================================
+// MATCHING
+// ============================================================
+
+model Matching {
+  id            String      @id @default(uuid())
+  tenantId      String
+  invoiceId     String
+  transactionId String
+
+  matchType   MatchType
+  confidence  Decimal?    @db.Decimal(5, 4)
+  matchReason String?
+
+  status MatchStatus @default(SUGGESTED)
+
+  confirmedByUserId String?
+  confirmedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id])
+  invoice     Invoice         @relation(fields: [invoiceId], references: [id])
+  transaction BankTransaction @relation(fields: [transactionId], references: [id])
+
+  @@unique([invoiceId, transactionId])
+  @@index([tenantId])
+  @@index([invoiceId])
+  @@index([transactionId])
+  @@map("matchings")
+}
+
+enum MatchType {
+  AUTO
+  AI_SUGGESTED
+  MANUAL
+}
+
+enum MatchStatus {
+  SUGGESTED
+  CONFIRMED
+  REJECTED
+}
+
+// ============================================================
+// EXPORT
+// ============================================================
+
+model ExportConfig {
+  id               String       @id @default(uuid())
+  tenantId         String
+  name             String
+  format           ExportFormat
+
+  columnMapping    Json
+  delimiter        String  @default(";")
+  dateFormat       String  @default("dd.MM.yyyy")
+  decimalSeparator String  @default(",")
+  encoding         String  @default("UTF-8")
+  includeHeader    Boolean @default(true)
+
+  isDefault Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("export_configs")
+}
+
+model ExportLog {
+  id               String       @id @default(uuid())
+  tenantId         String
+  exportConfigId   String?
+  exportedByUserId String
+  format           ExportFormat
+  invoiceCount     Int
+  dateFrom         DateTime?
+  dateTo           DateTime?
+  storagePath      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("export_logs")
+}
+
+enum ExportFormat {
+  CSV_GENERIC
+  BMD_CSV
+  BMD_XML
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id         String  @id @default(uuid())
+  tenantId   String
+  userId     String?
+
+  entityType String
+  entityId   String
+  action     String
+
+  previousData Json?
+  newData      Json?
+  metadata     Json?
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User?  @relation("AuditUser", fields: [userId], references: [id])
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, userId])
+  @@map("audit_logs")
+}

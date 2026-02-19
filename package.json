@@ -1,0 +1,31 @@
+{
+  "name": "buchungsai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KI-gestützte Buchhaltungs-Automatisierung für österreichische Unternehmer",
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
+    "db:migrate": "npm run db:migrate -w server",
+    "db:seed": "npm run db:seed -w server",
+    "db:studio": "npm run db:studio -w server",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "lint": "concurrently \"npm run lint -w server\" \"npm run lint -w client\"",
+    "test": "concurrently \"npm run test -w server\" \"npm run test -w client\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
