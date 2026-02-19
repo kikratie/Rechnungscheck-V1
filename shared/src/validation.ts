@@ -194,6 +194,14 @@ export const createErsatzbelegSchema = z.object({
 });
 
 // ============================================================
+// Batch Approve
+// ============================================================
+
+export const batchApproveSchema = z.object({
+  invoiceIds: z.array(z.string().uuid()).min(1).max(100),
+});
+
+// ============================================================
 // UID Validation
 // ============================================================
 

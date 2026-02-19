@@ -1,4 +1,4 @@
-import type { ApiResponse } from '@buchungsai/shared';
+import type { ApiResponse, VendorTrustLevel } from '@buchungsai/shared';
 import { apiClient } from './client';
 
 export interface VendorListItem {
@@ -10,6 +10,7 @@ export interface VendorListItem {
   phone: string | null;
   iban: string | null;
   website: string | null;
+  trustLevel: VendorTrustLevel;
   viesName: string | null;
   viesCheckedAt: string | null;
   isActive: boolean;

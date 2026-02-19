@@ -116,6 +116,7 @@ export async function listVendors(
       phone: v.phone,
       iban: v.iban,
       website: v.website,
+      trustLevel: v.trustLevel,
       viesName: v.viesName,
       viesCheckedAt: v.viesCheckedAt?.toISOString() || null,
       isActive: v.isActive,
@@ -170,6 +171,7 @@ export async function getVendorDetail(tenantId: string, vendorId: string) {
     bic: vendor.bic,
     website: vendor.website,
     notes: vendor.notes,
+    trustLevel: vendor.trustLevel,
     viesName: vendor.viesName,
     viesAddress: vendor.viesAddress,
     viesCheckedAt: vendor.viesCheckedAt?.toISOString() || null,
@@ -208,6 +210,7 @@ export async function updateVendor(
     website?: string | null;
     notes?: string | null;
     isActive?: boolean;
+    trustLevel?: 'NEW' | 'VERIFIED' | 'TRUSTED';
   },
 ) {
   const vendor = await prisma.vendor.findFirst({

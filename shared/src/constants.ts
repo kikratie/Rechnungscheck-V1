@@ -88,6 +88,13 @@ export const INGESTION_CHANNELS = {
   API: 'API',
 } as const;
 
+// Vendor Trust Levels
+export const VENDOR_TRUST_LEVELS = {
+  NEW: { label: 'Neu', description: 'Standard für neue Lieferanten' },
+  VERIFIED: { label: 'Geprüft', description: 'Lieferant wurde geprüft, keine Auto-Genehmigung' },
+  TRUSTED: { label: 'Vertrauenswürdig', description: 'Rechnungen werden bei GRÜN automatisch genehmigt' },
+} as const;
+
 // Betragsklassen gemäß §11 UStG
 export const AMOUNT_CLASS_THRESHOLDS = {
   SMALL_MAX: 400,     // Kleinbetragsrechnung ≤ 400€ brutto

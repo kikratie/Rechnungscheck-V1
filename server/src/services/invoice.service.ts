@@ -451,6 +451,56 @@ export async function createErsatzbeleg(params: CreateErsatzbelegParams) {
   return result;
 }
 
+export async function batchApproveInvoices(
+  tenantId: string,
+  userId: string,
+  invoiceIds: string[],
+): Promise<{ approved: number; skipped: string[] }> {
+  // Fetch all invoices that belong to tenant
+  const invoices = await prisma.invoice.findMany({
+    where: { id: { in: invoiceIds }, tenantId },
+    select: { id: true, processingStatus: true, belegNr: true },
+  });
+
+  const foundIds = new Set(invoices.map((i) => i.id));
+  const skipped: string[] = [];
+  const toApprove: string[] = [];
+
+  for (const id of invoiceIds) {
+    if (!foundIds.has(id)) {
+      skipped.push(id);
+      continue;
+    }
+    const inv = invoices.find((i) => i.id === id)!;
+    if (inv.processingStatus === 'PROCESSED' || inv.processingStatus === 'REVIEW_REQUIRED') {
+      toApprove.push(inv.id);
+    } else {
+      skipped.push(`BEL-${String(inv.belegNr).padStart(3, '0')} (${inv.processingStatus})`);
+    }
+  }
+
+  if (toApprove.length > 0) {
+    await prisma.invoice.updateMany({
+      where: { id: { in: toApprove } },
+      data: { processingStatus: 'APPROVED' },
+    });
+
+    // Audit log per invoice
+    for (const id of toApprove) {
+      writeAuditLog({
+        tenantId,
+        userId,
+        entityType: 'Invoice',
+        entityId: id,
+        action: 'APPROVE',
+        metadata: { trigger: 'BATCH', batchSize: toApprove.length },
+      });
+    }
+  }
+
+  return { approved: toApprove.length, skipped };
+}
+
 export async function getInvoiceVersions(tenantId: string, invoiceId: string) {
   const invoice = await prisma.invoice.findFirst({
     where: { id: invoiceId, tenantId },
@@ -590,6 +640,24 @@ export async function runValidationAndSync(params: {
     validationOutput.overallStatus === 'GREEN' ? 'VALID' :
     validationOutput.overallStatus === 'YELLOW' ? 'WARNING' : 'INVALID';
 
+  // 3a. Check if vendor is TRUSTED → auto-approve GREEN invoices
+  let autoApprove = false;
+  if (validationOutput.overallStatus === 'GREEN') {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { vendorId: true, processingStatus: true },
+    });
+    if (invoice?.vendorId) {
+      const vendor = await prisma.vendor.findUnique({
+        where: { id: invoice.vendorId },
+        select: { trustLevel: true },
+      });
+      if (vendor?.trustLevel === 'TRUSTED') {
+        autoApprove = true;
+      }
+    }
+  }
+
   await prisma.invoice.update({
     where: { id: invoiceId },
     data: {
@@ -614,6 +682,7 @@ export async function runValidationAndSync(params: {
       category: extracted.category,
       currency: extracted.currency,
       validationStatus,
+      ...(autoApprove ? { processingStatus: 'APPROVED' as const } : {}),
       // Felder die vorher nur im Worker gesetzt wurden — jetzt überall konsistent
       isDuplicate: validationOutput.checks.some(
         (c) => c.rule === 'DUPLICATE_CHECK' && c.status === 'RED',
@@ -631,6 +700,18 @@ export async function runValidationAndSync(params: {
       uidValidationDate: validationOutput.viesInfo?.checked ? new Date() : undefined,
     },
   });
+
+  // 3b. Write audit log for auto-approve
+  if (autoApprove) {
+    writeAuditLog({
+      tenantId,
+      userId: undefined,
+      entityType: 'Invoice',
+      entityId: invoiceId,
+      action: 'AUTO_APPROVE',
+      metadata: { trigger: 'AUTO_TRUST', vendorTrustLevel: 'TRUSTED' },
+    });
+  }
 
   return validationOutput;
 }

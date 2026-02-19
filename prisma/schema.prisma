@@ -333,6 +333,9 @@ model Vendor {
   website String?
   notes   String?
 
+  // Trust Level: NEW → VERIFIED → TRUSTED (auto-approve GREEN invoices)
+  trustLevel VendorTrustLevel @default(NEW)
+
   // VIES-Daten (gecacht vom letzten UID-Check)
   viesName      String?
   viesAddress   String?
@@ -349,6 +352,12 @@ model Vendor {
   @@index([tenantId])
   @@index([tenantId, name])
   @@map("vendors")
+}
+
+enum VendorTrustLevel {
+  NEW
+  VERIFIED
+  TRUSTED
 }
 
 // ============================================================

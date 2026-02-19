@@ -10,6 +10,7 @@ import {
   deleteInvoiceApi,
   createErsatzbelegApi,
   getInvoiceDownloadUrl,
+  batchApproveInvoicesApi,
 } from '../api/invoices';
 import type { InvoiceFilters } from '../api/invoices';
 import type { ValidationCheck, TrafficLightStatus } from '@buchungsai/shared';
@@ -30,6 +31,16 @@ export function InvoicesPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [showErsatzbelegDialog, setShowErsatzbelegDialog] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const batchApproveMutation = useMutation({
+    mutationFn: (ids: string[]) => batchApproveInvoicesApi(ids),
+    onSuccess: () => {
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      if (selectedId) queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+    },
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['invoices', filters],
@@ -88,6 +99,28 @@ export function InvoicesPage() {
       category: ed.category || '',
     });
     setEditMode(true);
+  }
+
+  // Batch selection helpers
+  const approvableStatuses = new Set(['PROCESSED', 'REVIEW_REQUIRED']);
+  const approvableInvoices = invoices.filter((inv) => approvableStatuses.has(inv.processingStatus));
+  const allApprovableSelected = approvableInvoices.length > 0 && approvableInvoices.every((inv) => selectedIds.has(inv.id));
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allApprovableSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(approvableInvoices.map((inv) => inv.id)));
+    }
   }
 
   return (
@@ -198,6 +231,35 @@ export function InvoicesPage() {
           </div>
         </div>
 
+        {/* Batch selection toolbar */}
+        {selectedIds.size > 0 && (
+          <div className="card p-3 mb-4 flex items-center gap-4 bg-primary-50 border-primary-200">
+            <span className="text-sm font-medium text-primary-800">
+              {selectedIds.size} ausgewählt
+            </span>
+            <button
+              onClick={() => batchApproveMutation.mutate(Array.from(selectedIds))}
+              disabled={batchApproveMutation.isPending}
+              className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-4 bg-green-600 hover:bg-green-700"
+            >
+              {batchApproveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
+              Genehmigen
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="btn-secondary text-sm py-1.5 px-3"
+            >
+              Auswahl aufheben
+            </button>
+            {batchApproveMutation.isSuccess && batchApproveMutation.data?.data && (
+              <span className="text-xs text-green-700">
+                {batchApproveMutation.data.data.approved} genehmigt
+                {batchApproveMutation.data.data.skipped.length > 0 && `, ${batchApproveMutation.data.data.skipped.length} übersprungen`}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Table */}
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
@@ -215,6 +277,15 @@ export function InvoicesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="px-3 py-3 w-[40px]">
+                      <input
+                        type="checkbox"
+                        checked={allApprovableSelected && approvableInvoices.length > 0}
+                        onChange={toggleSelectAll}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        title="Alle genehmigbaren auswählen"
+                      />
+                    </th>
                     <th className="text-left px-4 py-3 font-medium text-gray-600 w-[80px]">Beleg-Nr.</th>
                     <th className="text-left px-4 py-3 font-medium text-gray-600">Lieferant</th>
                     <th className="text-left px-4 py-3 font-medium text-gray-600">Rechnungsnr.</th>
@@ -229,9 +300,21 @@ export function InvoicesPage() {
                   {invoices.map((inv) => (
                     <tr
                       key={inv.id}
-                      className={`hover:bg-gray-50 cursor-pointer transition-colors ${selectedId === inv.id ? 'bg-primary-50' : ''}`}
+                      className={`hover:bg-gray-50 cursor-pointer transition-colors ${selectedId === inv.id ? 'bg-primary-50' : ''} ${selectedIds.has(inv.id) ? 'bg-green-50' : ''}`}
                       onClick={() => { setSelectedId(inv.id); setEditMode(false); }}
                     >
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                        {approvableStatuses.has(inv.processingStatus) ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(inv.id)}
+                            onChange={() => toggleSelect(inv.id)}
+                            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                        ) : (
+                          <span className="block w-4" />
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="font-mono text-xs font-semibold text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded">
                           BEL-{String(inv.belegNr).padStart(3, '0')}

@@ -5,7 +5,7 @@ import { validateBody } from '../middleware/validate.js';
 import { invoiceUpload } from '../middleware/upload.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
-import { updateExtractedDataSchema, rejectInvoiceSchema, createErsatzbelegSchema } from '@buchungsai/shared';
+import { updateExtractedDataSchema, rejectInvoiceSchema, createErsatzbelegSchema, batchApproveSchema } from '@buchungsai/shared';
 import * as invoiceService from '../services/invoice.service.js';
 
 const router = Router();
@@ -263,6 +263,20 @@ router.get('/:id/versions', async (req, res, next) => {
       req.params.id as string,
     );
     res.json({ success: true, data: versions });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/batch-approve — Approve multiple invoices at once
+router.post('/batch-approve', validateBody(batchApproveSchema), async (req, res, next) => {
+  try {
+    const result = await invoiceService.batchApproveInvoices(
+      req.tenantId!,
+      req.userId!,
+      req.body.invoiceIds as string[],
+    );
+    res.json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

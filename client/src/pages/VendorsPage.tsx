@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { listVendorsApi, getVendorApi } from '../api/vendors';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { listVendorsApi, getVendorApi, updateVendorApi } from '../api/vendors';
 import type { VendorFilters } from '../api/vendors';
+import type { VendorTrustLevel } from '@buchungsai/shared';
+import { VENDOR_TRUST_LEVELS } from '@buchungsai/shared';
 import {
   Users, Search, X, ChevronLeft, ChevronRight, Loader2,
   Mail, Phone, Globe, FileText, MapPin, ShieldCheck, ShieldAlert, ShieldQuestion,
@@ -99,6 +101,7 @@ export function VendorsPage() {
                 <tr className="border-b text-left text-gray-500 text-xs uppercase tracking-wider">
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">UID</th>
+                  <th className="px-4 py-3 text-center">Vertrauen</th>
                   <th className="px-4 py-3 text-center">Rechnungen</th>
                   <th className="px-4 py-3">Kontakt</th>
                   <th className="px-4 py-3">VIES</th>
@@ -129,6 +132,9 @@ export function VendorsPage() {
                       ) : (
                         <span className="text-gray-300 text-xs">—</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <TrustBadge level={vendor.trustLevel} />
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full text-xs font-medium">
@@ -206,6 +212,20 @@ export function VendorsPage() {
 // Sub-Components
 // ============================================================
 
+function TrustBadge({ level }: { level: string }) {
+  const config: Record<string, { label: string; bg: string; text: string }> = {
+    NEW: { label: 'Neu', bg: 'bg-gray-100', text: 'text-gray-600' },
+    VERIFIED: { label: 'Geprüft', bg: 'bg-blue-100', text: 'text-blue-700' },
+    TRUSTED: { label: 'Vertraut', bg: 'bg-green-100', text: 'text-green-700' },
+  };
+  const c = config[level] || config.NEW;
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>
+      {c.label}
+    </span>
+  );
+}
+
 function ViesBadge({ viesName, viesCheckedAt, uid }: { viesName: string | null; viesCheckedAt: string | null; uid: string | null }) {
   if (!uid) {
     return <span className="text-gray-300 text-xs">—</span>;
@@ -240,6 +260,15 @@ function VendorDetailPanel({
   onClose: () => void;
   onNavigateToInvoice: (id: string) => void;
 }) {
+  const queryClient = useQueryClient();
+  const trustMutation = useMutation({
+    mutationFn: (level: VendorTrustLevel) => updateVendorApi(vendor.id, { trustLevel: level }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vendor', vendor.id] });
+      queryClient.invalidateQueries({ queryKey: ['vendors'] });
+    },
+  });
+
   return (
     <div>
       {/* Header */}
@@ -255,6 +284,28 @@ function VendorDetailPanel({
         <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
           <X size={20} />
         </button>
+      </div>
+
+      {/* Trust Level Selector */}
+      <div className="mb-4">
+        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Vertrauenslevel</h3>
+        <div className="flex items-center gap-2">
+          <select
+            value={vendor.trustLevel}
+            onChange={(e) => trustMutation.mutate(e.target.value as VendorTrustLevel)}
+            disabled={trustMutation.isPending}
+            className="input-field !py-1.5 text-sm !w-auto"
+          >
+            {(Object.entries(VENDOR_TRUST_LEVELS) as [VendorTrustLevel, { label: string; description: string }][]).map(([key, val]) => (
+              <option key={key} value={key}>{val.label}</option>
+            ))}
+          </select>
+          <TrustBadge level={vendor.trustLevel} />
+          {trustMutation.isPending && <Loader2 size={14} className="animate-spin text-primary-600" />}
+        </div>
+        <p className="text-xs text-gray-400 mt-1">
+          {VENDOR_TRUST_LEVELS[vendor.trustLevel as keyof typeof VENDOR_TRUST_LEVELS]?.description}
+        </p>
       </div>
 
       {/* VIES Status */}

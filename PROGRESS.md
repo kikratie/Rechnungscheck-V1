@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 20. Februar 2026
+**Letzte Aktualisierung:** 20. Februar 2026 (Session 5)
 
 ---
 
@@ -112,6 +112,15 @@
 - [x] **Navigation**: Lieferanten-Link in Sidebar (zwischen Rechnungen und Kontoauszüge)
 - [x] **Seed**: 6 Vendor-Testdaten mit VIES-Daten und Rechnungsverknüpfung
 
+### Phase 3: Batch-Genehmigung + Vendor Trust Level ✅
+
+- [x] **Vendor Trust Level**: Enum `NEW` → `VERIFIED` → `TRUSTED` im Prisma-Schema
+- [x] **Auto-Approve**: Rechnungen von TRUSTED-Lieferanten werden bei GREEN-Validierung automatisch genehmigt
+- [x] **Batch-Genehmigung**: POST `/api/v1/invoices/batch-approve` — bis zu 100 Rechnungen auf einmal genehmigen
+- [x] **Vendor UI**: Trust-Level Badge in Listentabelle + Dropdown-Selector im Detail-Panel
+- [x] **Invoice UI**: Checkbox-Spalte + "Alle auswählen" + Batch-Toolbar mit Genehmigen-Button
+- [x] **Audit-Log**: `trigger: BATCH` bzw. `trigger: AUTO_TRUST` in Metadata
+
 ### Prio 2: Workflow & Bankabgleich
 
 - [ ] **Fortlaufende Nummerierung** (ER-JJJJ-NNNNN / AR-JJJJ-NNNNN)
@@ -123,7 +132,7 @@
   - Exakt: Betrag + Rechnungsnr. im Verwendungszweck
   - Betrags-Match: Betrag + Lieferantenname
   - Fuzzy: Betrag ±2% + Datum ±5 Tage
-- [ ] **Gruppenfreigabe** (alle grünen per Klick)
+- [x] **Gruppenfreigabe** (alle grünen per Klick) → Phase 3: Batch-Genehmigung
 
 ### Prio 3: Export & Kommunikation
 

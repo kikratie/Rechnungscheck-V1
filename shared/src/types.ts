@@ -55,6 +55,8 @@ export interface JwtPayload {
 
 export type UserRoleType = 'ADMIN' | 'ACCOUNTANT' | 'TAX_ADVISOR';
 
+export type VendorTrustLevel = 'NEW' | 'VERIFIED' | 'TRUSTED';
+
 export interface UserProfile {
   id: string;
   tenantId: string;

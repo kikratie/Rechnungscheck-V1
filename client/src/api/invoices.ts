@@ -55,6 +55,11 @@ export async function createErsatzbelegApi(originalInvoiceId: string, data: Reco
   return response.data;
 }
 
+export async function batchApproveInvoicesApi(invoiceIds: string[]) {
+  const response = await apiClient.post<ApiResponse<{ approved: number; skipped: string[] }>>('/invoices/batch-approve', { invoiceIds });
+  return response.data;
+}
+
 export async function getInvoiceDownloadUrl(id: string) {
   const response = await apiClient.get<ApiResponse<{ url: string }>>(`/invoices/${id}/download`);
   return response.data;
