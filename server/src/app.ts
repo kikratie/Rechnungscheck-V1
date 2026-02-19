@@ -26,22 +26,38 @@ app.use(
   }),
 );
 
-// Rate Limiting
-app.use(
-  rateLimit({
-    windowMs: env.RATE_LIMIT_WINDOW_MS,
-    max: env.RATE_LIMIT_MAX,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: {
-      success: false,
-      error: {
-        code: 'RATE_LIMIT',
-        message: 'Zu viele Anfragen. Bitte versuche es später erneut.',
-      },
+// Rate Limiting — global (100/15min)
+const globalLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT',
+      message: 'Zu viele Anfragen. Bitte versuche es später erneut.',
     },
-  }),
-);
+  },
+});
+
+// Rate Limiting — Upload-Endpoint großzügiger (200/15min, da Multi-Upload)
+const uploadLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.RATE_LIMIT_MAX * 2,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT',
+      message: 'Zu viele Anfragen. Bitte versuche es später erneut.',
+    },
+  },
+});
+
+app.use('/api/v1/invoices', uploadLimiter);
+app.use(globalLimiter);
 
 // Body Parsing
 app.use(express.json({ limit: '1mb' }));

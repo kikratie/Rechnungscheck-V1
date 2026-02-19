@@ -740,29 +740,33 @@ function UploadDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     }));
     setFileStates(initialStates);
 
-    // Upload all files in parallel
-    const uploads = fileArray.map(async (file, index) => {
-      // Set to uploading
-      setFileStates((prev) =>
-        prev.map((f, i) => (i === index ? { ...f, status: 'uploading' as const } : f)),
-      );
-
-      try {
-        await uploadInvoiceApi(file);
+    // Upload in batches of 5 to avoid rate limiting
+    const CONCURRENCY = 5;
+    for (let start = 0; start < fileArray.length; start += CONCURRENCY) {
+      const batch = fileArray.slice(start, start + CONCURRENCY);
+      const uploads = batch.map(async (file, batchIdx) => {
+        const index = start + batchIdx;
         setFileStates((prev) =>
-          prev.map((f, i) => (i === index ? { ...f, status: 'done' as const } : f)),
+          prev.map((f, i) => (i === index ? { ...f, status: 'uploading' as const } : f)),
         );
-      } catch (err: unknown) {
-        const msg =
-          (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data
-            ?.error?.message || 'Upload fehlgeschlagen';
-        setFileStates((prev) =>
-          prev.map((f, i) => (i === index ? { ...f, status: 'error' as const, error: msg } : f)),
-        );
-      }
-    });
 
-    await Promise.all(uploads);
+        try {
+          await uploadInvoiceApi(file);
+          setFileStates((prev) =>
+            prev.map((f, i) => (i === index ? { ...f, status: 'done' as const } : f)),
+          );
+        } catch (err: unknown) {
+          const msg =
+            (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data
+              ?.error?.message || 'Upload fehlgeschlagen';
+          setFileStates((prev) =>
+            prev.map((f, i) => (i === index ? { ...f, status: 'error' as const, error: msg } : f)),
+          );
+        }
+      });
+      await Promise.all(uploads);
+    }
+
     onSuccess();
   }, [onSuccess]);
 
