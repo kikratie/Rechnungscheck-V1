@@ -18,29 +18,74 @@ router.get('/stats', async (req, res, next) => {
       warningCount,
       invalidCount,
       pendingCount,
+      pendingReview,
+      matchedInvoices,
+      totalAmountResult,
+      recentLogs,
     ] = await Promise.all([
       prisma.invoice.count({ where: { tenantId } }),
       prisma.invoice.count({ where: { tenantId, validationStatus: 'VALID' } }),
       prisma.invoice.count({ where: { tenantId, validationStatus: 'WARNING' } }),
       prisma.invoice.count({ where: { tenantId, validationStatus: 'INVALID' } }),
       prisma.invoice.count({ where: { tenantId, validationStatus: 'PENDING' } }),
+      prisma.invoice.count({ where: { tenantId, processingStatus: 'REVIEW_REQUIRED' } }),
+      prisma.matching.count({ where: { tenantId, status: 'CONFIRMED' } }),
+      prisma.invoice.aggregate({ where: { tenantId, grossAmount: { not: null } }, _sum: { grossAmount: true } }),
+      prisma.auditLog.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        include: { user: { select: { firstName: true, lastName: true } } },
+      }),
     ]);
+
+    const recentActivity = recentLogs.map((log) => ({
+      id: log.id,
+      type: log.action,
+      description: formatAuditDescription(log),
+      timestamp: log.createdAt.toISOString(),
+    }));
 
     res.json({
       success: true,
       data: {
         totalInvoices,
+        pendingReview,
+        matchedInvoices,
+        unmatchedInvoices: totalInvoices - matchedInvoices,
         validationSummary: {
           valid: validCount,
           warning: warningCount,
           invalid: invalidCount,
           pending: pendingCount,
         },
+        totalAmount: totalAmountResult._sum.grossAmount?.toString() ?? '0',
+        recentActivity,
       },
     });
   } catch (err) {
     next(err);
   }
 });
+
+function formatAuditDescription(log: {
+  action: string;
+  entityType: string;
+  entityId: string;
+  user: { firstName: string; lastName: string } | null;
+}): string {
+  const user = log.user ? `${log.user.firstName} ${log.user.lastName}` : 'System';
+  const actions: Record<string, string> = {
+    UPLOAD: 'hat hochgeladen',
+    AI_PROCESSED: 'KI-Verarbeitung abgeschlossen',
+    APPROVE: 'hat genehmigt',
+    CONFIRM: 'hat bestätigt',
+    LOGIN: 'hat sich angemeldet',
+    REGISTER: 'hat sich registriert',
+    UID_VALIDATION_FAILED: 'UID-Validierung fehlgeschlagen',
+  };
+  const action = actions[log.action] || log.action;
+  return `${user}: ${action} (${log.entityType} ${log.entityId.substring(0, 8)}...)`;
+}
 
 export { router as dashboardRoutes };
