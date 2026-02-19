@@ -40,6 +40,19 @@ export function errorHandler(
     return;
   }
 
+  // Body-Parser Fehler (ungültiges JSON)
+  if ((err as unknown as Record<string, unknown>).type === 'entity.parse.failed') {
+    const response: ApiResponse = {
+      success: false,
+      error: {
+        code: 'INVALID_JSON',
+        message: 'Ungültiges JSON im Request-Body',
+      },
+    };
+    res.status(400).json(response);
+    return;
+  }
+
   // Multer Fehler (Datei zu groß etc.)
   if (err.message?.includes('File too large')) {
     const response: ApiResponse = {

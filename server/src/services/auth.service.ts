@@ -31,7 +31,7 @@ function generateSlug(name: string): string {
 
 function generateTokens(payload: Omit<JwtPayload, 'iat' | 'exp'>): AuthTokens {
   const accessToken = jwt.sign(payload, env.JWT_SECRET, {
-    expiresIn: env.JWT_ACCESS_EXPIRY,
+    expiresIn: env.JWT_ACCESS_EXPIRY as jwt.SignOptions['expiresIn'],
   });
 
   const refreshToken = crypto.randomBytes(64).toString('hex');

@@ -76,6 +76,7 @@ export type ProcessingStatusType =
   | 'REVIEW_REQUIRED'
   | 'APPROVED'
   | 'EXPORTED'
+  | 'REPLACED'
   | 'ERROR';
 
 export type ValidationStatusType =
@@ -92,6 +93,7 @@ export type UidValidationStatusType =
 
 export interface InvoiceListItem {
   id: string;
+  belegNr: number;
   originalFileName: string;
   vendorName: string | null;
   invoiceNumber: string | null;
@@ -101,6 +103,8 @@ export interface InvoiceListItem {
   processingStatus: ProcessingStatusType;
   validationStatus: ValidationStatusType;
   isLocked: boolean;
+  vendorId: string | null;
+  replacedByInvoiceId: string | null;
   createdAt: string;
 }
 
@@ -141,6 +145,92 @@ export interface ValidationResult {
   status: 'GREEN' | 'YELLOW' | 'RED';
   message: string;
   details?: unknown;
+}
+
+// ============================================================
+// Traffic Light & Amount Classes
+// ============================================================
+
+export type TrafficLightStatus = 'GREEN' | 'YELLOW' | 'RED';
+export type AmountClass = 'SMALL' | 'STANDARD' | 'LARGE';
+
+// ============================================================
+// Extracted Data Types
+// ============================================================
+
+export interface ExtractedDataItem {
+  id: string;
+  invoiceId: string;
+  version: number;
+  issuerName: string | null;
+  issuerUid: string | null;
+  issuerAddress: Record<string, string> | null;
+  issuerEmail: string | null;
+  issuerIban: string | null;
+  recipientName: string | null;
+  recipientUid: string | null;
+  recipientAddress: Record<string, string> | null;
+  invoiceNumber: string | null;
+  sequentialNumber: string | null;
+  invoiceDate: string | null;
+  deliveryDate: string | null;
+  dueDate: string | null;
+  description: string | null;
+  netAmount: string | null;
+  vatAmount: string | null;
+  grossAmount: string | null;
+  vatRate: string | null;
+  currency: string;
+  isReverseCharge: boolean;
+  accountNumber: string | null;
+  costCenter: string | null;
+  category: string | null;
+  confidenceScores: Record<string, number>;
+  source: string;
+  pipelineStage: string | null;
+  editedByUserId: string | null;
+  editReason: string | null;
+  createdAt: string;
+}
+
+export interface ValidationCheck {
+  rule: string;
+  status: TrafficLightStatus;
+  message: string;
+  legalBasis?: string;
+  details?: unknown;
+}
+
+export interface ViesValidationInfo {
+  checked: boolean;
+  valid: boolean;
+  registeredName: string | null;
+  registeredAddress: string | null;
+  nameMatch: boolean;
+  nameSimilarity: number;
+  error?: string;
+}
+
+export interface ValidationResultItem {
+  id: string;
+  invoiceId: string;
+  overallStatus: TrafficLightStatus;
+  amountClass: AmountClass;
+  checks: ValidationCheck[];
+  comments: string | null;
+  extractedDataVersion: number;
+  createdAt: string;
+}
+
+export interface InvoiceDetailExtended extends InvoiceDetail {
+  extractedData: ExtractedDataItem | null;
+  validationResult: ValidationResultItem | null;
+  documentType: string;
+  deliveryDate: string | null;
+  isReverseCharge: boolean;
+  recipientUid: string | null;
+  issuerEmail: string | null;
+  issuerIban: string | null;
 }
 
 // ============================================================

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { listInvoicesApi } from '../api/invoices';
+import type { InvoiceListItem } from '@buchungsai/shared';
 import { Download, FileText, CheckCircle } from 'lucide-react';
 
 export function ExportPage() {
@@ -8,12 +9,12 @@ export function ExportPage() {
     queryFn: () => listInvoicesApi({ processingStatus: 'APPROVED', limit: 100 }),
   });
 
-  const exportable = (data?.data ?? []) as Array<Record<string, unknown>>;
+  const exportable = (data?.data ?? []) as InvoiceListItem[];
   const exportedQuery = useQuery({
     queryKey: ['invoices-exported'],
     queryFn: () => listInvoicesApi({ processingStatus: 'EXPORTED', limit: 100 }),
   });
-  const exported = (exportedQuery.data?.data ?? []) as Array<Record<string, unknown>>;
+  const exported = (exportedQuery.data?.data ?? []) as InvoiceListItem[];
 
   return (
     <div>

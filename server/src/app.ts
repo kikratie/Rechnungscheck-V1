@@ -12,6 +12,7 @@ import { matchingRoutes } from './routes/matching.routes.js';
 import { exportRoutes } from './routes/export.routes.js';
 import { auditLogRoutes } from './routes/auditLog.routes.js';
 import { dashboardRoutes } from './routes/dashboard.routes.js';
+import vendorRoutes from './routes/vendor.routes.js';
 import type { ApiResponse } from '@buchungsai/shared';
 
 const app = express();
@@ -67,6 +68,7 @@ app.use('/api/v1/matchings', matchingRoutes);
 app.use('/api/v1/exports', exportRoutes);
 app.use('/api/v1/audit-logs', auditLogRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
+app.use('/api/v1/vendors', vendorRoutes);
 
 // 404 Handler
 app.use((_req, res) => {

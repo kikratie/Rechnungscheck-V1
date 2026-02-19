@@ -4,6 +4,7 @@ import { logoutApi } from '../../api/auth';
 import {
   LayoutDashboard,
   FileText,
+  Users,
   Building2,
   ArrowLeftRight,
   Download,
@@ -15,6 +16,7 @@ import {
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/invoices', label: 'Rechnungen', icon: FileText },
+  { to: '/vendors', label: 'Lieferanten', icon: Users },
   { to: '/bank-statements', label: 'Kontoauszüge', icon: Building2 },
   { to: '/matching', label: 'Abgleich', icon: ArrowLeftRight },
   { to: '/export', label: 'Export', icon: Download },

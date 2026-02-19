@@ -120,6 +120,7 @@ async function main() {
       create: {
         id: 'inv-001',
         tenantId: tenant.id,
+        belegNr: 1,
         originalFileName: 'RE-2026-0042_Papyrus.pdf',
         storagePath: 'demo-gmbh/invoices/inv-001.pdf',
         storageHash: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
@@ -153,6 +154,7 @@ async function main() {
       create: {
         id: 'inv-002',
         tenantId: tenant.id,
+        belegNr: 2,
         originalFileName: '2026-R-1187_WebAgentur.pdf',
         storagePath: 'demo-gmbh/invoices/inv-002.pdf',
         storageHash: 'b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5',
@@ -187,6 +189,7 @@ async function main() {
       create: {
         id: 'inv-003',
         tenantId: tenant.id,
+        belegNr: 3,
         originalFileName: 'Tankrechnung_OMV_Feb.jpg',
         storagePath: 'demo-gmbh/invoices/inv-003.jpg',
         storageHash: 'c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6',
@@ -204,6 +207,7 @@ async function main() {
       create: {
         id: 'inv-004',
         tenantId: tenant.id,
+        belegNr: 4,
         originalFileName: 'Miete_Jänner_2026.pdf',
         storagePath: 'demo-gmbh/invoices/inv-004.pdf',
         storageHash: 'd4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1',
@@ -237,6 +241,7 @@ async function main() {
       create: {
         id: 'inv-005',
         tenantId: tenant.id,
+        belegNr: 5,
         originalFileName: 'scan_unleserlich.pdf',
         storagePath: 'demo-gmbh/invoices/inv-005.pdf',
         storageHash: 'e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
@@ -255,6 +260,7 @@ async function main() {
       create: {
         id: 'inv-006',
         tenantId: tenant.id,
+        belegNr: 6,
         originalFileName: 'RE_2026_Consulting_XY.pdf',
         storagePath: 'demo-gmbh/invoices/inv-006.pdf',
         storageHash: 'f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3',
@@ -289,6 +295,7 @@ async function main() {
       create: {
         id: 'inv-007',
         tenantId: tenant.id,
+        belegNr: 7,
         originalFileName: 'RE-2026-0042_Papyrus_kopie.pdf',
         storagePath: 'demo-gmbh/invoices/inv-007.pdf',
         storageHash: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
@@ -318,6 +325,7 @@ async function main() {
       create: {
         id: 'inv-008',
         tenantId: tenant.id,
+        belegNr: 8,
         originalFileName: 'Hotel_Sacher_Jän2026.pdf',
         storagePath: 'demo-gmbh/invoices/inv-008.pdf',
         storageHash: 'a8b8c8d8e8f8a8b8c8d8e8f8a8b8c8d8',
@@ -351,6 +359,7 @@ async function main() {
       create: {
         id: 'inv-009',
         tenantId: tenant.id,
+        belegNr: 9,
         originalFileName: 'Metro_Bewirtung_Feb2026.pdf',
         storagePath: 'demo-gmbh/invoices/inv-009.pdf',
         storageHash: 'a9b9c9d9e9f9a9b9c9d9e9f9a9b9c9d9',
@@ -377,25 +386,330 @@ async function main() {
       },
     }),
 
-    // 10) Gerade in Verarbeitung
+    // 10) Hochgeladen, noch nicht verarbeitet (kein Dummy-PROCESSING mehr)
     prisma.invoice.upsert({
       where: { id: 'inv-010' },
       update: {},
       create: {
         id: 'inv-010',
         tenantId: tenant.id,
+        belegNr: 10,
         originalFileName: 'A1_Telekom_Feb2026.pdf',
         storagePath: 'demo-gmbh/invoices/inv-010.pdf',
         storageHash: 'aab0c0d0e0f0a0b0c0d0e0f0a0b0c0d0',
         mimeType: 'application/pdf',
         fileSizeBytes: 178_000,
-        processingStatus: 'PROCESSING',
+        processingStatus: 'ERROR',
+        processingError: 'Testdaten — keine echte Datei vorhanden',
         validationStatus: 'PENDING',
       },
     }),
   ]);
 
   console.log(`${invoices.length} Rechnungen erstellt`);
+
+  // ============================================================
+  // EXTRACTED DATA (KI-Extraktionen für verarbeitete Rechnungen)
+  // ============================================================
+
+  const extractedDataRecords = await Promise.all([
+    // inv-001: Papyrus Bürobedarf — vollständig
+    prisma.extractedData.upsert({
+      where: { invoiceId_version: { invoiceId: 'inv-001', version: 1 } },
+      update: {},
+      create: {
+        invoiceId: 'inv-001', version: 1, source: 'AI', pipelineStage: 'TEXT_EXTRACTION',
+        issuerName: 'Papyrus Bürobedarf GmbH', issuerUid: 'ATU63456789',
+        issuerAddress: { street: 'Mariahilfer Str. 45', zip: '1060', city: 'Wien', country: 'AT' },
+        issuerIban: 'AT88 3200 0000 1234 5678',
+        recipientName: 'Demo GmbH', recipientUid: 'ATU12345678',
+        invoiceNumber: 'RE-2026-0042', invoiceDate: new Date('2026-01-15'),
+        deliveryDate: new Date('2026-01-14'), dueDate: new Date('2026-02-14'),
+        description: 'Büromaterial: Kopierpapier, Druckerpatronen, Ordner',
+        netAmount: 420.00, vatAmount: 84.00, grossAmount: 504.00, vatRate: 20.00,
+        confidenceScores: { issuerName: 0.98, issuerUid: 0.97, invoiceNumber: 0.99, netAmount: 0.96, vatRate: 0.99 },
+      },
+    }),
+
+    // inv-002: WebAgentur — Review nötig
+    prisma.extractedData.upsert({
+      where: { invoiceId_version: { invoiceId: 'inv-002', version: 1 } },
+      update: {},
+      create: {
+        invoiceId: 'inv-002', version: 1, source: 'AI', pipelineStage: 'TEXT_EXTRACTION',
+        issuerName: 'WebAgentur Steiner KG', issuerUid: 'ATU74567890',
+        issuerAddress: { street: 'Landstraßer Hauptstr. 12', zip: '1030', city: 'Wien', country: 'AT' },
+        recipientName: 'Demo GmbH',
+        invoiceNumber: '2026-R-1187', invoiceDate: new Date('2026-01-22'),
+        dueDate: new Date('2026-02-21'),
+        description: 'Website-Redesign: Konzept, Wireframes, Frontend-Entwicklung, Hosting',
+        netAmount: 3200.00, vatAmount: 640.00, grossAmount: 3840.00, vatRate: 20.00,
+        confidenceScores: { issuerName: 0.95, invoiceNumber: 0.97, netAmount: 0.92, deliveryDate: 0.0 },
+      },
+    }),
+
+    // inv-004: Miete — exportiert
+    prisma.extractedData.upsert({
+      where: { invoiceId_version: { invoiceId: 'inv-004', version: 1 } },
+      update: {},
+      create: {
+        invoiceId: 'inv-004', version: 1, source: 'AI', pipelineStage: 'TEXT_EXTRACTION',
+        issuerName: 'Immo Verwaltung Hofer GmbH', issuerUid: 'ATU55667788',
+        issuerAddress: { street: 'Kärntner Ring 22', zip: '1010', city: 'Wien', country: 'AT' },
+        recipientName: 'Demo GmbH', recipientUid: 'ATU12345678',
+        invoiceNumber: 'MV-2026-01', invoiceDate: new Date('2026-01-01'),
+        deliveryDate: new Date('2026-01-01'), dueDate: new Date('2026-01-05'),
+        description: 'Büromiete Jänner 2026, 120m²',
+        netAmount: 2500.00, vatAmount: 500.00, grossAmount: 3000.00, vatRate: 20.00,
+        confidenceScores: { issuerName: 0.99, invoiceNumber: 0.99, netAmount: 0.99, vatRate: 0.99 },
+      },
+    }),
+
+    // inv-006: Consulting XY — ungültige UID
+    prisma.extractedData.upsert({
+      where: { invoiceId_version: { invoiceId: 'inv-006', version: 1 } },
+      update: {},
+      create: {
+        invoiceId: 'inv-006', version: 1, source: 'AI', pipelineStage: 'TEXT_EXTRACTION',
+        issuerName: 'Consulting XY e.U.', issuerUid: 'ATU99999999',
+        issuerAddress: { street: 'Favoritenstr. 100', zip: '1100', city: 'Wien', country: 'AT' },
+        recipientName: 'Demo GmbH', recipientUid: 'ATU12345678',
+        invoiceNumber: 'CXY-2026-003', invoiceDate: new Date('2026-02-01'),
+        dueDate: new Date('2026-03-03'),
+        description: 'Unternehmensberatung Jänner 2026',
+        netAmount: 8500.00, vatAmount: 1700.00, grossAmount: 10200.00, vatRate: 20.00,
+        confidenceScores: { issuerName: 0.97, issuerUid: 0.94, invoiceNumber: 0.98, netAmount: 0.96 },
+      },
+    }),
+
+    // inv-008: Hotel Sacher — 13% USt
+    prisma.extractedData.upsert({
+      where: { invoiceId_version: { invoiceId: 'inv-008', version: 1 } },
+      update: {},
+      create: {
+        invoiceId: 'inv-008', version: 1, source: 'AI', pipelineStage: 'TEXT_EXTRACTION',
+        issuerName: 'Hotel Sacher Wien GmbH', issuerUid: 'ATU36789012',
+        issuerAddress: { street: 'Philharmoniker Str. 4', zip: '1010', city: 'Wien', country: 'AT' },
+        recipientName: 'Demo GmbH',
+        invoiceNumber: 'HS-2026-00412', invoiceDate: new Date('2026-01-28'),
+        deliveryDate: new Date('2026-01-28'), dueDate: new Date('2026-02-28'),
+        description: 'Übernachtung Einzelzimmer, 2 Nächte',
+        netAmount: 354.00, vatAmount: 46.02, grossAmount: 400.02, vatRate: 13.00,
+        confidenceScores: { issuerName: 0.97, invoiceNumber: 0.95, netAmount: 0.94, vatRate: 0.96 },
+      },
+    }),
+
+    // inv-009: Metro — 10% USt
+    prisma.extractedData.upsert({
+      where: { invoiceId_version: { invoiceId: 'inv-009', version: 1 } },
+      update: {},
+      create: {
+        invoiceId: 'inv-009', version: 1, source: 'AI', pipelineStage: 'TEXT_EXTRACTION',
+        issuerName: 'METRO Cash & Carry Österreich GmbH', issuerUid: 'ATU45678901',
+        issuerAddress: { street: 'Metro-Platz 1', zip: '1230', city: 'Wien', country: 'AT' },
+        invoiceNumber: 'M-2026-887431', invoiceDate: new Date('2026-02-05'),
+        dueDate: new Date('2026-02-19'),
+        description: 'Diverse Lebensmittel Kundenbewirtung',
+        netAmount: 272.73, vatAmount: 27.27, grossAmount: 300.00, vatRate: 10.00,
+        confidenceScores: { issuerName: 0.96, invoiceNumber: 0.93, netAmount: 0.95, vatRate: 0.97 },
+      },
+    }),
+  ]);
+
+  console.log(`${extractedDataRecords.length} ExtractedData Versionen erstellt`);
+
+  // ============================================================
+  // VALIDATION RESULTS
+  // ============================================================
+
+  const validationResults = await Promise.all([
+    // inv-001: Alles grün
+    prisma.validationResult.create({
+      data: {
+        invoiceId: 'inv-001', overallStatus: 'GREEN', amountClass: 'STANDARD',
+        extractedDataVersion: 1,
+        checks: [
+          { rule: 'ISSUER_NAME', status: 'GREEN', message: 'Name des Ausstellers vorhanden: Papyrus Bürobedarf GmbH', legalBasis: '§11 Abs 1 Z 1 UStG' },
+          { rule: 'ISSUER_ADDRESS', status: 'GREEN', message: 'Anschrift des Ausstellers vorhanden', legalBasis: '§11 Abs 1 Z 1 UStG' },
+          { rule: 'ISSUER_UID', status: 'GREEN', message: 'UID-Nummer des Ausstellers vorhanden: ATU63456789', legalBasis: '§11 Abs 1 Z 2 UStG' },
+          { rule: 'INVOICE_NUMBER', status: 'GREEN', message: 'Rechnungsnummer vorhanden: RE-2026-0042', legalBasis: '§11 Abs 1 Z 5 UStG' },
+          { rule: 'INVOICE_DATE', status: 'GREEN', message: 'Ausstellungsdatum vorhanden', legalBasis: '§11 Abs 1 Z 4 UStG' },
+          { rule: 'DELIVERY_DATE', status: 'GREEN', message: 'Liefer-/Leistungsdatum vorhanden', legalBasis: '§11 Abs 1 Z 4 UStG' },
+          { rule: 'MATH_CHECK', status: 'GREEN', message: 'Netto (420) + USt (84) = Brutto (504) ✓', legalBasis: '§11 UStG' },
+          { rule: 'VAT_RATE_VALID', status: 'GREEN', message: 'Steuersatz 20% ist gültig', legalBasis: '§10 UStG' },
+          { rule: 'UID_SYNTAX', status: 'GREEN', message: 'UID-Syntax korrekt: ATU63456789', legalBasis: 'Art 28 MwStSystRL' },
+          { rule: 'DUPLICATE_CHECK', status: 'GREEN', message: 'Kein Duplikat gefunden', legalBasis: 'Betriebsprüfung' },
+        ],
+      },
+    }),
+
+    // inv-002: Gelb — Lieferdatum fehlt
+    prisma.validationResult.create({
+      data: {
+        invoiceId: 'inv-002', overallStatus: 'YELLOW', amountClass: 'STANDARD',
+        extractedDataVersion: 1,
+        checks: [
+          { rule: 'ISSUER_NAME', status: 'GREEN', message: 'Name des Ausstellers vorhanden: WebAgentur Steiner KG', legalBasis: '§11 Abs 1 Z 1 UStG' },
+          { rule: 'ISSUER_ADDRESS', status: 'GREEN', message: 'Anschrift des Ausstellers vorhanden', legalBasis: '§11 Abs 1 Z 1 UStG' },
+          { rule: 'ISSUER_UID', status: 'GREEN', message: 'UID-Nummer vorhanden: ATU74567890', legalBasis: '§11 Abs 1 Z 2 UStG' },
+          { rule: 'DELIVERY_DATE', status: 'YELLOW', message: 'Liefer-/Leistungsdatum fehlt — kann das Rechnungsdatum sein', legalBasis: '§11 Abs 1 Z 4 UStG' },
+          { rule: 'MATH_CHECK', status: 'GREEN', message: 'Netto (3200) + USt (640) = Brutto (3840) ✓', legalBasis: '§11 UStG' },
+          { rule: 'VAT_RATE_VALID', status: 'GREEN', message: 'Steuersatz 20% ist gültig', legalBasis: '§10 UStG' },
+          { rule: 'DUPLICATE_CHECK', status: 'GREEN', message: 'Kein Duplikat gefunden', legalBasis: 'Betriebsprüfung' },
+        ],
+      },
+    }),
+
+    // inv-004: Alles grün (Miete)
+    prisma.validationResult.create({
+      data: {
+        invoiceId: 'inv-004', overallStatus: 'GREEN', amountClass: 'STANDARD',
+        extractedDataVersion: 1,
+        checks: [
+          { rule: 'ISSUER_NAME', status: 'GREEN', message: 'Name vorhanden: Immo Verwaltung Hofer GmbH', legalBasis: '§11 Abs 1 Z 1 UStG' },
+          { rule: 'MATH_CHECK', status: 'GREEN', message: 'Netto (2500) + USt (500) = Brutto (3000) ✓', legalBasis: '§11 UStG' },
+          { rule: 'VAT_RATE_VALID', status: 'GREEN', message: 'Steuersatz 20% ist gültig', legalBasis: '§10 UStG' },
+          { rule: 'DUPLICATE_CHECK', status: 'GREEN', message: 'Kein Duplikat gefunden', legalBasis: 'Betriebsprüfung' },
+        ],
+      },
+    }),
+
+    // inv-006: Rot — UID ungültig + Großbetrag >10k ohne Empfänger-UID
+    prisma.validationResult.create({
+      data: {
+        invoiceId: 'inv-006', overallStatus: 'RED', amountClass: 'LARGE',
+        extractedDataVersion: 1,
+        checks: [
+          { rule: 'ISSUER_NAME', status: 'GREEN', message: 'Name vorhanden: Consulting XY e.U.', legalBasis: '§11 Abs 1 Z 1 UStG' },
+          { rule: 'ISSUER_UID', status: 'GREEN', message: 'UID vorhanden: ATU99999999', legalBasis: '§11 Abs 1 Z 2 UStG' },
+          { rule: 'RECIPIENT_UID', status: 'GREEN', message: 'Empfänger-UID vorhanden: ATU12345678', legalBasis: '§11 Abs 1 Z 3a UStG' },
+          { rule: 'DELIVERY_DATE', status: 'YELLOW', message: 'Liefer-/Leistungsdatum fehlt', legalBasis: '§11 Abs 1 Z 4 UStG' },
+          { rule: 'MATH_CHECK', status: 'GREEN', message: 'Netto (8500) + USt (1700) = Brutto (10200) ✓', legalBasis: '§11 UStG' },
+          { rule: 'UID_SYNTAX', status: 'GREEN', message: 'UID-Syntax korrekt: ATU99999999', legalBasis: 'Art 28 MwStSystRL' },
+          { rule: 'DUPLICATE_CHECK', status: 'GREEN', message: 'Kein Duplikat gefunden', legalBasis: 'Betriebsprüfung' },
+        ],
+        comments: 'UID ATU99999999 bei VIES als ungültig gemeldet',
+      },
+    }),
+
+    // inv-008: Grün (Hotel 13%)
+    prisma.validationResult.create({
+      data: {
+        invoiceId: 'inv-008', overallStatus: 'GREEN', amountClass: 'SMALL',
+        extractedDataVersion: 1,
+        checks: [
+          { rule: 'ISSUER_NAME', status: 'GREEN', message: 'Name vorhanden: Hotel Sacher Wien GmbH', legalBasis: '§11 Abs 1 Z 1 UStG' },
+          { rule: 'INVOICE_DATE', status: 'GREEN', message: 'Ausstellungsdatum vorhanden', legalBasis: '§11 Abs 1 Z 4 UStG' },
+          { rule: 'MATH_CHECK', status: 'GREEN', message: 'Netto (354) + USt (46.02) = Brutto (400.02) ✓', legalBasis: '§11 UStG' },
+          { rule: 'VAT_RATE_VALID', status: 'GREEN', message: 'Steuersatz 13% ist gültig', legalBasis: '§10 UStG' },
+          { rule: 'DUPLICATE_CHECK', status: 'GREEN', message: 'Kein Duplikat gefunden', legalBasis: 'Betriebsprüfung' },
+        ],
+      },
+    }),
+
+    // inv-009: Gelb (Metro — kein Lieferdatum)
+    prisma.validationResult.create({
+      data: {
+        invoiceId: 'inv-009', overallStatus: 'GREEN', amountClass: 'SMALL',
+        extractedDataVersion: 1,
+        checks: [
+          { rule: 'ISSUER_NAME', status: 'GREEN', message: 'Name vorhanden: METRO Cash & Carry Österreich GmbH', legalBasis: '§11 Abs 1 Z 1 UStG' },
+          { rule: 'INVOICE_DATE', status: 'GREEN', message: 'Ausstellungsdatum vorhanden', legalBasis: '§11 Abs 1 Z 4 UStG' },
+          { rule: 'MATH_CHECK', status: 'GREEN', message: 'Netto (272.73) + USt (27.27) = Brutto (300) ✓', legalBasis: '§11 UStG' },
+          { rule: 'VAT_RATE_VALID', status: 'GREEN', message: 'Steuersatz 10% ist gültig', legalBasis: '§10 UStG' },
+          { rule: 'DUPLICATE_CHECK', status: 'GREEN', message: 'Kein Duplikat gefunden', legalBasis: 'Betriebsprüfung' },
+        ],
+      },
+    }),
+  ]);
+
+  console.log(`${validationResults.length} ValidationResult Records erstellt`);
+
+  // ============================================================
+  // LIEFERANTEN (Vendors) — auto-erstellt aus Rechnungsdaten
+  // ============================================================
+
+  const vendors = await Promise.all([
+    prisma.vendor.upsert({
+      where: { tenantId_uid: { tenantId: tenant.id, uid: 'ATU63456789' } },
+      update: {},
+      create: {
+        id: 'vendor-001', tenantId: tenant.id,
+        name: 'Papyrus Bürobedarf GmbH', uid: 'ATU63456789',
+        address: { street: 'Mariahilfer Str. 45', zip: '1060', city: 'Wien', country: 'AT' },
+        iban: 'AT88 3200 0000 1234 5678',
+        viesName: 'PAPYRUS BÜROBEDARF GMBH', viesCheckedAt: new Date('2026-01-15'),
+      },
+    }),
+    prisma.vendor.upsert({
+      where: { tenantId_uid: { tenantId: tenant.id, uid: 'ATU74567890' } },
+      update: {},
+      create: {
+        id: 'vendor-002', tenantId: tenant.id,
+        name: 'WebAgentur Steiner KG', uid: 'ATU74567890',
+        address: { street: 'Landstraßer Hauptstr. 12', zip: '1030', city: 'Wien', country: 'AT' },
+        email: 'office@webagentur-steiner.at', website: 'https://webagentur-steiner.at',
+        viesName: 'WEBAGENTUR STEINER KG', viesCheckedAt: new Date('2026-01-22'),
+      },
+    }),
+    prisma.vendor.upsert({
+      where: { tenantId_uid: { tenantId: tenant.id, uid: 'ATU55667788' } },
+      update: {},
+      create: {
+        id: 'vendor-003', tenantId: tenant.id,
+        name: 'Immo Verwaltung Hofer GmbH', uid: 'ATU55667788',
+        address: { street: 'Kärntner Ring 22', zip: '1010', city: 'Wien', country: 'AT' },
+        phone: '+43 1 512 1234',
+        viesName: 'IMMO VERWALTUNG HOFER GMBH', viesCheckedAt: new Date('2026-01-01'),
+      },
+    }),
+    prisma.vendor.upsert({
+      where: { tenantId_uid: { tenantId: tenant.id, uid: 'ATU99999999' } },
+      update: {},
+      create: {
+        id: 'vendor-004', tenantId: tenant.id,
+        name: 'Consulting XY e.U.', uid: 'ATU99999999',
+        address: { street: 'Favoritenstr. 100', zip: '1100', city: 'Wien', country: 'AT' },
+        // VIES invalid — no viesName
+        viesCheckedAt: new Date('2026-02-01'),
+      },
+    }),
+    prisma.vendor.upsert({
+      where: { tenantId_uid: { tenantId: tenant.id, uid: 'ATU36789012' } },
+      update: {},
+      create: {
+        id: 'vendor-005', tenantId: tenant.id,
+        name: 'Hotel Sacher Wien GmbH', uid: 'ATU36789012',
+        address: { street: 'Philharmoniker Str. 4', zip: '1010', city: 'Wien', country: 'AT' },
+        email: 'reservierung@sacher.com', website: 'https://www.sacher.com',
+        viesName: 'HOTEL SACHER WIEN GMBH', viesCheckedAt: new Date('2026-01-28'),
+      },
+    }),
+    prisma.vendor.upsert({
+      where: { tenantId_uid: { tenantId: tenant.id, uid: 'ATU45678901' } },
+      update: {},
+      create: {
+        id: 'vendor-006', tenantId: tenant.id,
+        name: 'METRO Cash & Carry Österreich GmbH', uid: 'ATU45678901',
+        address: { street: 'Metro-Platz 1', zip: '1230', city: 'Wien', country: 'AT' },
+        viesName: 'METRO CASH & CARRY ÖSTERREICH GMBH', viesCheckedAt: new Date('2026-02-05'),
+      },
+    }),
+  ]);
+
+  // Link invoices to vendors
+  await Promise.all([
+    prisma.invoice.update({ where: { id: 'inv-001' }, data: { vendorId: 'vendor-001' } }),
+    prisma.invoice.update({ where: { id: 'inv-002' }, data: { vendorId: 'vendor-002' } }),
+    prisma.invoice.update({ where: { id: 'inv-003' }, data: { vendorId: 'vendor-002' } }),
+    prisma.invoice.update({ where: { id: 'inv-004' }, data: { vendorId: 'vendor-003' } }),
+    prisma.invoice.update({ where: { id: 'inv-006' }, data: { vendorId: 'vendor-004' } }),
+    prisma.invoice.update({ where: { id: 'inv-007' }, data: { vendorId: 'vendor-001' } }),
+    prisma.invoice.update({ where: { id: 'inv-008' }, data: { vendorId: 'vendor-005' } }),
+    prisma.invoice.update({ where: { id: 'inv-009' }, data: { vendorId: 'vendor-006' } }),
+  ]);
+
+  console.log(`${vendors.length} Lieferanten erstellt und mit Rechnungen verknüpft`);
 
   // ============================================================
   // RECHNUNGSPOSITIONEN (Line Items)

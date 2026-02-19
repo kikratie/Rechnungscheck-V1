@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { listMatchingsApi } from '../api/matchings';
+import type { MatchingItem } from '@buchungsai/shared';
 import { ArrowLeftRight, Loader2, CheckCircle, Clock, FileText, Building2 } from 'lucide-react';
 
 export function MatchingPage() {
@@ -11,7 +12,7 @@ export function MatchingPage() {
     queryFn: () => listMatchingsApi({ status: statusFilter || undefined }),
   });
 
-  const matchings = (data?.data ?? []) as Array<Record<string, unknown>>;
+  const matchings = (data?.data ?? []) as MatchingItem[];
 
   return (
     <div>
@@ -45,12 +46,12 @@ export function MatchingPage() {
       ) : (
         <div className="space-y-4">
           {matchings.map((m) => {
-            const invoice = m.invoice as Record<string, unknown>;
-            const transaction = m.transaction as Record<string, unknown>;
-            const confidence = m.confidence ? (parseFloat(m.confidence as string) * 100).toFixed(0) : null;
+            const invoice = m.invoice;
+            const transaction = m.transaction;
+            const confidence = m.confidence ? (parseFloat(m.confidence) * 100).toFixed(0) : null;
 
             return (
-              <div key={m.id as string} className="card overflow-hidden">
+              <div key={m.id} className="card overflow-hidden">
                 <div className="flex items-center gap-1 p-1">
                   {/* Invoice side */}
                   <div className="flex-1 p-4 bg-blue-50 rounded-lg">
@@ -58,21 +59,21 @@ export function MatchingPage() {
                       <FileText size={16} className="text-blue-600" />
                       <span className="text-xs font-medium text-blue-600 uppercase">Rechnung</span>
                     </div>
-                    <p className="font-medium text-gray-900 truncate">{(invoice.vendorName as string) || (invoice.originalFileName as string)}</p>
-                    <p className="text-sm text-gray-500">{(invoice.invoiceNumber as string) || '—'}</p>
+                    <p className="font-medium text-gray-900 truncate">{invoice.vendorName || invoice.originalFileName}</p>
+                    <p className="text-sm text-gray-500">{invoice.invoiceNumber || '—'}</p>
                     <p className="text-lg font-bold mt-1">
-                      {invoice.grossAmount ? formatCurrency(invoice.grossAmount as string) : '—'}
+                      {invoice.grossAmount ? formatCurrency(String(invoice.grossAmount)) : '—'}
                     </p>
-                    {invoice.invoiceDate && (
-                      <p className="text-xs text-gray-400 mt-1">{formatDate(invoice.invoiceDate as string)}</p>
-                    )}
+                    {invoice.invoiceDate ? (
+                      <p className="text-xs text-gray-400 mt-1">{formatDate(invoice.invoiceDate)}</p>
+                    ) : null}
                   </div>
 
                   {/* Match indicator */}
                   <div className="flex flex-col items-center px-4 py-2 shrink-0">
-                    <MatchStatusIcon status={m.status as string} />
+                    <MatchStatusIcon status={m.status} />
                     <ArrowLeftRight size={20} className="text-gray-300 my-1" />
-                    <MatchTypeBadge type={m.matchType as string} />
+                    <MatchTypeBadge type={m.matchType} />
                     {confidence && (
                       <span className="text-xs text-gray-400 mt-1">{confidence}%</span>
                     )}
@@ -84,21 +85,21 @@ export function MatchingPage() {
                       <Building2 size={16} className="text-green-600" />
                       <span className="text-xs font-medium text-green-600 uppercase">Transaktion</span>
                     </div>
-                    <p className="font-medium text-gray-900 truncate">{(transaction.counterpartName as string) || '—'}</p>
-                    <p className="text-sm text-gray-500 truncate">{(transaction.reference as string) || '—'}</p>
+                    <p className="font-medium text-gray-900 truncate">{transaction.counterpartName || '—'}</p>
+                    <p className="text-sm text-gray-500 truncate">{transaction.reference || '—'}</p>
                     <p className="text-lg font-bold mt-1">
-                      {formatCurrency(transaction.amount as string)}
+                      {formatCurrency(String(transaction.amount))}
                     </p>
-                    <p className="text-xs text-gray-400 mt-1">{formatDate(transaction.transactionDate as string)}</p>
+                    <p className="text-xs text-gray-400 mt-1">{formatDate(transaction.transactionDate)}</p>
                   </div>
                 </div>
 
                 {/* Reason */}
-                {m.matchReason && (
+                {m.matchReason ? (
                   <div className="px-5 py-2 bg-gray-50 border-t text-xs text-gray-500">
-                    {m.matchReason as string}
+                    {m.matchReason}
                   </div>
-                )}
+                ) : null}
               </div>
             );
           })}

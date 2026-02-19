@@ -122,6 +122,78 @@ export const exportGenerateSchema = z.object({
 });
 
 // ============================================================
+// Extracted Data Correction Schema (manual edit)
+// ============================================================
+
+// EU-UID: 2 Buchstaben Ländercode + alphanumerisch (2-12 Zeichen)
+const euUidRegex = /^[A-Z]{2}[A-Z0-9]{2,12}$/;
+
+export const updateExtractedDataSchema = z.object({
+  issuerName: z.string().max(200).optional().nullable(),
+  issuerUid: z
+    .string()
+    .regex(euUidRegex, 'UID-Nummer muss mit 2-stelligem Ländercode beginnen (z.B. ATU12345678, DE123456789, IE9825613N)')
+    .optional()
+    .nullable(),
+  issuerAddress: z
+    .object({
+      street: z.string().max(200).optional().default(''),
+      zip: z.string().max(10).optional().nullable().default(''),
+      city: z.string().max(100).optional().default(''),
+      country: z.string().max(50).optional().default(''),
+    })
+    .optional()
+    .nullable(),
+  issuerEmail: z.string().email().optional().nullable(),
+  issuerIban: z.string().max(34).optional().nullable(),
+  recipientName: z.string().max(200).optional().nullable(),
+  recipientUid: z
+    .string()
+    .regex(euUidRegex, 'UID-Nummer muss mit 2-stelligem Ländercode beginnen (z.B. ATU12345678, DE123456789)')
+    .optional()
+    .nullable(),
+  invoiceNumber: z.string().max(100).optional().nullable(),
+  sequentialNumber: z.string().max(100).optional().nullable(),
+  invoiceDate: z.string().datetime().optional().nullable(),
+  deliveryDate: z.string().datetime().optional().nullable(),
+  dueDate: z.string().datetime().optional().nullable(),
+  description: z.string().max(2000).optional().nullable(),
+  netAmount: z.number().min(0).optional().nullable(),
+  vatAmount: z.number().min(0).optional().nullable(),
+  grossAmount: z.number().min(0).optional().nullable(),
+  vatRate: z.number().min(0).max(100).optional().nullable(),
+  currency: z.string().length(3).optional(),
+  isReverseCharge: z.boolean().optional(),
+  accountNumber: z.string().max(20).optional().nullable(),
+  costCenter: z.string().max(50).optional().nullable(),
+  category: z.string().max(100).optional().nullable(),
+  editReason: z.string().max(500).optional(),
+});
+
+export const rejectInvoiceSchema = z.object({
+  reason: z.string().min(1, 'Begründung ist erforderlich').max(2000),
+});
+
+// ============================================================
+// Ersatzbeleg Schema
+// ============================================================
+
+export const createErsatzbelegSchema = z.object({
+  reason: z.string().min(1, 'Begründung ist erforderlich').max(2000),
+  issuerName: z.string().min(1, 'Lieferant ist erforderlich').max(200),
+  description: z.string().min(1, 'Beschreibung ist erforderlich').max(2000),
+  invoiceDate: z.string().min(1, 'Datum ist erforderlich'),
+  grossAmount: z.number().min(0.01, 'Betrag ist erforderlich'),
+  netAmount: z.number().min(0).optional().nullable(),
+  vatAmount: z.number().min(0).optional().nullable(),
+  vatRate: z.number().min(0).max(100).optional().nullable(),
+  invoiceNumber: z.string().max(100).optional().nullable(),
+  issuerUid: z.string().max(20).optional().nullable(),
+  accountNumber: z.string().max(20).optional().nullable(),
+  category: z.string().max(100).optional().nullable(),
+});
+
+// ============================================================
 // UID Validation
 // ============================================================
 

@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireTenant } from '../middleware/tenantContext.js';
+import { validateBody } from '../middleware/validate.js';
+import { invoiceUpload } from '../middleware/upload.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
+import { updateExtractedDataSchema, rejectInvoiceSchema, createErsatzbelegSchema } from '@buchungsai/shared';
+import * as invoiceService from '../services/invoice.service.js';
 
 const router = Router();
 
@@ -22,10 +26,13 @@ router.get('/', async (req, res, next) => {
     if (req.query.validationStatus) where.validationStatus = req.query.validationStatus;
     if (req.query.vendorName) where.vendorName = { contains: req.query.vendorName, mode: 'insensitive' };
     if (req.query.search) {
+      const searchTerm = req.query.search as string;
+      const belegNrMatch = searchTerm.match(/^BEL-?(\d+)$/i);
       where.OR = [
-        { vendorName: { contains: req.query.search, mode: 'insensitive' } },
-        { invoiceNumber: { contains: req.query.search, mode: 'insensitive' } },
-        { originalFileName: { contains: req.query.search, mode: 'insensitive' } },
+        { vendorName: { contains: searchTerm, mode: 'insensitive' } },
+        { invoiceNumber: { contains: searchTerm, mode: 'insensitive' } },
+        { originalFileName: { contains: searchTerm, mode: 'insensitive' } },
+        ...(belegNrMatch ? [{ belegNr: parseInt(belegNrMatch[1]) }] : []),
       ];
     }
 
@@ -40,6 +47,8 @@ router.get('/', async (req, res, next) => {
         orderBy: { [sortBy]: sortOrder },
         select: {
           id: true,
+          belegNr: true,
+          documentType: true,
           originalFileName: true,
           vendorName: true,
           invoiceNumber: true,
@@ -49,6 +58,8 @@ router.get('/', async (req, res, next) => {
           processingStatus: true,
           validationStatus: true,
           isLocked: true,
+          vendorId: true,
+          replacedByInvoiceId: true,
           createdAt: true,
         },
       }),
@@ -71,9 +82,10 @@ router.get('/:id', async (req, res, next) => {
     const tenantId = req.tenantId!;
 
     const invoice = await prisma.invoice.findFirst({
-      where: { id: req.params.id, tenantId },
+      where: { id: req.params.id as string, tenantId },
       include: {
         lineItems: { orderBy: { position: 'asc' } },
+        vendor: { select: { id: true, name: true, uid: true } },
       },
     });
 
@@ -82,7 +94,185 @@ router.get('/:id', async (req, res, next) => {
       return;
     }
 
+    // Get latest extracted data
+    const extractedData = await prisma.extractedData.findFirst({
+      where: { invoiceId: invoice.id as string },
+      orderBy: { version: 'desc' },
+    });
+
+    // Get latest validation result
+    const validationResult = await prisma.validationResult.findFirst({
+      where: { invoiceId: invoice.id as string },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // If this invoice was replaced, get the Ersatzbeleg belegNr
+    let replacedByBelegNr: number | null = null;
+    if (invoice.replacedByInvoiceId) {
+      const replacement = await prisma.invoice.findUnique({
+        where: { id: invoice.replacedByInvoiceId },
+        select: { belegNr: true },
+      });
+      replacedByBelegNr = replacement?.belegNr ?? null;
+    }
+
+    // If this is an Ersatzbeleg, get the original belegNr
+    let replacesBelegNr: number | null = null;
+    if (invoice.replacesInvoiceId) {
+      const original = await prisma.invoice.findUnique({
+        where: { id: invoice.replacesInvoiceId },
+        select: { belegNr: true },
+      });
+      replacesBelegNr = original?.belegNr ?? null;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...invoice,
+        replacedByBelegNr,
+        replacesBelegNr,
+        extractedData: extractedData || null,
+        validationResult: validationResult
+          ? {
+              ...validationResult,
+              checks: validationResult.checks,
+            }
+          : null,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices — Upload
+router.post('/', invoiceUpload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      res.status(422).json({ success: false, error: { code: 'NO_FILE', message: 'Keine Datei hochgeladen' } });
+      return;
+    }
+
+    const invoice = await invoiceService.uploadInvoice({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      file: req.file,
+    });
+
+    res.status(201).json({ success: true, data: invoice });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/v1/invoices/:id — Manual correction
+router.put('/:id', validateBody(updateExtractedDataSchema), async (req, res, next) => {
+  try {
+    const extractedData = await invoiceService.updateExtractedData({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      invoiceId: req.params.id as string,
+      data: req.body,
+      editReason: req.body.editReason as string | undefined,
+    });
+
+    res.json({ success: true, data: extractedData });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/approve
+router.post('/:id/approve', async (req, res, next) => {
+  try {
+    const invoice = await invoiceService.approveInvoice(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+    );
     res.json({ success: true, data: invoice });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/reject
+router.post('/:id/reject', validateBody(rejectInvoiceSchema), async (req, res, next) => {
+  try {
+    const invoice = await invoiceService.rejectInvoice(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+      req.body.reason as string,
+    );
+    res.json({ success: true, data: invoice });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/ersatzbeleg — Create replacement receipt
+router.post('/:id/ersatzbeleg', validateBody(createErsatzbelegSchema), async (req, res, next) => {
+  try {
+    const ersatzbeleg = await invoiceService.createErsatzbeleg({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      originalInvoiceId: req.params.id as string,
+      reason: req.body.reason as string,
+      data: req.body,
+    });
+    res.status(201).json({ success: true, data: ersatzbeleg });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/v1/invoices/:id — Delete (only UPLOADED/ERROR)
+router.delete('/:id', async (req, res, next) => {
+  try {
+    await invoiceService.deleteInvoice(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+    );
+    res.json({ success: true, data: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/invoices/:id/download — Presigned URL
+router.get('/:id/download', async (req, res, next) => {
+  try {
+    const url = await invoiceService.getInvoiceDownloadUrl(
+      req.tenantId!,
+      req.params.id as string,
+    );
+    res.json({ success: true, data: { url } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/invoices/:id/versions — ExtractedData version history
+router.get('/:id/versions', async (req, res, next) => {
+  try {
+    const versions = await invoiceService.getInvoiceVersions(
+      req.tenantId!,
+      req.params.id as string,
+    );
+    res.json({ success: true, data: versions });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/revalidate-all — Re-validate all invoices with current rules
+router.post('/revalidate-all', async (req, res, next) => {
+  try {
+    const result = await invoiceService.revalidateAll(req.tenantId!);
+    res.json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

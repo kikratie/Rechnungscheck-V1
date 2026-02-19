@@ -25,6 +25,7 @@ model Tenant {
 
   users          User[]
   invoices       Invoice[]
+  vendors        Vendor[]
   bankStatements BankStatement[]
   matchings      Matching[]
   exportConfigs  ExportConfig[]
@@ -46,8 +47,10 @@ model User {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id])
-  auditLogs AuditLog[] @relation("AuditUser")
+  tenant             Tenant          @relation(fields: [tenantId], references: [id])
+  auditLogs          AuditLog[]      @relation("AuditUser")
+  uploadedInvoices   Invoice[]       @relation("UploadedBy")
+  extractedDataEdits ExtractedData[] @relation("EditedBy")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -79,26 +82,35 @@ model RefreshToken {
 model Invoice {
   id               String   @id @default(uuid())
   tenantId         String
+  belegNr          Int      @default(0)          // Fortlaufende, sichtbare Beleg-Nr. pro Tenant
 
   // Dokument-Metadaten
+  documentType     String   @default("INVOICE") // INVOICE, CREDIT_NOTE, RECEIPT
+  ingestionChannel String   @default("UPLOAD")  // UPLOAD, EMAIL, API
   originalFileName String
   storagePath      String
   storageHash      String
   mimeType         String
   fileSizeBytes    Int
 
-  // AI-extrahierte Daten
-  vendorName    String?
-  vendorUid     String?
-  vendorAddress Json?
-  invoiceNumber String?
-  invoiceDate   DateTime?
-  dueDate       DateTime?
-  netAmount     Decimal?  @db.Decimal(12, 2)
-  vatAmount     Decimal?  @db.Decimal(12, 2)
-  grossAmount   Decimal?  @db.Decimal(12, 2)
-  currency      String    @default("EUR")
-  vatRate       Decimal?  @db.Decimal(5, 2)
+  // Denormalisierte Felder (synced from latest ExtractedData)
+  vendorName       String?
+  vendorUid        String?
+  vendorAddress    Json?
+  invoiceNumber    String?
+  sequentialNumber String?
+  invoiceDate      DateTime?
+  deliveryDate     DateTime?
+  dueDate          DateTime?
+  netAmount        Decimal?  @db.Decimal(12, 2)
+  vatAmount        Decimal?  @db.Decimal(12, 2)
+  grossAmount      Decimal?  @db.Decimal(12, 2)
+  currency         String    @default("EUR")
+  vatRate          Decimal?  @db.Decimal(5, 2)
+  isReverseCharge  Boolean   @default(false)
+  recipientUid     String?
+  issuerEmail      String?
+  issuerIban       String?
 
   // AI-Klassifikation
   accountNumber String?
@@ -121,20 +133,36 @@ model Invoice {
   isDuplicate   Boolean @default(false)
   duplicateOfId String?
 
+  // Ersatzbeleg-Verknüpfung
+  replacesInvoiceId  String?  @unique  // This Ersatzbeleg replaces original invoice
+  replacedByInvoiceId String? @unique  // This invoice was replaced by an Ersatzbeleg
+  ersatzReason       String?           // Why the Ersatzbeleg was created
+
   // Workflow
   isLocked       Boolean   @default(false)
   lockedAt       DateTime?
   lockedByUserId String?
   notes          String?
 
+  // Lieferant (auto-verknüpft)
+  vendorId String?
+
+  // Upload-Tracking
+  uploadedByUserId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant           Tenant            @relation(fields: [tenantId], references: [id])
-  lineItems        InvoiceLineItem[]
-  matchings        Matching[]
-  documentVersions DocumentVersion[]
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  uploadedBy        User?              @relation("UploadedBy", fields: [uploadedByUserId], references: [id])
+  vendor            Vendor?            @relation(fields: [vendorId], references: [id])
+  lineItems         InvoiceLineItem[]
+  matchings         Matching[]
+  documentVersions  DocumentVersion[]
+  extractedData     ExtractedData[]
+  validationResults ValidationResult[]
 
+  @@unique([tenantId, belegNr])
   @@index([tenantId])
   @@index([tenantId, vendorName])
   @@index([tenantId, invoiceNumber])
@@ -142,6 +170,7 @@ model Invoice {
   @@index([tenantId, validationStatus])
   @@index([tenantId, processingStatus])
   @@index([storageHash])
+  @@index([vendorId])
   @@map("invoices")
 }
 
@@ -182,6 +211,85 @@ model DocumentVersion {
   @@map("document_versions")
 }
 
+model ExtractedData {
+  id        String @id @default(uuid())
+  invoiceId String
+  version   Int    @default(1) // 1 = KI-Extraktion, 2+ = User-Korrektur
+
+  // §11 UStG Pflichtmerkmale
+  issuerName       String?
+  issuerUid        String?
+  issuerAddress    Json?    // { street, zip, city, country }
+  issuerEmail      String?
+  issuerIban       String?
+  recipientName    String?
+  recipientUid     String?
+  recipientAddress Json?
+  invoiceNumber    String?
+  sequentialNumber String?
+  invoiceDate      DateTime?
+  deliveryDate     DateTime?
+  dueDate          DateTime?
+  description      String?  // Leistungsbeschreibung
+
+  // Beträge
+  netAmount       Decimal? @db.Decimal(12, 2)
+  vatAmount       Decimal? @db.Decimal(12, 2)
+  grossAmount     Decimal? @db.Decimal(12, 2)
+  vatRate         Decimal? @db.Decimal(5, 2)
+  currency        String   @default("EUR")
+  isReverseCharge Boolean  @default(false)
+
+  // Klassifikation
+  accountNumber String?
+  costCenter    String?
+  category      String?
+
+  // Konfidenz-Scores pro Feld (JSON: { fieldName: 0.0-1.0 })
+  confidenceScores Json? @default("{}")
+
+  // Tracking
+  source          String  @default("AI") // AI, MANUAL
+  pipelineStage   String? // TEXT_EXTRACTION, VISION_OCR, VISION_OCR_ENHANCED
+  editedByUserId  String?
+  editReason      String?
+
+  createdAt DateTime @default(now())
+
+  invoice  Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  editedBy User?   @relation("EditedBy", fields: [editedByUserId], references: [id])
+
+  @@unique([invoiceId, version])
+  @@index([invoiceId])
+  @@map("extracted_data")
+}
+
+model ValidationResult {
+  id        String @id @default(uuid())
+  invoiceId String
+
+  // Ampel
+  overallStatus String // GREEN, YELLOW, RED
+  amountClass   String // SMALL (≤400), STANDARD (>400), LARGE (>10000)
+
+  // Strukturierte Prüfungen (JSON Array of ValidationCheck)
+  checks Json @default("[]")
+
+  // Kommentare
+  comments String?
+
+  // Versionsbezug
+  extractedDataVersion Int
+
+  createdAt DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([invoiceId, createdAt])
+  @@map("validation_results")
+}
+
 enum ProcessingStatus {
   UPLOADED
   PROCESSING
@@ -190,6 +298,7 @@ enum ProcessingStatus {
   APPROVED
   EXPORTED
   ERROR
+  REPLACED
 }
 
 enum ValidationStatus {
@@ -204,6 +313,42 @@ enum UidValidationStatus {
   VALID
   INVALID
   SERVICE_UNAVAILABLE
+}
+
+// ============================================================
+// VENDORS (Lieferanten / Kunden)
+// ============================================================
+
+model Vendor {
+  id       String @id @default(uuid())
+  tenantId String
+
+  name    String
+  uid     String?
+  address Json?    // { street, zip, city, country }
+  email   String?
+  phone   String?
+  iban    String?
+  bic     String?
+  website String?
+  notes   String?
+
+  // VIES-Daten (gecacht vom letzten UID-Check)
+  viesName      String?
+  viesAddress   String?
+  viesCheckedAt DateTime?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  invoices Invoice[]
+
+  @@unique([tenantId, uid])
+  @@index([tenantId])
+  @@index([tenantId, name])
+  @@map("vendors")
 }
 
 // ============================================================

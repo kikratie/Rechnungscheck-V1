@@ -2,11 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Referenzdokumente
+
+- **CONCEPT.md** — Vollständiges Produktkonzept, DB-Schema, API-Endpunkte, Feature-Katalog, Regel-Engine. **VOR jeder Implementierung gegen CONCEPT.md abgleichen.**
+- **PROGRESS.md** — Fortschritt, offene Aufgaben, Konzept-Abweichungen, Verbesserungsvorschläge. **Nach jeder Session aktualisieren.**
+
 ## Project
 
-**BuchungsAI** — KI-gestützte Buchhaltungs-Automatisierung für österreichische Unternehmer. Multi-tenant SaaS: GPT-4o Vision OCR für Rechnungen, Matching gegen Banktransaktionen, UID-Validierung, BMD-Export. Sprache im Code ist Englisch, Domain-Begriffe teils Deutsch.
+**Ki2Go Accounting** (Arbeitstitel im Code: BuchungsAI) — KI-gestützte Buchhaltungs-Automatisierung für österreichische Einzelunternehmer (E/A-Rechner). Multi-tenant SaaS: GPT-4 Vision OCR für Rechnungen, Matching gegen Banktransaktionen, Regel-Engine (§11 UStG), UID-Validierung, BMD-Export. Sprache im Code ist Englisch, Domain-Begriffe teils Deutsch.
 
-Currently Phase 1 (auth, tenants, audit, dashboard). Phases 2-6 (invoice AI processing, bank import, matching engine, export) are stubbed placeholder routes.
+**USP:** Automatischer Bankabgleich + tiefe Rechnungsprüfung nach §11 UStG + importfertiger BMD-Export.
+
+**UX-Prinzip:** Komplexität unter der Haube. Der Unternehmer sieht nur die Ampel (Grün/Gelb/Rot). Details bei Klick.
 
 ## Commands
 
@@ -26,6 +33,7 @@ npm run build
 # Database (Prisma)
 npm run db:migrate          # prisma migrate dev
 npm run db:seed             # seed demo data
+npm run db:clean            # alle Rechnungen/Lieferanten/Validierungen löschen (frisch testen)
 npm run db:studio           # Prisma Studio on port 5555
 
 # From server/ workspace
