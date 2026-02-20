@@ -10,6 +10,7 @@ interface AuthState {
   setAuth: (user: UserProfile, accessToken: string, refreshToken: string) => void;
   setTokens: (accessToken: string, refreshToken: string) => void;
   setUser: (user: UserProfile) => void;
+  setOnboardingComplete: () => void;
   logout: () => void;
 }
 
@@ -33,6 +34,11 @@ export const useAuthStore = create<AuthState>()(
         set({ accessToken, refreshToken }),
 
       setUser: (user) => set({ user }),
+
+      setOnboardingComplete: () =>
+        set((state) => ({
+          user: state.user ? { ...state.user, onboardingComplete: true } : null,
+        })),
 
       logout: () =>
         set({

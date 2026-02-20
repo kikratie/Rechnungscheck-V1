@@ -117,6 +117,7 @@ export async function register(data: RegisterRequest): Promise<{ user: UserProfi
     lastName: result.user.lastName,
     role: result.user.role,
     tenantName: result.tenant.name,
+    onboardingComplete: false,
   };
 
   return { user: userProfile, tokens };
@@ -188,6 +189,7 @@ export async function login(
     lastName: user.lastName,
     role: user.role,
     tenantName: user.tenant.name,
+    onboardingComplete: user.tenant.onboardingComplete,
   };
 
   return { user: userProfile, tokens };
@@ -262,5 +264,6 @@ export async function getMe(userId: string): Promise<UserProfile> {
     lastName: user.lastName,
     role: user.role,
     tenantName: user.tenant.name,
+    onboardingComplete: user.tenant.onboardingComplete,
   };
 }

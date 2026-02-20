@@ -498,7 +498,40 @@ function checkUidSyntax(fields: ExtractedFields, amountClass: AmountClass): Vali
   return { rule: rule.id, status: 'YELLOW', message: `UID-Format nicht erkannt: ${uid} — manuelle Prüfung empfohlen`, legalBasis: rule.legalBasis };
 }
 
-function checkIbanSyntax(fields: ExtractedFields): ValidationCheck {
+// ISO 13616 IBAN country-specific lengths
+const IBAN_LENGTHS: Record<string, number> = {
+  AT: 20, DE: 22, CH: 21, BE: 16, BG: 22, CZ: 24, DK: 18, EE: 20,
+  ES: 24, FI: 18, FR: 27, GB: 22, HR: 21, HU: 28, IE: 22, IT: 27,
+  LT: 20, LU: 20, LV: 21, MT: 31, NL: 18, PL: 28, PT: 25, RO: 24,
+  SE: 24, SI: 19, SK: 24,
+};
+
+/**
+ * ISO 13616 Mod-97 Prüfziffern-Validierung
+ * Buchstaben → Ziffern (A=10..Z=35), erste 4 Zeichen ans Ende, BigInt mod 97 === 1
+ */
+function validateIbanCheckDigit(ibanClean: string): boolean {
+  // Move first 4 chars (country + check digits) to end
+  const rearranged = ibanClean.substring(4) + ibanClean.substring(0, 4);
+  // Convert letters to numbers (A=10, B=11, ..., Z=35)
+  let numericStr = '';
+  for (const ch of rearranged) {
+    const code = ch.charCodeAt(0);
+    if (code >= 65 && code <= 90) {
+      numericStr += (code - 55).toString();
+    } else {
+      numericStr += ch;
+    }
+  }
+  // BigInt mod 97
+  try {
+    return BigInt(numericStr) % 97n === 1n;
+  } catch {
+    return false;
+  }
+}
+
+function checkIbanSyntax(fields: ExtractedFields, tenantIbans: string[] = []): ValidationCheck {
   const rule = VALIDATION_RULES.IBAN_SYNTAX;
   const iban = fields.issuerIban;
 
@@ -506,13 +539,47 @@ function checkIbanSyntax(fields: ExtractedFields): ValidationCheck {
     return { rule: rule.id, status: 'YELLOW', message: 'Keine IBAN vorhanden', legalBasis: rule.legalBasis };
   }
 
-  const ibanClean = iban.replace(/\s/g, '');
+  const ibanClean = iban.replace(/\s/g, '').toUpperCase();
+
+  // Step 1: Basic regex
   const ibanRegex = /^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/;
-  if (ibanRegex.test(ibanClean)) {
-    return { rule: rule.id, status: 'GREEN', message: `IBAN-Syntax korrekt: ${iban}`, legalBasis: rule.legalBasis };
+  if (!ibanRegex.test(ibanClean)) {
+    return { rule: rule.id, status: 'YELLOW', message: `IBAN-Syntax möglicherweise ungültig: ${iban}`, legalBasis: rule.legalBasis };
   }
 
-  return { rule: rule.id, status: 'YELLOW', message: `IBAN-Syntax möglicherweise ungültig: ${iban}`, legalBasis: rule.legalBasis };
+  // Step 2: Country-specific length
+  const country = ibanClean.substring(0, 2);
+  const expectedLength = IBAN_LENGTHS[country];
+  if (expectedLength && ibanClean.length !== expectedLength) {
+    return {
+      rule: rule.id, status: 'RED',
+      message: `IBAN-Länge ungültig: ${ibanClean.length} Zeichen, erwartet ${expectedLength} für ${country}`,
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  // Step 3: Mod-97 check digit validation
+  if (!validateIbanCheckDigit(ibanClean)) {
+    return {
+      rule: rule.id, status: 'RED',
+      message: `IBAN-Prüfziffer ungültig: ${iban} — die IBAN ist rechnerisch falsch`,
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  // Step 4: Compare against ALL tenant IBANs
+  for (const tenantIban of tenantIbans) {
+    const tenantIbanClean = tenantIban.replace(/\s/g, '').toUpperCase();
+    if (ibanClean === tenantIbanClean) {
+      return {
+        rule: rule.id, status: 'YELLOW',
+        message: `Dies ist Ihre eigene Firmen-IBAN (${iban}) — bei Eingangsrechnungen wird die IBAN des Lieferanten erwartet`,
+        legalBasis: rule.legalBasis,
+      };
+    }
+  }
+
+  return { rule: rule.id, status: 'GREEN', message: `IBAN-Syntax und Prüfziffer korrekt: ${iban}`, legalBasis: rule.legalBasis };
 }
 
 function checkReverseCharge(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
@@ -734,13 +801,29 @@ function checkPlzUidConsistency(fields: ExtractedFields, amountClass: AmountClas
   return { rule: rule.id, status: 'GREEN', message: `Adress-Plausibilität: ${location.label}`, legalBasis: rule.legalBasis };
 }
 
-async function checkIssuerIsNotSelf(tenantId: string, fields: ExtractedFields): Promise<ValidationCheck> {
+interface TenantInfo {
+  name: string;
+  uidNumber: string | null;
+  ibans: string[];
+}
+
+async function checkIssuerIsNotSelf(tenantId: string, fields: ExtractedFields, tenantInfo?: TenantInfo | null): Promise<ValidationCheck> {
   const rule = VALIDATION_RULES.ISSUER_SELF_CHECK;
 
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    select: { name: true, uidNumber: true },
-  });
+  let tenant: TenantInfo | null = tenantInfo ?? null;
+  if (!tenant) {
+    const t = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { name: true, uidNumber: true, bankAccounts: { where: { isActive: true }, select: { iban: true } } },
+    });
+    if (t) {
+      tenant = {
+        name: t.name,
+        uidNumber: t.uidNumber,
+        ibans: t.bankAccounts.map((a: { iban: string | null }) => a.iban).filter((i): i is string => !!i),
+      };
+    }
+  }
 
   if (!tenant) {
     return { rule: rule.id, status: 'GREEN', message: 'Mandant nicht gefunden — Prüfung übersprungen', legalBasis: rule.legalBasis };
@@ -764,6 +847,28 @@ async function checkIssuerIsNotSelf(tenantId: string, fields: ExtractedFields): 
           ],
         },
       };
+    }
+  }
+
+  // Check if issuer IBAN matches ANY tenant IBAN
+  if (fields.issuerIban && tenant.ibans.length > 0) {
+    const issuerIbanClean = fields.issuerIban.replace(/\s/g, '').toUpperCase();
+    for (const tenantIban of tenant.ibans) {
+      const tenantIbanClean = tenantIban.replace(/\s/g, '').toUpperCase();
+      if (tenantIbanClean === issuerIbanClean) {
+        return {
+          rule: rule.id,
+          status: 'RED',
+          message: `VERWECHSLUNG: Die Aussteller-IBAN (${fields.issuerIban}) ist Ihre eigene Firmen-IBAN. Aussteller und Empfänger sind wahrscheinlich vertauscht.`,
+          legalBasis: rule.legalBasis,
+          details: {
+            actions: [
+              'Aussteller und Empfänger manuell tauschen',
+              'Prüfen Sie den Briefkopf/Logo und die Fußzeile der Rechnung',
+            ],
+          },
+        };
+      }
     }
   }
 
@@ -941,6 +1046,22 @@ export async function validateInvoice(input: ValidationInput): Promise<Validatio
   const gross = toNum(fields.grossAmount);
   const amountClass = determineAmountClass(gross);
 
+  // Load tenant info once for IBAN comparison and self-check
+  const tenantRaw = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { name: true, uidNumber: true, bankAccounts: { where: { isActive: true }, select: { iban: true } } },
+  });
+
+  const tenantIbans = tenantRaw?.bankAccounts
+    .map((a: { iban: string | null }) => a.iban)
+    .filter((i): i is string => !!i) ?? [];
+
+  const tenantInfo: TenantInfo | null = tenantRaw ? {
+    name: tenantRaw.name,
+    uidNumber: tenantRaw.uidNumber,
+    ibans: tenantIbans,
+  } : null;
+
   const checks: ValidationCheck[] = [
     // Pflichtfelder
     checkIssuerName(fields, amountClass),
@@ -960,7 +1081,7 @@ export async function validateInvoice(input: ValidationInput): Promise<Validatio
     checkMath(fields),
     checkVatRateValid(fields),
     checkUidSyntax(fields, amountClass),
-    checkIbanSyntax(fields),
+    checkIbanSyntax(fields, tenantIbans),
     checkReverseCharge(fields, amountClass),
     checkForeignVat(fields),
     checkPlzUidConsistency(fields, amountClass),
@@ -970,7 +1091,7 @@ export async function validateInvoice(input: ValidationInput): Promise<Validatio
   const duplicateCheck = await checkDuplicate(tenantId, invoiceId, fields);
   checks.push(duplicateCheck);
 
-  const selfCheck = await checkIssuerIsNotSelf(tenantId, fields);
+  const selfCheck = await checkIssuerIsNotSelf(tenantId, fields, tenantInfo);
   checks.push(selfCheck);
 
   // VIES UID validation (live EU API call)

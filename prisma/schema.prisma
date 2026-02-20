@@ -18,6 +18,11 @@ model Tenant {
   taxId     String?
   uidNumber String?
   address   Json?
+  firmenbuchNr      String?
+  country           String?  @default("AT")
+  phone             String?
+  email             String?
+  onboardingComplete Boolean @default(false)
   settings  Json     @default("{}")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -26,6 +31,7 @@ model Tenant {
   users          User[]
   invoices       Invoice[]
   vendors        Vendor[]
+  bankAccounts   BankAccount[]
   bankStatements BankStatement[]
   matchings      Matching[]
   exportConfigs  ExportConfig[]
@@ -61,6 +67,40 @@ enum UserRole {
   ADMIN
   ACCOUNTANT
   TAX_ADVISOR
+}
+
+// ============================================================
+// BANK ACCOUNTS (Bankkonten des Mandanten)
+// ============================================================
+
+model BankAccount {
+  id        String   @id @default(uuid())
+  tenantId  String
+
+  label         String
+  accountType   BankAccountType @default(CHECKING)
+  iban          String?
+  bic           String?
+  bankName      String?
+  cardLastFour  String?
+  isPrimary     Boolean  @default(false)
+  isActive      Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("bank_accounts")
+}
+
+enum BankAccountType {
+  CHECKING
+  SAVINGS
+  CREDIT_CARD
+  PAYPAL
+  OTHER
 }
 
 model RefreshToken {

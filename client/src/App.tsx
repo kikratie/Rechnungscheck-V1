@@ -3,6 +3,7 @@ import { useAuthStore } from './store/authStore';
 import { AppLayout } from './components/layout/AppLayout';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { OnboardingPage } from './pages/OnboardingPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { InvoicesPage } from './pages/InvoicesPage';
 import { BankStatementsPage } from './pages/BankStatementsPage';
@@ -13,10 +14,15 @@ import { SettingsPage } from './pages/SettingsPage';
 import { VendorsPage } from './pages/VendorsPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Redirect to onboarding if not completed
+  if (user && !user.onboardingComplete) {
+    return <Navigate to="/onboarding" replace />;
   }
 
   return <>{children}</>;
@@ -53,6 +59,16 @@ export default function App() {
         }
       />
 
+      {/* Onboarding Route (authenticated but outside AppLayout) */}
+      <Route
+        path="/onboarding"
+        element={
+          <OnboardingRoute>
+            <OnboardingPage />
+          </OnboardingRoute>
+        }
+      />
+
       {/* Protected Routes */}
       <Route
         element={
@@ -75,4 +91,20 @@ export default function App() {
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
+}
+
+/** Requires authentication, shows onboarding only if not yet completed */
+function OnboardingRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, user } = useAuthStore();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Already completed onboarding → go to dashboard
+  if (user?.onboardingComplete) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
 }

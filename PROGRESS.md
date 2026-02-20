@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 20. Februar 2026 (Session 5)
+**Letzte Aktualisierung:** 20. Februar 2026 (Session 7)
 
 ---
 
@@ -24,7 +24,7 @@
 
 | Tabelle | Zweck | Status |
 |---------|-------|--------|
-| `bank_accounts` | Separate Bankkontenverwaltung (Multi-Konto) | OFFEN — Prio 2 |
+| `bank_accounts` | Separate Bankkontenverwaltung (Multi-Konto) | ✅ IMPLEMENTIERT (Phase 4) |
 | `extracted_data` | Versionierte KI-Extraktionsdaten | ✅ IMPLEMENTIERT |
 | `validation_results` | Separates Prüfprotokoll (Regel-Engine Output) | ✅ IMPLEMENTIERT |
 | `sequential_numbers` | Fortlaufende Nummerierung ER/AR-JJJJ-NNNNN | OFFEN — Prio 2 |
@@ -121,6 +121,24 @@
 - [x] **Invoice UI**: Checkbox-Spalte + "Alle auswählen" + Batch-Toolbar mit Genehmigen-Button
 - [x] **Audit-Log**: `trigger: BATCH` bzw. `trigger: AUTO_TRUST` in Metadata
 
+### Phase 3.5: Tenant-Onboarding + IBAN-Verbesserung ✅
+
+- [x] **Tenant-Schema erweitert**: +8 Felder (iban, bic, bankName, firmenbuchNr, country, phone, email, onboardingComplete)
+- [x] **Shared Types**: TenantProfile Interface, UserProfile um onboardingComplete erweitert
+- [x] **Shared Validation**: updateTenantSchema erweitert, neues completeOnboardingSchema
+- [x] **Auth Service**: onboardingComplete in register(), login(), getMe() UserProfile
+- [x] **Tenant Routes**: validateBody(updateTenantSchema) auf PUT /, neuer POST /complete-onboarding Endpoint
+- [x] **IBAN Mod-97 Validierung**: ISO 13616 Prüfziffern-Check (BigInt mod 97), länderspezifische Längentabelle
+- [x] **IBAN Tenant-Vergleich**: checkIbanSyntax erkennt eigene Firmen-IBAN → YELLOW Hinweis
+- [x] **Aussteller-Prüfung**: checkIssuerIsNotSelf vergleicht jetzt auch IBAN (nicht nur UID + Name)
+- [x] **Validierung optimiert**: Tenant-Info wird einmal geladen und an alle Checks durchgereicht
+- [x] **Client Onboarding-Seite**: 4-Sections-Formular (Firma, Adresse*, Bank, Kontakt)
+- [x] **Client Onboarding-Redirect**: ProtectedRoute prüft onboardingComplete → /onboarding
+- [x] **Client Settings-Upgrade**: Von read-only Stub zum vollständigen Edit-Formular mit Firmen-IBAN
+- [x] **Client API-Layer**: getTenantApi, updateTenantApi, completeOnboardingApi
+- [x] **Auth Store**: setOnboardingComplete() Helper
+- [x] **Seed**: Demo-Tenant mit Bankdaten + onboardingComplete: true
+
 ### Prio 2: Workflow & Bankabgleich
 
 - [ ] **Fortlaufende Nummerierung** (ER-JJJJ-NNNNN / AR-JJJJ-NNNNN)
@@ -204,3 +222,11 @@ VIES-Abfrage ist implementiert (validateUid + compareCompanyNames in vies.servic
 | `server/src/routes/vendor.routes.ts` | Vendor API-Endpoints |
 | `client/src/api/vendors.ts` | Vendor API-Client |
 | `client/src/pages/VendorsPage.tsx` | Lieferantenliste UI |
+
+## Neue Dateien (Phase 3.5)
+
+| Datei | Zweck |
+|-------|-------|
+| `client/src/api/tenant.ts` | Tenant API-Client (get, update, completeOnboarding) |
+| `client/src/pages/OnboardingPage.tsx` | Onboarding-Formular (4 Sections) |
+| `prisma/migrations/20260220_add_tenant_onboarding_fields/` | DB-Migration für Tenant-Felder |

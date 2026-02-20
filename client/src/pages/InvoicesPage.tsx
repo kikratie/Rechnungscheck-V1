@@ -203,6 +203,18 @@ export function InvoicesPage() {
             </form>
 
             <select
+              value={filters.validationStatus || ''}
+              onChange={(e) => handleFilterChange('validationStatus', e.target.value)}
+              className="input-field !w-auto !py-2 text-sm"
+            >
+              <option value="">Alle Validierung</option>
+              <option value="VALID">Gültig</option>
+              <option value="WARNING">Warnung</option>
+              <option value="INVALID">Ungültig</option>
+              <option value="PENDING">Ausstehend</option>
+            </select>
+
+            <select
               value={filters.processingStatus || ''}
               onChange={(e) => handleFilterChange('processingStatus', e.target.value)}
               className="input-field !w-auto !py-2 text-sm"
@@ -215,18 +227,6 @@ export function InvoicesPage() {
               <option value="APPROVED">Genehmigt</option>
               <option value="EXPORTED">Exportiert</option>
               <option value="ERROR">Fehler</option>
-            </select>
-
-            <select
-              value={filters.validationStatus || ''}
-              onChange={(e) => handleFilterChange('validationStatus', e.target.value)}
-              className="input-field !w-auto !py-2 text-sm"
-            >
-              <option value="">Alle Validierung</option>
-              <option value="VALID">Gültig</option>
-              <option value="WARNING">Warnung</option>
-              <option value="INVALID">Ungültig</option>
-              <option value="PENDING">Ausstehend</option>
             </select>
           </div>
         </div>

@@ -65,6 +65,39 @@ export interface UserProfile {
   lastName: string;
   role: UserRoleType;
   tenantName: string;
+  onboardingComplete: boolean;
+}
+
+export type BankAccountType = 'CHECKING' | 'SAVINGS' | 'CREDIT_CARD' | 'PAYPAL' | 'OTHER';
+
+export interface BankAccountItem {
+  id: string;
+  tenantId: string;
+  label: string;
+  accountType: BankAccountType;
+  iban: string | null;
+  bic: string | null;
+  bankName: string | null;
+  cardLastFour: string | null;
+  isPrimary: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantProfile {
+  id: string;
+  name: string;
+  slug: string;
+  taxId: string | null;
+  uidNumber: string | null;
+  address: { street?: string; zip?: string; city?: string; country?: string } | null;
+  firmenbuchNr: string | null;
+  country: string | null;
+  phone: string | null;
+  email: string | null;
+  onboardingComplete: boolean;
+  bankAccounts: BankAccountItem[];
 }
 
 // ============================================================

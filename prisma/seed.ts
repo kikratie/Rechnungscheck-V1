@@ -9,7 +9,13 @@ async function main() {
   // Demo Tenant erstellen
   const tenant = await prisma.tenant.upsert({
     where: { slug: 'demo-gmbh' },
-    update: {},
+    update: {
+      firmenbuchNr: 'FN 123456a',
+      country: 'AT',
+      phone: '+43 1 234 5678',
+      email: 'office@demo-gmbh.at',
+      onboardingComplete: true,
+    },
     create: {
       name: 'Demo GmbH',
       slug: 'demo-gmbh',
@@ -20,10 +26,43 @@ async function main() {
         city: 'Wien',
         country: 'AT',
       },
+      firmenbuchNr: 'FN 123456a',
+      country: 'AT',
+      phone: '+43 1 234 5678',
+      email: 'office@demo-gmbh.at',
+      onboardingComplete: true,
     },
   });
 
   console.log(`Tenant erstellt: ${tenant.name} (${tenant.id})`);
+
+  // Bankkonten erstellen
+  await prisma.bankAccount.deleteMany({ where: { tenantId: tenant.id } });
+  const bankAccounts = await Promise.all([
+    prisma.bankAccount.create({
+      data: {
+        tenantId: tenant.id,
+        label: 'Geschäftskonto Erste Bank',
+        accountType: 'CHECKING',
+        iban: 'AT611904300234573201',
+        bic: 'GIBAATWWXXX',
+        bankName: 'Erste Bank',
+        isPrimary: true,
+      },
+    }),
+    prisma.bankAccount.create({
+      data: {
+        tenantId: tenant.id,
+        label: 'Visa Business',
+        accountType: 'CREDIT_CARD',
+        cardLastFour: '4832',
+        bankName: 'Erste Bank',
+        isPrimary: false,
+      },
+    }),
+  ]);
+
+  console.log(`${bankAccounts.length} Bankkonten erstellt`);
 
   // Admin User
   const adminPassword = await bcrypt.hash('Admin123!', 12);

@@ -42,6 +42,62 @@ export const updateTenantSchema = z.object({
     })
     .optional()
     .nullable(),
+  firmenbuchNr: z.string().max(30).optional().nullable(),
+  country: z.string().length(2).optional().nullable(),
+  phone: z.string().max(30).optional().nullable(),
+  email: z.string().email('Ungültige E-Mail-Adresse').optional().nullable(),
+});
+
+export const completeOnboardingSchema = z.object({
+  name: z.string().min(2).max(100).optional(),
+  uidNumber: z
+    .string()
+    .regex(/^ATU\d{8}$/, 'UID-Nummer muss dem Format ATU12345678 entsprechen')
+    .optional()
+    .nullable(),
+  address: z
+    .object({
+      street: z.string().min(1, 'Straße ist erforderlich').max(200),
+      zip: z.string().min(1, 'PLZ ist erforderlich').max(10),
+      city: z.string().min(1, 'Stadt ist erforderlich').max(100),
+      country: z.string().length(2).default('AT'),
+    }),
+  firmenbuchNr: z.string().max(30).optional().nullable(),
+  country: z.string().length(2).optional().nullable(),
+  phone: z.string().max(30).optional().nullable(),
+  email: z.string().email('Ungültige E-Mail-Adresse').optional().nullable(),
+  // Optional: first bank account created during onboarding
+  bankAccount: z.object({
+    label: z.string().min(1).max(100),
+    accountType: z.enum(['CHECKING', 'SAVINGS', 'CREDIT_CARD', 'PAYPAL', 'OTHER']).default('CHECKING'),
+    iban: z.string().max(34).optional().nullable(),
+    bic: z.string().max(11).optional().nullable(),
+    bankName: z.string().max(100).optional().nullable(),
+  }).optional(),
+});
+
+// ============================================================
+// Bank Account Schemas
+// ============================================================
+
+export const createBankAccountSchema = z.object({
+  label: z.string().min(1, 'Bezeichnung ist erforderlich').max(100),
+  accountType: z.enum(['CHECKING', 'SAVINGS', 'CREDIT_CARD', 'PAYPAL', 'OTHER']).default('CHECKING'),
+  iban: z.string().max(34).optional().nullable(),
+  bic: z.string().max(11).optional().nullable(),
+  bankName: z.string().max(100).optional().nullable(),
+  cardLastFour: z.string().max(4).optional().nullable(),
+  isPrimary: z.boolean().default(false),
+});
+
+export const updateBankAccountSchema = z.object({
+  label: z.string().min(1).max(100).optional(),
+  accountType: z.enum(['CHECKING', 'SAVINGS', 'CREDIT_CARD', 'PAYPAL', 'OTHER']).optional(),
+  iban: z.string().max(34).optional().nullable(),
+  bic: z.string().max(11).optional().nullable(),
+  bankName: z.string().max(100).optional().nullable(),
+  cardLastFour: z.string().max(4).optional().nullable(),
+  isPrimary: z.boolean().optional(),
 });
 
 // ============================================================
