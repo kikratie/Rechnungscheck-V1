@@ -97,12 +97,13 @@ RECHNUNGSDATEN:
 - dueDate: Fälligkeitsdatum (ISO 8601, falls vorhanden)
 - description: Kurze Leistungsbeschreibung
 
-BETRÄGE:
-- netAmount: Nettobetrag als Zahl
-- vatAmount: USt-Betrag als Zahl
-- grossAmount: Bruttobetrag als Zahl
-- vatRate: Steuersatz als Zahl (z.B. 20, 13, 10, 0)
+BETRÄGE (WICHTIG — immer als JSON-Number, NIEMALS als String!):
+- netAmount: Nettobetrag als JSON-Number (z.B. 1234.56, NICHT "1234.56")
+- vatAmount: USt-Betrag als JSON-Number (z.B. 246.91, NICHT "246.91")
+- grossAmount: Bruttobetrag als JSON-Number (z.B. 1481.47, NICHT "1481.47")
+- vatRate: Steuersatz als JSON-Number (z.B. 20, NICHT "20")
 - currency: Währung (ISO 4217, Default EUR)
+Dezimaltrennzeichen ist PUNKT (1234.56), nicht Komma. Alle Beträge als reine Zahlen ohne Währungszeichen.
 
 SONSTIGES:
 - isReverseCharge: true wenn Reverse Charge Vermerk

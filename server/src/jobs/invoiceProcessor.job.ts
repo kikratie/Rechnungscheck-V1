@@ -14,6 +14,25 @@ interface InvoiceJobData {
   mimeType: string;
 }
 
+/**
+ * Robuste Konvertierung von LLM-Feldern zu number | null.
+ * Das LLM gibt Beträge manchmal als String zurück ("1234.56" statt 1234.56).
+ */
+function parseNumericField(value: unknown): number | null {
+  if (typeof value === 'number' && !isNaN(value)) return value;
+  if (typeof value === 'string') {
+    const cleaned = value.trim();
+    if (!cleaned) return null;
+    // Europäisches Format: "1.234,56" → 1234.56
+    if (/^\d{1,3}(\.\d{3})*(,\d{1,2})?$/.test(cleaned)) {
+      return parseFloat(cleaned.replace(/\./g, '').replace(',', '.'));
+    }
+    const num = parseFloat(cleaned.replace(',', '.'));
+    if (!isNaN(num)) return num;
+  }
+  return null;
+}
+
 export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void> {
   const { invoiceId, tenantId, storagePath, mimeType } = job.data;
   const startTime = Date.now();
@@ -47,6 +66,28 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
       ? new Date(fields.deliveryDate as string)
       : invoiceDate; // §11 Abs 1 Z 4 UStG: Rechnungsdatum gilt als Leistungsdatum
 
+    // Parse amounts robustly (LLM may return strings)
+    let netAmount = parseNumericField(fields.netAmount);
+    let vatAmount = parseNumericField(fields.vatAmount);
+    let grossAmount = parseNumericField(fields.grossAmount);
+    const vatRate = parseNumericField(fields.vatRate);
+
+    // Derive missing amounts from available data
+    if (grossAmount !== null && vatRate !== null) {
+      if (netAmount === null) {
+        netAmount = Math.round((grossAmount / (1 + vatRate / 100)) * 100) / 100;
+      }
+      if (vatAmount === null) {
+        vatAmount = Math.round((grossAmount - (netAmount ?? grossAmount / (1 + vatRate / 100))) * 100) / 100;
+      }
+    } else if (netAmount !== null && vatAmount !== null && grossAmount === null) {
+      grossAmount = Math.round((netAmount + vatAmount) * 100) / 100;
+    } else if (grossAmount !== null && netAmount !== null && vatAmount === null) {
+      vatAmount = Math.round((grossAmount - netAmount) * 100) / 100;
+    } else if (grossAmount !== null && vatAmount !== null && netAmount === null) {
+      netAmount = Math.round((grossAmount - vatAmount) * 100) / 100;
+    }
+
     // Create ExtractedData Version 1
     const extractedData = await prisma.extractedData.create({
       data: {
@@ -68,10 +109,10 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
         deliveryDate,
         dueDate: fields.dueDate ? new Date(fields.dueDate as string) : null,
         description: (fields.description as string) || null,
-        netAmount: typeof fields.netAmount === 'number' ? fields.netAmount : null,
-        vatAmount: typeof fields.vatAmount === 'number' ? fields.vatAmount : null,
-        grossAmount: typeof fields.grossAmount === 'number' ? fields.grossAmount : null,
-        vatRate: typeof fields.vatRate === 'number' ? fields.vatRate : null,
+        netAmount,
+        vatAmount,
+        grossAmount,
+        vatRate,
         currency: (fields.currency as string) || 'EUR',
         isReverseCharge: (fields.isReverseCharge as boolean) || false,
         accountNumber: (fields.accountNumber as string) || null,

@@ -381,9 +381,22 @@ function checkGrossAmount(fields: ExtractedFields, amountClass: AmountClass): Va
 
 function checkMath(fields: ExtractedFields): ValidationCheck {
   const rule = VALIDATION_RULES.MATH_CHECK;
-  const net = toNum(fields.netAmount);
-  const vat = toNum(fields.vatAmount);
-  const gross = toNum(fields.grossAmount);
+  let net = toNum(fields.netAmount);
+  let vat = toNum(fields.vatAmount);
+  let gross = toNum(fields.grossAmount);
+  const rate = toNum(fields.vatRate);
+
+  // Try to derive missing amounts from available data
+  if (gross !== null && rate !== null) {
+    if (net === null) net = Math.round((gross / (1 + rate / 100)) * 100) / 100;
+    if (vat === null) vat = Math.round((gross - net) * 100) / 100;
+  } else if (net !== null && vat !== null && gross === null) {
+    gross = Math.round((net + vat) * 100) / 100;
+  } else if (gross !== null && net !== null && vat === null) {
+    vat = Math.round((gross - net) * 100) / 100;
+  } else if (gross !== null && vat !== null && net === null) {
+    net = Math.round((gross - vat) * 100) / 100;
+  }
 
   if (net === null || vat === null || gross === null) {
     return { rule: rule.id, status: 'YELLOW', message: 'Rechnerische Prüfung nicht möglich (Beträge fehlen)', legalBasis: rule.legalBasis };

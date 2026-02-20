@@ -115,7 +115,7 @@ async function extractFromText(text: string): Promise<ExtractionResult> {
   const parsed = JSON.parse(response.content);
 
   return {
-    fields: parsed.fields || {},
+    fields: normalizeFields(parsed.fields || {}),
     confidenceScores: parsed.confidence || {},
     rawResponse: { model: response.model, usage: response.usage, notes: parsed.notes },
     pipelineStage: 'TEXT_EXTRACTION',
@@ -150,11 +150,38 @@ async function extractFromImage(
   const parsed = JSON.parse(response.content);
 
   return {
-    fields: parsed.fields || {},
+    fields: normalizeFields(parsed.fields || {}),
     confidenceScores: parsed.confidence || {},
     rawResponse: { model: response.model, usage: response.usage, notes: parsed.notes },
     pipelineStage: 'VISION_OCR',
   };
+}
+
+/**
+ * Numerische Felder aus LLM-Antwort normalisieren.
+ * GPT gibt manchmal Zahlen als Strings zurück — hier zwangskonvertieren.
+ */
+const NUMERIC_FIELDS = ['netAmount', 'vatAmount', 'grossAmount', 'vatRate'];
+
+function normalizeFields(fields: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...fields };
+  for (const key of NUMERIC_FIELDS) {
+    const val = normalized[key];
+    if (val === null || val === undefined) continue;
+    if (typeof val === 'number') continue;
+    if (typeof val === 'string') {
+      const cleaned = val.trim();
+      if (!cleaned) { normalized[key] = null; continue; }
+      // Europäisches Format: "1.234,56" → 1234.56
+      if (/^\d{1,3}(\.\d{3})*(,\d{1,2})?$/.test(cleaned)) {
+        normalized[key] = parseFloat(cleaned.replace(/\./g, '').replace(',', '.'));
+        continue;
+      }
+      const num = parseFloat(cleaned.replace(',', '.'));
+      normalized[key] = isNaN(num) ? null : num;
+    }
+  }
+  return normalized;
 }
 
 function computeAverageConfidence(scores: Record<string, number>): number {
