@@ -688,7 +688,7 @@ export async function runValidationAndSync(params: {
         (c) => c.rule === 'DUPLICATE_CHECK' && c.status === 'RED',
       ),
       validationDetails: validationOutput.checks.filter(
-        (c) => c.status !== 'GREEN',
+        (c) => c.status !== 'GREEN' && c.status !== 'GRAY',
       ) as unknown as Prisma.InputJsonValue,
       uidValidationStatus: validationOutput.viesInfo?.checked
         ? validationOutput.viesInfo.valid

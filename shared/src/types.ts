@@ -153,7 +153,7 @@ export interface ValidationResult {
 // Traffic Light & Amount Classes
 // ============================================================
 
-export type TrafficLightStatus = 'GREEN' | 'YELLOW' | 'RED';
+export type TrafficLightStatus = 'GREEN' | 'YELLOW' | 'RED' | 'GRAY';
 export type AmountClass = 'SMALL' | 'STANDARD' | 'LARGE';
 
 // ============================================================

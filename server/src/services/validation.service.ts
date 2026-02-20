@@ -169,7 +169,7 @@ function detectVendorLocation(fields: ExtractedFields): VendorLocation {
 function checkIssuerName(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.ISSUER_NAME;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für diese Betragsklasse`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für diese Betragsklasse`, legalBasis: rule.legalBasis };
   }
   if (!fields.issuerName?.trim()) {
     return { rule: rule.id, status: 'RED', message: `${rule.label} fehlt`, legalBasis: rule.legalBasis };
@@ -180,7 +180,7 @@ function checkIssuerName(fields: ExtractedFields, amountClass: AmountClass): Val
 function checkIssuerAddress(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.ISSUER_ADDRESS;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
   }
   const addr = fields.issuerAddress;
   if (!addr || !addr.street || !addr.zip || !addr.city) {
@@ -199,7 +199,7 @@ function checkIssuerUid(fields: ExtractedFields, amountClass: AmountClass): Vali
   const isEuB2B = vendorLocation.region === 'EU';
 
   if (!isRequiredFor(rule.id, amountClass) && !isEuB2B) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
   }
 
   if (uid) {
@@ -267,7 +267,7 @@ function checkIssuerUid(fields: ExtractedFields, amountClass: AmountClass): Vali
 function checkRecipientName(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.RECIPIENT_NAME;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für diese Betragsklasse`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für diese Betragsklasse`, legalBasis: rule.legalBasis };
   }
   if (!fields.recipientName?.trim()) {
     return { rule: rule.id, status: 'RED', message: `${rule.label} fehlt (erforderlich ab €10.000)`, legalBasis: rule.legalBasis };
@@ -278,7 +278,7 @@ function checkRecipientName(fields: ExtractedFields, amountClass: AmountClass): 
 function checkRecipientUid(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.RECIPIENT_UID;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für diese Betragsklasse`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für diese Betragsklasse`, legalBasis: rule.legalBasis };
   }
   if (!fields.recipientUid?.trim()) {
     return { rule: rule.id, status: 'RED', message: `${rule.label} fehlt (erforderlich ab €10.000)`, legalBasis: rule.legalBasis };
@@ -289,7 +289,7 @@ function checkRecipientUid(fields: ExtractedFields, amountClass: AmountClass): V
 function checkInvoiceNumber(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.INVOICE_NUMBER;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
   }
   if (!fields.invoiceNumber?.trim()) {
     return { rule: rule.id, status: 'RED', message: `${rule.label} fehlt`, legalBasis: rule.legalBasis };
@@ -300,7 +300,7 @@ function checkInvoiceNumber(fields: ExtractedFields, amountClass: AmountClass): 
 function checkInvoiceDate(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.INVOICE_DATE;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich`, legalBasis: rule.legalBasis };
   }
   if (!fields.invoiceDate) {
     return { rule: rule.id, status: 'RED', message: `${rule.label} fehlt`, legalBasis: rule.legalBasis };
@@ -311,7 +311,7 @@ function checkInvoiceDate(fields: ExtractedFields, amountClass: AmountClass): Va
 function checkDeliveryDate(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.DELIVERY_DATE;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
   }
   if (!fields.deliveryDate) {
     return { rule: rule.id, status: 'YELLOW', message: `${rule.label} fehlt — kann das Rechnungsdatum sein`, legalBasis: rule.legalBasis };
@@ -326,7 +326,7 @@ function checkDeliveryDate(fields: ExtractedFields, amountClass: AmountClass): V
 function checkDescription(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.DESCRIPTION;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich`, legalBasis: rule.legalBasis };
   }
   if (!fields.description?.trim()) {
     return { rule: rule.id, status: 'YELLOW', message: `${rule.label} fehlt oder unklar`, legalBasis: rule.legalBasis };
@@ -337,7 +337,7 @@ function checkDescription(fields: ExtractedFields, amountClass: AmountClass): Va
 function checkNetAmount(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.NET_AMOUNT;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
   }
   if (toNum(fields.netAmount) === null) {
     return { rule: rule.id, status: 'RED', message: `${rule.label} fehlt`, legalBasis: rule.legalBasis };
@@ -348,7 +348,7 @@ function checkNetAmount(fields: ExtractedFields, amountClass: AmountClass): Vali
 function checkVatRate(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.VAT_RATE;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich`, legalBasis: rule.legalBasis };
   }
   const rate = toNum(fields.vatRate);
   if (rate === null) {
@@ -360,7 +360,7 @@ function checkVatRate(fields: ExtractedFields, amountClass: AmountClass): Valida
 function checkVatAmount(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.VAT_AMOUNT;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
   }
   if (toNum(fields.vatAmount) === null) {
     return { rule: rule.id, status: 'RED', message: `${rule.label} fehlt`, legalBasis: rule.legalBasis };
@@ -371,7 +371,7 @@ function checkVatAmount(fields: ExtractedFields, amountClass: AmountClass): Vali
 function checkGrossAmount(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
   const rule = VALIDATION_RULES.GROSS_AMOUNT;
   if (!isRequiredFor(rule.id, amountClass)) {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich`, legalBasis: rule.legalBasis };
   }
   if (toNum(fields.grossAmount) === null) {
     return { rule: rule.id, status: 'RED', message: `${rule.label} fehlt`, legalBasis: rule.legalBasis };
@@ -446,7 +446,7 @@ function checkUidSyntax(fields: ExtractedFields, amountClass: AmountClass): Vali
   // Bei EU-Lieferanten immer prüfen (UID bei EU-B2B zwingend)
   const vendorLocation = detectVendorLocation(fields);
   if (!isRequiredFor(rule.id, amountClass) && vendorLocation.region !== 'EU') {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
   }
   if (!uid) {
     return { rule: rule.id, status: 'YELLOW', message: 'Keine UID-Nummer vorhanden', legalBasis: rule.legalBasis };
@@ -519,7 +519,7 @@ function checkReverseCharge(fields: ExtractedFields, amountClass: AmountClass): 
   const rule = VALIDATION_RULES.REVERSE_CHARGE;
   const vendorLoc = detectVendorLocation(fields);
   if (!isRequiredFor(rule.id, amountClass) && vendorLoc.region !== 'EU') {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
   }
 
   if (!fields.isReverseCharge) {
@@ -681,7 +681,7 @@ function checkPlzUidConsistency(fields: ExtractedFields, amountClass: AmountClas
 
   // Bei EU-Lieferanten immer prüfen
   if (!isRequiredFor(rule.id, amountClass) && location.region !== 'EU') {
-    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
+    return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
   }
   const uidCountry = uid && uid.length >= 2 ? uid.substring(0, 2) : null;
 
@@ -836,7 +836,7 @@ async function checkUidVies(
   const vendorLocation = detectVendorLocation(fields);
   if (!isRequiredFor(rule.id, amountClass) && vendorLocation.region !== 'EU') {
     return {
-      check: { rule: rule.id, status: 'GREEN', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis },
+      check: { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis },
       viesInfo: noCheckInfo,
     };
   }

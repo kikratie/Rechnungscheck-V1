@@ -17,7 +17,7 @@ import type { ValidationCheck, TrafficLightStatus } from '@buchungsai/shared';
 import {
   FileText, Upload, Search, X, ChevronLeft, ChevronRight, Loader2,
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
-  ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight,
+  ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight, MinusCircle,
 } from 'lucide-react';
 
 export function InvoicesPage() {
@@ -546,16 +546,23 @@ export function InvoicesPage() {
                           </span>
                         </div>
                         <div className="space-y-1.5">
-                          {(detail.validationResult.checks as ValidationCheck[]).map((check, i) => (
+                          {[...(detail.validationResult.checks as ValidationCheck[])]
+                            .sort((a, b) => {
+                              const order = { RED: 0, YELLOW: 1, GREEN: 2, GRAY: 3 };
+                              return (order[a.status] ?? 2) - (order[b.status] ?? 2);
+                            })
+                            .map((check, i) => (
                             <div
                               key={i}
                               className={`flex items-start gap-2 text-xs rounded p-2 ${
+                                check.status === 'GRAY' ? 'bg-gray-50 border border-gray-100 opacity-60' :
                                 check.status === 'GREEN' ? 'bg-green-50 border border-green-100' :
                                 check.status === 'YELLOW' ? 'bg-yellow-50 border border-yellow-200' :
                                 'bg-red-50 border border-red-200'
                               }`}
                             >
-                              {check.status === 'GREEN' ? <CheckCircle size={13} className="text-green-600 shrink-0 mt-0.5" /> :
+                              {check.status === 'GRAY' ? <MinusCircle size={13} className="text-gray-400 shrink-0 mt-0.5" /> :
+                               check.status === 'GREEN' ? <CheckCircle size={13} className="text-green-600 shrink-0 mt-0.5" /> :
                                check.status === 'YELLOW' ? <AlertTriangle size={13} className="text-yellow-600 shrink-0 mt-0.5" /> :
                                <XCircle size={13} className="text-red-600 shrink-0 mt-0.5" />}
                               <div className="flex-1 min-w-0">
@@ -1370,6 +1377,7 @@ function TrafficLight({ status }: { status: TrafficLightStatus }) {
     GREEN: { bg: 'bg-green-500', ring: 'ring-green-200' },
     YELLOW: { bg: 'bg-yellow-400', ring: 'ring-yellow-200' },
     RED: { bg: 'bg-red-500', ring: 'ring-red-200' },
+    GRAY: { bg: 'bg-gray-400', ring: 'ring-gray-200' },
   };
   const c = config[status] || config.RED;
   return <span className={`inline-block w-3 h-3 rounded-full ${c.bg} ring-2 ${c.ring}`} />;
