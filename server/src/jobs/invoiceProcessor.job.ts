@@ -72,6 +72,20 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
     let grossAmount = parseNumericField(fields.grossAmount);
     const vatRate = parseNumericField(fields.vatRate);
 
+    // Parse vatBreakdown (multi-rate invoices like restaurants: 10% food + 20% drinks)
+    const vatBreakdown = Array.isArray(fields.vatBreakdown) && fields.vatBreakdown.length > 1
+      ? (fields.vatBreakdown as Array<{ rate: number; netAmount: number; vatAmount: number }>)
+      : null;
+
+    // If we have a breakdown, derive totals from it
+    if (vatBreakdown) {
+      const totalNet = Math.round(vatBreakdown.reduce((s, b) => s + b.netAmount, 0) * 100) / 100;
+      const totalVat = Math.round(vatBreakdown.reduce((s, b) => s + b.vatAmount, 0) * 100) / 100;
+      if (netAmount === null) netAmount = totalNet;
+      if (vatAmount === null) vatAmount = totalVat;
+      if (grossAmount === null) grossAmount = Math.round((totalNet + totalVat) * 100) / 100;
+    }
+
     // Derive missing amounts from available data
     if (grossAmount !== null && vatRate !== null) {
       if (netAmount === null) {
@@ -113,6 +127,7 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
         vatAmount,
         grossAmount,
         vatRate,
+        vatBreakdown: vatBreakdown ? (vatBreakdown as unknown as Prisma.InputJsonValue) : undefined,
         currency: (fields.currency as string) || 'EUR',
         isReverseCharge: (fields.isReverseCharge as boolean) || false,
         accountNumber: (fields.accountNumber as string) || null,

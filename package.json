@@ -15,7 +15,7 @@
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "db:migrate": "npm run db:migrate -w server",
     "db:seed": "npm run db:seed -w server",
-    "db:clean": "docker exec buchungsai-db psql -U postgres -d buchungsai -c \"DELETE FROM matchings; DELETE FROM validation_results; DELETE FROM extracted_data; DELETE FROM audit_logs; DELETE FROM invoices; DELETE FROM vendors; SELECT 'Alles gelöscht — bereit für frische Tests.' AS status;\"",
+    "db:clean": "docker exec buchungsai-postgres psql -U buchungsai -d buchungsai -c \"DELETE FROM matchings; DELETE FROM validation_results; DELETE FROM extracted_data; DELETE FROM audit_logs; DELETE FROM invoices; DELETE FROM vendors; DELETE FROM bank_statements; DELETE FROM bank_transactions; SELECT 'Alles gelöscht — bereit für frische Tests.' AS status;\"",
     "db:studio": "npm run db:studio -w server",
     "screenshot": "powershell -ExecutionPolicy Bypass -File screenshots/save-clip.ps1",
     "docker:up": "docker compose up -d",

@@ -57,7 +57,8 @@ async function extractPdf(fileBuffer: Buffer): Promise<ExtractionResult> {
   // Stage 2: Scan-PDF — render first page to PNG with mupdf, then Vision OCR
   console.log('PDF hat keinen Text — rendere als Bild mit mupdf...');
   const pngBuffer = await renderPdfPageToPng(fileBuffer);
-  return await extractWithVision(pngBuffer, 'image/png', pngBuffer);
+  // Pass partial text layer for IBAN cross-check (even short text may contain an IBAN)
+  return await extractWithVision(pngBuffer, 'image/png', pngBuffer, extractedText || undefined);
 }
 
 async function renderPdfPageToPng(pdfBuffer: Buffer): Promise<Buffer> {
@@ -78,6 +79,7 @@ async function extractWithVision(
   visionBuffer: Buffer,
   visionMime: string,
   originalBuffer: Buffer,
+  pdfTextLayer?: string,
 ): Promise<ExtractionResult> {
   const result = await extractFromImage(visionBuffer, visionMime);
 
@@ -94,10 +96,27 @@ async function extractWithVision(
       const retryResult = await extractFromImage(enhanced, 'image/png');
       const retryAvg = computeAverageConfidence(retryResult.confidenceScores);
       if (retryAvg > avgConfidence) {
+        // Cross-check IBAN from text layer if available
+        if (pdfTextLayer) {
+          const corrected = crossCheckIban(retryResult.fields.issuerIban as string | null, pdfTextLayer);
+          if (corrected && corrected !== retryResult.fields.issuerIban) {
+            console.log(`IBAN korrigiert (enhanced): LLM="${retryResult.fields.issuerIban}" → Regex="${corrected}"`);
+            retryResult.fields.issuerIban = corrected;
+          }
+        }
         return { ...retryResult, pipelineStage: 'VISION_OCR_ENHANCED' };
       }
     } catch {
       // Enhancement failed, return original result
+    }
+  }
+
+  // Cross-check IBAN from text layer if available
+  if (pdfTextLayer) {
+    const corrected = crossCheckIban(result.fields.issuerIban as string | null, pdfTextLayer);
+    if (corrected && corrected !== result.fields.issuerIban) {
+      console.log(`IBAN korrigiert (vision): LLM="${result.fields.issuerIban}" → Regex="${corrected}"`);
+      result.fields.issuerIban = corrected;
     }
   }
 
@@ -113,9 +132,17 @@ async function extractFromText(text: string): Promise<ExtractionResult> {
   });
 
   const parsed = JSON.parse(response.content);
+  const fields = normalizeFields(parsed.fields || {});
+
+  // Cross-check IBAN: if LLM extracted one that fails Mod-97, try regex from text
+  const correctedIban = crossCheckIban(fields.issuerIban as string | null, text);
+  if (correctedIban && correctedIban !== fields.issuerIban) {
+    console.log(`IBAN korrigiert: LLM="${fields.issuerIban}" → Regex="${correctedIban}"`);
+    fields.issuerIban = correctedIban;
+  }
 
   return {
-    fields: normalizeFields(parsed.fields || {}),
+    fields,
     confidenceScores: parsed.confidence || {},
     rawResponse: { model: response.model, usage: response.usage, notes: parsed.notes },
     pipelineStage: 'TEXT_EXTRACTION',
@@ -181,7 +208,132 @@ function normalizeFields(fields: Record<string, unknown>): Record<string, unknow
       normalized[key] = isNaN(num) ? null : num;
     }
   }
+
+  // Normalize IBAN: strip spaces, uppercase
+  if (typeof normalized.issuerIban === 'string') {
+    normalized.issuerIban = normalized.issuerIban.replace(/\s/g, '').toUpperCase();
+  }
+
+  // Normalize vatBreakdown: ensure all numbers, derive totals
+  if (Array.isArray(normalized.vatBreakdown) && normalized.vatBreakdown.length > 0) {
+    const breakdown = (normalized.vatBreakdown as Array<Record<string, unknown>>)
+      .map((item) => ({
+        rate: typeof item.rate === 'string' ? parseFloat(item.rate) : (item.rate as number),
+        netAmount: typeof item.netAmount === 'string' ? parseFloat(item.netAmount) : (item.netAmount as number),
+        vatAmount: typeof item.vatAmount === 'string' ? parseFloat(item.vatAmount) : (item.vatAmount as number),
+      }))
+      .filter((item) => !isNaN(item.rate) && !isNaN(item.netAmount) && !isNaN(item.vatAmount));
+
+    if (breakdown.length > 1) {
+      normalized.vatBreakdown = breakdown;
+      // Derive totals from breakdown
+      const totalNet = Math.round(breakdown.reduce((s, b) => s + b.netAmount, 0) * 100) / 100;
+      const totalVat = Math.round(breakdown.reduce((s, b) => s + b.vatAmount, 0) * 100) / 100;
+      if (normalized.netAmount === null || normalized.netAmount === undefined) {
+        normalized.netAmount = totalNet;
+      }
+      if (normalized.vatAmount === null || normalized.vatAmount === undefined) {
+        normalized.vatAmount = totalVat;
+      }
+      // Mixed rates → set vatRate to null
+      normalized.vatRate = null;
+    } else if (breakdown.length === 1) {
+      // Single entry → convert to flat fields, drop breakdown
+      normalized.vatRate = breakdown[0].rate;
+      if (normalized.netAmount === null || normalized.netAmount === undefined) {
+        normalized.netAmount = breakdown[0].netAmount;
+      }
+      if (normalized.vatAmount === null || normalized.vatAmount === undefined) {
+        normalized.vatAmount = breakdown[0].vatAmount;
+      }
+      delete normalized.vatBreakdown;
+    } else {
+      delete normalized.vatBreakdown;
+    }
+  }
+
   return normalized;
+}
+
+// --- IBAN validation & cross-check helpers ---
+
+/**
+ * ISO 13616 Mod-97 check: returns true if the IBAN checksum is valid.
+ */
+function validateIbanMod97(ibanClean: string): boolean {
+  const rearranged = ibanClean.substring(4) + ibanClean.substring(0, 4);
+  let numericStr = '';
+  for (const ch of rearranged) {
+    const code = ch.charCodeAt(0);
+    if (code >= 65 && code <= 90) {
+      numericStr += (code - 55).toString();
+    } else {
+      numericStr += ch;
+    }
+  }
+  try {
+    return BigInt(numericStr) % 97n === 1n;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Extract all IBAN candidates from raw text using regex.
+ * Matches patterns like "AT42 2011 1824 5416 4200" or "AT4220111824541642000".
+ */
+function extractIbansFromText(text: string): string[] {
+  // Match country code (2 letters) + check digits (2 digits) + BBAN (groups of alphanums)
+  // IBANs in text often have spaces every 4 chars
+  const ibanRegex = /\b([A-Z]{2}\d{2})\s*(\d{4})\s*(\d{4})\s*(\d{4})\s*(\d{4})\s*(\d{0,4})\b/g;
+  const candidates: string[] = [];
+  let match;
+  while ((match = ibanRegex.exec(text)) !== null) {
+    const iban = match.slice(1).join('').replace(/\s/g, '');
+    if (iban.length >= 16 && iban.length <= 34) {
+      candidates.push(iban);
+    }
+  }
+  // Also try fully concatenated IBANs (no spaces)
+  const compactRegex = /\b([A-Z]{2}\d{14,30})\b/g;
+  while ((match = compactRegex.exec(text)) !== null) {
+    const iban = match[1];
+    if (!candidates.includes(iban) && iban.length >= 16 && iban.length <= 34) {
+      candidates.push(iban);
+    }
+  }
+  return candidates;
+}
+
+/**
+ * Cross-check the LLM-extracted IBAN against IBANs found via regex in the text.
+ * If the LLM IBAN fails Mod-97 but a regex candidate passes, return the regex one.
+ * If the LLM IBAN passes Mod-97, keep it.
+ */
+function crossCheckIban(llmIban: string | null, rawText: string): string | null {
+  if (!rawText) return llmIban;
+
+  const llmClean = llmIban?.replace(/\s/g, '').toUpperCase() || '';
+
+  // If LLM IBAN passes Mod-97, it's correct
+  if (llmClean && validateIbanMod97(llmClean)) {
+    return llmClean;
+  }
+
+  // LLM IBAN is missing or fails Mod-97 — try regex extraction
+  const candidates = extractIbansFromText(rawText);
+  const validCandidates = candidates.filter(c => validateIbanMod97(c));
+
+  if (validCandidates.length === 0) return llmIban;
+
+  // If LLM had a specific country prefix, prefer a candidate with the same prefix
+  if (llmClean.length >= 2) {
+    const sameCountry = validCandidates.find(c => c.startsWith(llmClean.substring(0, 2)));
+    if (sameCountry) return sameCountry;
+  }
+
+  // Return first valid candidate
+  return validCandidates[0];
 }
 
 function computeAverageConfidence(scores: Record<string, number>): number {

@@ -83,6 +83,8 @@ AUSSTELLER (wer stellt die Rechnung):
 - issuerAddress: { street, zip, city, country } des Ausstellers
 - issuerEmail: E-Mail des Ausstellers (falls vorhanden)
 - issuerIban: IBAN des Ausstellers (= Zahlungsempfänger, oft in Fußzeile oder Zahlungsinformation)
+  IBAN GENAU transkribieren! Jede einzelne Ziffer zählt. Lies die IBAN Zeichen für Zeichen ab.
+  Typisches Format: AT## #### #### #### #### (AT + 2 Prüfziffern + 16 Ziffern). Gib die IBAN OHNE Leerzeichen zurück.
 
 EMPFÄNGER (wer erhält die Rechnung):
 - recipientName: Name/Firma des Empfängers (Adressfeld)
@@ -98,10 +100,15 @@ RECHNUNGSDATEN:
 - description: Kurze Leistungsbeschreibung
 
 BETRÄGE (WICHTIG — immer als JSON-Number, NIEMALS als String!):
-- netAmount: Nettobetrag als JSON-Number (z.B. 1234.56, NICHT "1234.56")
-- vatAmount: USt-Betrag als JSON-Number (z.B. 246.91, NICHT "246.91")
+- netAmount: Gesamter Nettobetrag als JSON-Number (z.B. 1234.56, NICHT "1234.56")
+- vatAmount: Gesamter USt-Betrag als JSON-Number (z.B. 246.91, NICHT "246.91")
 - grossAmount: Bruttobetrag als JSON-Number (z.B. 1481.47, NICHT "1481.47")
-- vatRate: Steuersatz als JSON-Number (z.B. 20, NICHT "20")
+- vatRate: Steuersatz als JSON-Number (z.B. 20). NUR setzen wenn die gesamte Rechnung EINEN einzigen USt-Satz hat. Auf null setzen bei gemischten Sätzen.
+- vatBreakdown: NUR bei MEHREREN USt-Sätzen auf einer Rechnung (z.B. Gastronomie: 10% Speisen + 20% Getränke).
+  Array von Objekten: [{"rate": 10, "netAmount": 45.00, "vatAmount": 4.50}, {"rate": 20, "netAmount": 20.00, "vatAmount": 4.00}]
+  Jeder Eintrag enthält: rate (Steuersatz), netAmount (Netto dieses Satzes), vatAmount (USt dieses Satzes).
+  Die Summe aller netAmount + vatAmount muss den grossAmount ergeben.
+  Bei NUR einem USt-Satz: vatBreakdown WEGLASSEN und stattdessen vatRate als Einzelwert setzen.
 - currency: Währung (ISO 4217, Default EUR)
 Dezimaltrennzeichen ist PUNKT (1234.56), nicht Komma. Alle Beträge als reine Zahlen ohne Währungszeichen.
 

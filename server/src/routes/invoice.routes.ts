@@ -36,7 +36,12 @@ router.get('/', async (req, res, next) => {
       ];
     }
 
-    const sortBy = (req.query.sortBy as string) || 'createdAt';
+    const ALLOWED_SORT_COLUMNS = new Set([
+      'belegNr', 'vendorName', 'invoiceNumber', 'invoiceDate',
+      'grossAmount', 'validationStatus', 'processingStatus', 'createdAt',
+    ]);
+    const requestedSort = req.query.sortBy as string;
+    const sortBy = ALLOWED_SORT_COLUMNS.has(requestedSort) ? requestedSort : 'belegNr';
     const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
 
     const [invoices, total] = await Promise.all([

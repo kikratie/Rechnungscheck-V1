@@ -150,6 +150,7 @@ export interface InvoiceDetail extends InvoiceListItem {
   netAmount: string | null;
   vatAmount: string | null;
   vatRate: string | null;
+  vatBreakdown: Array<{ rate: number; netAmount: number; vatAmount: number }> | null;
   accountNumber: string | null;
   costCenter: string | null;
   category: string | null;

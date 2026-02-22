@@ -18,11 +18,12 @@ import {
   FileText, Upload, Search, X, ChevronLeft, ChevronRight, Loader2,
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
   ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight, MinusCircle,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from 'lucide-react';
 
 export function InvoicesPage() {
   const queryClient = useQueryClient();
-  const [filters, setFilters] = useState<InvoiceFilters>({ page: 1, limit: 20 });
+  const [filters, setFilters] = useState<InvoiceFilters>({ page: 1, limit: 20, sortBy: 'belegNr', sortOrder: 'desc' });
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(false);
@@ -78,6 +79,18 @@ export function InvoicesPage() {
 
   function handleFilterChange(key: string, value: string) {
     setFilters((f) => ({ ...f, [key]: value || undefined, page: 1 }));
+  }
+
+  function handleSort(column: string) {
+    setFilters((f) => {
+      if (f.sortBy === column) {
+        // Toggle direction, or reset if already desc→asc
+        return { ...f, sortOrder: f.sortOrder === 'desc' ? 'asc' : 'desc', page: 1 };
+      }
+      // New column: default desc for numeric/date, asc for text
+      const textColumns = ['vendorName', 'invoiceNumber'];
+      return { ...f, sortBy: column, sortOrder: textColumns.includes(column) ? 'asc' : 'desc', page: 1 };
+    });
   }
 
   function startEdit() {
@@ -286,14 +299,14 @@ export function InvoicesPage() {
                         title="Alle genehmigbaren auswählen"
                       />
                     </th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600 w-[80px]">Beleg-Nr.</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Lieferant</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Rechnungsnr.</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Datum</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-600">Betrag</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-600">Validierung</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-600">Status</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-600"></th>
+                    <SortHeader label="Beleg-Nr." column="belegNr" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} />
+                    <SortHeader label="Lieferant" column="vendorName" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} />
+                    <SortHeader label="Rechnungsnr." column="invoiceNumber" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} />
+                    <SortHeader label="Datum" column="invoiceDate" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} />
+                    <SortHeader label="Betrag" column="grossAmount" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} align="right" />
+                    <SortHeader label="Validierung" column="validationStatus" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} align="center" />
+                    <SortHeader label="Status" column="processingStatus" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} align="center" />
+                    <th className="px-4 py-3 w-[40px]"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -321,17 +334,27 @@ export function InvoicesPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="font-medium text-gray-900 truncate max-w-[200px]">
-                          {inv.vendorName || inv.originalFileName}
-                        </div>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          {inv.vendorName && (
-                            <span className="text-xs text-gray-400 truncate max-w-[160px]">{inv.originalFileName}</span>
-                          )}
-                          {(inv as unknown as { documentType?: string }).documentType === 'ERSATZBELEG' && (
-                            <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>
-                          )}
-                        </div>
+                        {inv.vendorName ? (
+                          <>
+                            <div className="font-medium text-gray-900 truncate max-w-[200px]">{inv.vendorName}</div>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-xs text-gray-400 truncate max-w-[160px]">{inv.originalFileName}</span>
+                              {(inv as unknown as { documentType?: string }).documentType === 'ERSATZBELEG' && (
+                                <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-gray-400 truncate max-w-[200px] italic text-xs">{inv.originalFileName}</div>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-[10px] text-gray-300">Lieferant wird erkannt...</span>
+                              {(inv as unknown as { documentType?: string }).documentType === 'ERSATZBELEG' && (
+                                <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-600">{inv.invoiceNumber || '—'}</td>
                       <td className="px-4 py-3 text-gray-600">{inv.invoiceDate ? formatDate(inv.invoiceDate) : '—'}</td>
@@ -509,8 +532,27 @@ export function InvoicesPage() {
                     <div className="border-t pt-4">
                       <h3 className="font-medium text-gray-900 mb-2">Beträge</h3>
                       <dl className="space-y-1">
-                        <DetailRow label="Netto" value={detail.netAmount ? formatCurrency(detail.netAmount) : null} />
-                        <DetailRow label={`USt (${detail.vatRate ?? '?'}%)`} value={detail.vatAmount ? formatCurrency(detail.vatAmount) : null} />
+                        {Array.isArray(detail.vatBreakdown) && detail.vatBreakdown.length > 1 ? (
+                          <>
+                            {(detail.vatBreakdown as Array<{ rate: number; netAmount: number; vatAmount: number }>).map((line, i) => (
+                              <div key={i} className="flex justify-between text-sm">
+                                <dt className="text-gray-500">Netto ({line.rate}%)</dt>
+                                <dd className="flex gap-4">
+                                  <span>{formatCurrency(line.netAmount)}</span>
+                                  <span className="text-gray-400">USt {formatCurrency(line.vatAmount)}</span>
+                                </dd>
+                              </div>
+                            ))}
+                            <div className="border-t border-dashed my-1" />
+                            <DetailRow label="Netto gesamt" value={detail.netAmount ? formatCurrency(detail.netAmount) : null} />
+                            <DetailRow label="USt gesamt" value={detail.vatAmount ? formatCurrency(detail.vatAmount) : null} />
+                          </>
+                        ) : (
+                          <>
+                            <DetailRow label="Netto" value={detail.netAmount ? formatCurrency(detail.netAmount) : null} />
+                            <DetailRow label={`USt (${detail.vatRate ?? '?'}%)`} value={detail.vatAmount ? formatCurrency(detail.vatAmount) : null} />
+                          </>
+                        )}
                         <div className="flex justify-between font-semibold pt-1">
                           <dt>Brutto</dt>
                           <dd>{detail.grossAmount ? formatCurrency(detail.grossAmount) : '—'}</dd>
@@ -1431,8 +1473,33 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function formatCurrency(value: string): string {
-  const num = parseFloat(value);
+function formatCurrency(value: string | number): string {
+  const num = typeof value === 'number' ? value : parseFloat(value);
   if (isNaN(num)) return '—';
   return num.toLocaleString('de-AT', { style: 'currency', currency: 'EUR' });
+}
+
+function SortHeader({
+  label, column, currentSort, currentOrder, onSort, align = 'left',
+}: {
+  label: string; column: string; currentSort?: string; currentOrder?: string;
+  onSort: (column: string) => void; align?: 'left' | 'right' | 'center';
+}) {
+  const isActive = currentSort === column;
+  const alignClass = align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start';
+  return (
+    <th
+      className={`px-4 py-3 font-medium text-gray-600 cursor-pointer select-none hover:bg-gray-100 transition-colors group`}
+      onClick={() => onSort(column)}
+    >
+      <div className={`flex items-center gap-1 ${alignClass}`}>
+        <span>{label}</span>
+        {isActive ? (
+          currentOrder === 'asc' ? <ArrowUp size={14} className="text-primary-600" /> : <ArrowDown size={14} className="text-primary-600" />
+        ) : (
+          <ArrowUpDown size={14} className="text-gray-300 group-hover:text-gray-400" />
+        )}
+      </div>
+    </th>
+  );
 }

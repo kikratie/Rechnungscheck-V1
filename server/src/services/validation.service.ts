@@ -18,6 +18,7 @@ interface ExtractedFields {
   vatAmount: number | Prisma.Decimal | null;
   grossAmount: number | Prisma.Decimal | null;
   vatRate: number | Prisma.Decimal | null;
+  vatBreakdown?: Array<{ rate: number; netAmount: number; vatAmount: number }> | null;
   isReverseCharge: boolean;
   issuerIban: string | null;
   issuerEmail?: string | null;
@@ -350,6 +351,11 @@ function checkVatRate(fields: ExtractedFields, amountClass: AmountClass): Valida
   if (!isRequiredFor(rule.id, amountClass)) {
     return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich`, legalBasis: rule.legalBasis };
   }
+  // Multi-rate: show all rates
+  if (fields.vatBreakdown && fields.vatBreakdown.length > 1) {
+    const rates = fields.vatBreakdown.map(b => b.rate);
+    return { rule: rule.id, status: 'GREEN', message: `${rule.label}: ${rates.join('% + ')}% (aufgeteilt)`, legalBasis: rule.legalBasis };
+  }
   const rate = toNum(fields.vatRate);
   if (rate === null) {
     return { rule: rule.id, status: 'RED', message: `${rule.label} fehlt`, legalBasis: rule.legalBasis };
@@ -381,6 +387,61 @@ function checkGrossAmount(fields: ExtractedFields, amountClass: AmountClass): Va
 
 function checkMath(fields: ExtractedFields): ValidationCheck {
   const rule = VALIDATION_RULES.MATH_CHECK;
+  const TOLERANCE = 0.02;
+
+  // Multi-rate breakdown: validate each line and totals
+  if (fields.vatBreakdown && fields.vatBreakdown.length > 1) {
+    const gross = toNum(fields.grossAmount);
+    if (gross === null) {
+      return { rule: rule.id, status: 'YELLOW', message: 'Rechnerische Prüfung nicht möglich (Bruttobetrag fehlt)', legalBasis: rule.legalBasis };
+    }
+
+    let totalNet = 0;
+    let totalVat = 0;
+    const lineDetails: string[] = [];
+
+    for (const item of fields.vatBreakdown) {
+      const lineNet = item.netAmount;
+      const lineVat = item.vatAmount;
+      totalNet += lineNet;
+      totalVat += lineVat;
+
+      // Check per-line math: net * rate/100 ≈ vat
+      const expectedVat = Math.round((lineNet * item.rate / 100) * 100) / 100;
+      const lineDiff = Math.abs(expectedVat - lineVat);
+      if (lineDiff > TOLERANCE) {
+        return {
+          rule: rule.id, status: 'RED',
+          message: `USt-Rechenfehler bei ${item.rate}%: ${lineNet} × ${item.rate}% = ${expectedVat}, aber USt ist ${lineVat}`,
+          legalBasis: rule.legalBasis,
+          details: { breakdown: fields.vatBreakdown, gross },
+        };
+      }
+      lineDetails.push(`${item.rate}%: ${lineNet} + ${lineVat}`);
+    }
+
+    totalNet = Math.round(totalNet * 100) / 100;
+    totalVat = Math.round(totalVat * 100) / 100;
+    const calculated = Math.round((totalNet + totalVat) * 100) / 100;
+    const diff = Math.abs(calculated - gross);
+
+    if (diff <= TOLERANCE) {
+      return {
+        rule: rule.id, status: 'GREEN',
+        message: `USt-Aufschlüsselung korrekt: ${lineDetails.join(' | ')} = ${gross} ✓`,
+        legalBasis: rule.legalBasis,
+      };
+    }
+
+    return {
+      rule: rule.id, status: 'RED',
+      message: `Rechenfehler bei USt-Aufschlüsselung: Summe ${calculated} ≠ Brutto ${gross} (Differenz: ${diff.toFixed(2)}€)`,
+      legalBasis: rule.legalBasis,
+      details: { breakdown: fields.vatBreakdown, totalNet, totalVat, gross, calculated, diff },
+    };
+  }
+
+  // Single-rate: existing logic
   let net = toNum(fields.netAmount);
   let vat = toNum(fields.vatAmount);
   let gross = toNum(fields.grossAmount);
@@ -404,7 +465,6 @@ function checkMath(fields: ExtractedFields): ValidationCheck {
 
   const calculated = Math.round((net + vat) * 100) / 100;
   const diff = Math.abs(calculated - gross);
-  const TOLERANCE = 0.02;
 
   if (diff <= TOLERANCE) {
     return { rule: rule.id, status: 'GREEN', message: `Netto (${net}) + USt (${vat}) = Brutto (${gross}) ✓`, legalBasis: rule.legalBasis };
@@ -421,6 +481,23 @@ function checkMath(fields: ExtractedFields): ValidationCheck {
 
 function checkVatRateValid(fields: ExtractedFields): ValidationCheck {
   const rule = VALIDATION_RULES.VAT_RATE_VALID;
+
+  // Multi-rate: validate each rate in the breakdown
+  if (fields.vatBreakdown && fields.vatBreakdown.length > 1) {
+    const invalidRates = fields.vatBreakdown
+      .filter(b => !(VAT_RATE_VALUES as readonly number[]).includes(b.rate))
+      .map(b => b.rate);
+    if (invalidRates.length > 0) {
+      return {
+        rule: rule.id, status: 'RED',
+        message: `Ungültige Steuersätze: ${invalidRates.join('%, ')}% (erlaubt: 20%, 13%, 10%, 0%)`,
+        legalBasis: rule.legalBasis,
+      };
+    }
+    const rates = fields.vatBreakdown.map(b => b.rate);
+    return { rule: rule.id, status: 'GREEN', message: `Steuersätze ${rates.join('% + ')}% sind gültig`, legalBasis: rule.legalBasis };
+  }
+
   const rate = toNum(fields.vatRate);
 
   if (rate === null) {

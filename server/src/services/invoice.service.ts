@@ -5,7 +5,7 @@ import * as storageService from './storage.service.js';
 import { validateInvoice } from './validation.service.js';
 import { writeAuditLog } from '../middleware/auditLogger.js';
 import { ConflictError, NotFoundError } from '../utils/errors.js';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 interface UploadParams {
   tenantId: string;
@@ -172,6 +172,7 @@ export async function updateExtractedData(params: UpdateExtractedDataParams) {
       vatAmount: data.vatAmount as number ?? (latestVersion?.vatAmount ? Number(latestVersion.vatAmount) : null),
       grossAmount: data.grossAmount as number ?? (latestVersion?.grossAmount ? Number(latestVersion.grossAmount) : null),
       vatRate: data.vatRate as number ?? (latestVersion?.vatRate ? Number(latestVersion.vatRate) : null),
+      vatBreakdown: (data.vatBreakdown ?? latestVersion?.vatBreakdown ?? undefined) as Prisma.InputJsonValue | undefined,
       currency: data.currency as string ?? latestVersion?.currency ?? 'EUR',
       isReverseCharge: data.isReverseCharge as boolean ?? latestVersion?.isReverseCharge ?? false,
       accountNumber: data.accountNumber as string ?? latestVersion?.accountNumber ?? null,
@@ -425,6 +426,7 @@ export async function createErsatzbeleg(params: CreateErsatzbelegParams) {
       vatAmount: vatAmount!,
       grossAmount: data.grossAmount,
       vatRate,
+      vatBreakdown: null,
       isReverseCharge: false,
       accountNumber: data.accountNumber || null,
       costCenter: null,
@@ -585,6 +587,7 @@ interface ExtractedDataRecord {
   vatAmount: Prisma.Decimal | number | null;
   grossAmount: Prisma.Decimal | number | null;
   vatRate: Prisma.Decimal | number | null;
+  vatBreakdown: unknown;
   isReverseCharge: boolean;
   accountNumber: string | null;
   costCenter: string | null;
@@ -616,6 +619,7 @@ export async function runValidationAndSync(params: {
       vatAmount: extracted.vatAmount ? Number(extracted.vatAmount) : null,
       grossAmount: extracted.grossAmount ? Number(extracted.grossAmount) : null,
       vatRate: extracted.vatRate ? Number(extracted.vatRate) : null,
+      vatBreakdown: extracted.vatBreakdown as Array<{ rate: number; netAmount: number; vatAmount: number }> | null,
       isReverseCharge: extracted.isReverseCharge,
       issuerIban: extracted.issuerIban,
       issuerEmail: extracted.issuerEmail,
@@ -673,6 +677,7 @@ export async function runValidationAndSync(params: {
       vatAmount: extracted.vatAmount,
       grossAmount: extracted.grossAmount,
       vatRate: extracted.vatRate,
+      vatBreakdown: extracted.vatBreakdown ? (extracted.vatBreakdown as Prisma.InputJsonValue) : Prisma.DbNull,
       isReverseCharge: extracted.isReverseCharge,
       recipientUid: extracted.recipientUid,
       issuerEmail: extracted.issuerEmail,
