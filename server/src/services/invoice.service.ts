@@ -4,6 +4,7 @@ import { invoiceQueue } from '../jobs/queue.js';
 import * as storageService from './storage.service.js';
 import { validateInvoice } from './validation.service.js';
 import { toEurEstimate } from './exchangeRate.service.js';
+import { archiveInvoice, batchArchiveInvoices } from './archival.service.js';
 import { writeAuditLog } from '../middleware/auditLogger.js';
 import { ConflictError, NotFoundError } from '../utils/errors.js';
 import { Prisma } from '@prisma/client';
@@ -12,6 +13,7 @@ interface UploadParams {
   tenantId: string;
   userId: string;
   file: Express.Multer.File;
+  direction?: 'INCOMING' | 'OUTGOING';
 }
 
 interface UpdateExtractedDataParams {
@@ -43,7 +45,7 @@ interface CreateErsatzbelegParams {
 }
 
 export async function uploadInvoice(params: UploadParams) {
-  const { tenantId, userId, file } = params;
+  const { tenantId, userId, file, direction = 'INCOMING' } = params;
 
   // Compute file hash
   const hash = crypto.createHash('sha256').update(file.buffer).digest('hex');
@@ -63,7 +65,7 @@ export async function uploadInvoice(params: UploadParams) {
   // Generate storage path
   const ext = file.originalname.split('.').pop() || 'bin';
   const fileId = crypto.randomUUID();
-  const storagePath = `${tenantId}/invoices/${fileId}.${ext}`;
+  const storagePath = `${tenantId}/temp/${fileId}.${ext}`;
 
   // Upload to S3
   await storageService.uploadFile(storagePath, file.buffer, file.mimetype);
@@ -84,6 +86,7 @@ export async function uploadInvoice(params: UploadParams) {
         data: {
           tenantId,
           belegNr: nextBelegNr,
+          direction,
           originalFileName: file.originalname,
           storagePath,
           storageHash: hash,
@@ -113,6 +116,7 @@ export async function uploadInvoice(params: UploadParams) {
     tenantId,
     storagePath,
     mimeType: file.mimetype,
+    direction,
   });
 
   // Audit log (fire-and-forget)
@@ -189,6 +193,7 @@ export async function updateExtractedData(params: UpdateExtractedDataParams) {
     tenantId,
     extracted: extractedData,
     extractedDataVersion: newVersion,
+    direction: (invoice.direction as 'INCOMING' | 'OUTGOING') || 'INCOMING',
   });
 
   // Audit log
@@ -213,9 +218,9 @@ export async function revalidateAll(tenantId: string): Promise<{ total: number; 
   const invoices = await prisma.invoice.findMany({
     where: {
       tenantId,
-      processingStatus: { in: ['PROCESSED', 'REVIEW_REQUIRED', 'APPROVED', 'EXPORTED'] },
+      processingStatus: { in: ['PROCESSED', 'REVIEW_REQUIRED', 'ARCHIVED', 'RECONCILED', 'EXPORTED'] },
     },
-    select: { id: true, belegNr: true },
+    select: { id: true, belegNr: true, direction: true },
   });
 
   let updated = 0;
@@ -236,6 +241,7 @@ export async function revalidateAll(tenantId: string): Promise<{ total: number; 
         tenantId,
         extracted: latestEd,
         extractedDataVersion: latestEd.version,
+        direction: (inv.direction as 'INCOMING' | 'OUTGOING') || 'INCOMING',
       });
 
       updated++;
@@ -247,26 +253,13 @@ export async function revalidateAll(tenantId: string): Promise<{ total: number; 
   return { total: invoices.length, updated, errors };
 }
 
-export async function approveInvoice(tenantId: string, userId: string, invoiceId: string) {
-  const invoice = await prisma.invoice.findFirst({
-    where: { id: invoiceId, tenantId },
-  });
-  if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
+export async function approveInvoice(tenantId: string, userId: string, invoiceId: string, comment?: string | null) {
+  // Approval now triggers full archival workflow:
+  // sequential number → stamp PDF → move to archive/ → lock
+  await archiveInvoice(tenantId, userId, invoiceId, comment);
 
-  const updated = await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: { processingStatus: 'APPROVED' },
-  });
-
-  writeAuditLog({
-    tenantId,
-    userId,
-    entityType: 'Invoice',
-    entityId: invoiceId,
-    action: 'APPROVE',
-  });
-
-  return updated;
+  // Return the updated invoice for the API response
+  return prisma.invoice.findFirst({ where: { id: invoiceId, tenantId } });
 }
 
 export async function rejectInvoice(tenantId: string, userId: string, invoiceId: string, reason: string) {
@@ -336,11 +329,12 @@ export async function createErsatzbeleg(params: CreateErsatzbelegParams) {
     });
     const nextBelegNr = (lastInvoice?.belegNr ?? 0) + 1;
 
-    // 1. Create the Ersatzbeleg invoice
+    // 1. Create the Ersatzbeleg invoice (inherits direction from original)
     const ersatzbeleg = await tx.invoice.create({
       data: {
         tenantId,
         belegNr: nextBelegNr,
+        direction: original.direction,
         documentType: 'ERSATZBELEG',
         ingestionChannel: 'UPLOAD',
         originalFileName: `Ersatzbeleg_BEL-${String(original.belegNr).padStart(3, '0')}.pdf`,
@@ -409,6 +403,7 @@ export async function createErsatzbeleg(params: CreateErsatzbelegParams) {
   await runValidationAndSync({
     invoiceId: result.id,
     tenantId,
+    direction: (original.direction as 'INCOMING' | 'OUTGOING') || 'INCOMING',
     extracted: {
       issuerName: data.issuerName,
       issuerUid: data.issuerUid || null,
@@ -458,50 +453,11 @@ export async function batchApproveInvoices(
   tenantId: string,
   userId: string,
   invoiceIds: string[],
-): Promise<{ approved: number; skipped: string[] }> {
-  // Fetch all invoices that belong to tenant
-  const invoices = await prisma.invoice.findMany({
-    where: { id: { in: invoiceIds }, tenantId },
-    select: { id: true, processingStatus: true, belegNr: true },
-  });
-
-  const foundIds = new Set(invoices.map((i) => i.id));
-  const skipped: string[] = [];
-  const toApprove: string[] = [];
-
-  for (const id of invoiceIds) {
-    if (!foundIds.has(id)) {
-      skipped.push(id);
-      continue;
-    }
-    const inv = invoices.find((i) => i.id === id)!;
-    if (inv.processingStatus === 'PROCESSED' || inv.processingStatus === 'REVIEW_REQUIRED') {
-      toApprove.push(inv.id);
-    } else {
-      skipped.push(`BEL-${String(inv.belegNr).padStart(3, '0')} (${inv.processingStatus})`);
-    }
-  }
-
-  if (toApprove.length > 0) {
-    await prisma.invoice.updateMany({
-      where: { id: { in: toApprove } },
-      data: { processingStatus: 'APPROVED' },
-    });
-
-    // Audit log per invoice
-    for (const id of toApprove) {
-      writeAuditLog({
-        tenantId,
-        userId,
-        entityType: 'Invoice',
-        entityId: id,
-        action: 'APPROVE',
-        metadata: { trigger: 'BATCH', batchSize: toApprove.length },
-      });
-    }
-  }
-
-  return { approved: toApprove.length, skipped };
+  comment?: string | null,
+) {
+  // Batch approval now triggers full archival workflow for all invoices
+  // (sequential numbering, PDF stamp, archive move, lock — in one transaction)
+  return batchArchiveInvoices(tenantId, userId, invoiceIds, comment);
 }
 
 export async function getInvoiceVersions(tenantId: string, invoiceId: string) {
@@ -601,8 +557,9 @@ export async function runValidationAndSync(params: {
   tenantId: string;
   extracted: ExtractedDataRecord;
   extractedDataVersion: number;
+  direction?: 'INCOMING' | 'OUTGOING';
 }) {
-  const { invoiceId, tenantId, extracted, extractedDataVersion } = params;
+  const { invoiceId, tenantId, extracted, extractedDataVersion, direction = 'INCOMING' } = params;
 
   // 1. Compute EUR estimate for foreign currency invoices (needed for validation thresholds)
   let estimatedEurGross: number | null = null;
@@ -645,6 +602,7 @@ export async function runValidationAndSync(params: {
     },
     tenantId,
     invoiceId,
+    direction,
     estimatedEurGross,
     exchangeRate,
     exchangeRateDate: exchangeRateDateStr,
@@ -690,6 +648,7 @@ export async function runValidationAndSync(params: {
       vendorName: extracted.issuerName,
       vendorUid: extracted.issuerUid,
       vendorAddress: extracted.issuerAddress as Prisma.InputJsonValue,
+      customerName: direction === 'OUTGOING' ? extracted.recipientName : undefined,
       invoiceNumber: extracted.invoiceNumber,
       sequentialNumber: extracted.sequentialNumber,
       invoiceDate: extracted.invoiceDate,
@@ -712,7 +671,7 @@ export async function runValidationAndSync(params: {
       exchangeRate,
       exchangeRateDate,
       validationStatus,
-      ...(autoApprove ? { processingStatus: 'APPROVED' as const } : {}),
+      // Auto-approve is now handled asynchronously via archival job (see below)
       // Felder die vorher nur im Worker gesetzt wurden — jetzt überall konsistent
       isDuplicate: validationOutput.checks.some(
         (c) => c.rule === 'DUPLICATE_CHECK' && c.status === 'RED',
@@ -731,8 +690,12 @@ export async function runValidationAndSync(params: {
     },
   });
 
-  // 4b. Write audit log for auto-approve
+  // 4b. Auto-approve for TRUSTED vendors: enqueue archival job
   if (autoApprove) {
+    invoiceQueue.add('archive-invoice', { invoiceId, tenantId }, {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5000 },
+    });
     writeAuditLog({
       tenantId,
       userId: undefined,

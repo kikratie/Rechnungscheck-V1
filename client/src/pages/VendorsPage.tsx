@@ -445,7 +445,8 @@ function ProcessingBadge({ status }: { status: string }) {
     PROCESSING: { label: 'Verarbeitung...', bg: 'bg-blue-100', text: 'text-blue-700' },
     PROCESSED: { label: 'Verarbeitet', bg: 'bg-green-100', text: 'text-green-700' },
     REVIEW_REQUIRED: { label: 'Review nötig', bg: 'bg-yellow-100', text: 'text-yellow-700' },
-    APPROVED: { label: 'Genehmigt', bg: 'bg-green-100', text: 'text-green-700' },
+    ARCHIVED: { label: 'Archiviert', bg: 'bg-green-100', text: 'text-green-700' },
+    RECONCILED: { label: 'Abgeglichen', bg: 'bg-teal-100', text: 'text-teal-700' },
     ERROR: { label: 'Fehler', bg: 'bg-red-100', text: 'text-red-700' },
     REPLACED: { label: 'Ersetzt', bg: 'bg-orange-100', text: 'text-orange-700' },
   };

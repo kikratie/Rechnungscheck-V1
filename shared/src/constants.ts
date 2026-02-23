@@ -22,10 +22,18 @@ export const PROCESSING_STATUS = {
   PROCESSING: 'PROCESSING',
   PROCESSED: 'PROCESSED',
   REVIEW_REQUIRED: 'REVIEW_REQUIRED',
-  APPROVED: 'APPROVED',
+  ARCHIVED: 'ARCHIVED',
+  RECONCILED: 'RECONCILED',
   EXPORTED: 'EXPORTED',
   ERROR: 'ERROR',
   REPLACED: 'REPLACED',
+} as const;
+
+// Archivierungs-Prefixes
+export const ARCHIVAL_PREFIXES = {
+  INCOMING: 'ER',   // Eingangsrechnung
+  OUTGOING: 'AR',   // Ausgangsrechnung
+  CREDIT_NOTE: 'GS', // Gutschrift
 } as const;
 
 // Validierungsstatus
@@ -79,6 +87,12 @@ export const DOCUMENT_TYPES = {
   CREDIT_NOTE: 'CREDIT_NOTE',
   RECEIPT: 'RECEIPT',
   ERSATZBELEG: 'ERSATZBELEG',
+} as const;
+
+// Rechnungsrichtung (Eingang/Ausgang)
+export const INVOICE_DIRECTIONS = {
+  INCOMING: 'INCOMING',   // Eingangsrechnung (von Lieferant an uns)
+  OUTGOING: 'OUTGOING',   // Ausgangsrechnung (von uns an Kunden)
 } as const;
 
 // Ingestion-Kanäle

@@ -6,7 +6,7 @@ import { Download, FileText, CheckCircle } from 'lucide-react';
 export function ExportPage() {
   const { data } = useQuery({
     queryKey: ['invoices-exportable'],
-    queryFn: () => listInvoicesApi({ processingStatus: 'APPROVED', limit: 100 }),
+    queryFn: () => listInvoicesApi({ processingStatus: 'ARCHIVED', limit: 100 }),
   });
 
   const exportable = (data?.data ?? []) as InvoiceListItem[];

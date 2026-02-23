@@ -1,7 +1,7 @@
 // @ts-expect-error pdf-parse v2 ESM types not resolved by bundler moduleResolution
 import { PDFParse } from 'pdf-parse';
 import sharp from 'sharp';
-import { callLlm, INVOICE_EXTRACTION_SYSTEM_PROMPT } from './llm.service.js';
+import { callLlm, INVOICE_EXTRACTION_SYSTEM_PROMPT, getExtractionPrompt } from './llm.service.js';
 
 interface ExtractionResult {
   fields: Record<string, unknown>;
@@ -24,28 +24,30 @@ const LOW_CONFIDENCE_THRESHOLD = 0.6;
 export async function extractInvoiceData(
   fileBuffer: Buffer,
   mimeType: string,
+  direction: 'INCOMING' | 'OUTGOING' = 'INCOMING',
 ): Promise<ExtractionResult> {
   const t0 = Date.now();
-  console.log(`[OCR] Start: ${mimeType}, ${(fileBuffer.length / 1024).toFixed(0)} KB`);
+  console.log(`[OCR] Start: ${mimeType}, ${(fileBuffer.length / 1024).toFixed(0)} KB, direction=${direction}`);
 
+  const prompt = getExtractionPrompt(direction);
   let result: ExtractionResult;
 
   if (mimeType === 'application/pdf') {
-    result = await extractPdf(fileBuffer);
+    result = await extractPdf(fileBuffer, prompt);
   } else if (mimeType === 'image/tiff') {
     // TIFF: convert to PNG first
     const pngBuffer = await sharp(fileBuffer).png().toBuffer();
-    result = await extractWithVision(pngBuffer, 'image/png', fileBuffer);
+    result = await extractWithVision(pngBuffer, 'image/png', fileBuffer, undefined, prompt);
   } else {
     // JPEG, PNG, WebP: direct Vision OCR
-    result = await extractWithVision(fileBuffer, mimeType, fileBuffer);
+    result = await extractWithVision(fileBuffer, mimeType, fileBuffer, undefined, prompt);
   }
 
   console.log(`[OCR] Fertig: ${result.pipelineStage} in ${Date.now() - t0}ms`);
   return result;
 }
 
-async function extractPdf(fileBuffer: Buffer): Promise<ExtractionResult> {
+async function extractPdf(fileBuffer: Buffer, prompt: string): Promise<ExtractionResult> {
   // Stage 1: Try text extraction for digital PDFs
   let extractedText = '';
   let parser: InstanceType<typeof PDFParse> | null = null;
@@ -62,7 +64,7 @@ async function extractPdf(fileBuffer: Buffer): Promise<ExtractionResult> {
   if (extractedText.length >= MIN_TEXT_LENGTH) {
     console.log(`[OCR] Text-Layer OK (${extractedText.length} Zeichen) → LLM-Extraktion`);
     const t0 = Date.now();
-    const result = await extractFromText(extractedText);
+    const result = await extractFromText(extractedText, prompt);
     console.log(`[OCR] TEXT_EXTRACTION abgeschlossen in ${Date.now() - t0}ms`);
     return result;
   }
@@ -72,7 +74,7 @@ async function extractPdf(fileBuffer: Buffer): Promise<ExtractionResult> {
   const t0 = Date.now();
   const pngBuffer = await renderPdfPageToPng(fileBuffer);
   // Pass partial text layer for IBAN cross-check (even short text may contain an IBAN)
-  const result = await extractWithVision(pngBuffer, 'image/png', pngBuffer, extractedText || undefined);
+  const result = await extractWithVision(pngBuffer, 'image/png', pngBuffer, extractedText || undefined, prompt);
   console.log(`[OCR] ${result.pipelineStage} abgeschlossen in ${Date.now() - t0}ms`);
   return result;
 }
@@ -101,8 +103,9 @@ async function extractWithVision(
   visionMime: string,
   originalBuffer: Buffer,
   pdfTextLayer?: string,
+  prompt: string = INVOICE_EXTRACTION_SYSTEM_PROMPT,
 ): Promise<ExtractionResult> {
-  const result = await extractFromImage(visionBuffer, visionMime);
+  const result = await extractFromImage(visionBuffer, visionMime, prompt);
 
   // Stage 3: If confidence is low, preprocess and retry
   const avgConfidence = computeAverageConfidence(result.confidenceScores);
@@ -114,7 +117,7 @@ async function extractWithVision(
         .sharpen()
         .png()
         .toBuffer();
-      const retryResult = await extractFromImage(enhanced, 'image/png');
+      const retryResult = await extractFromImage(enhanced, 'image/png', prompt);
       const retryAvg = computeAverageConfidence(retryResult.confidenceScores);
       if (retryAvg > avgConfidence) {
         // Cross-check IBAN from text layer if available
@@ -158,10 +161,10 @@ function safeJsonParse(content: string): { fields?: Record<string, unknown>; con
   }
 }
 
-async function extractFromText(text: string): Promise<ExtractionResult> {
+async function extractFromText(text: string, prompt: string = INVOICE_EXTRACTION_SYSTEM_PROMPT): Promise<ExtractionResult> {
   const response = await callLlm({
     task: 'invoice_extraction',
-    systemPrompt: INVOICE_EXTRACTION_SYSTEM_PROMPT,
+    systemPrompt: prompt,
     userContent: `Extrahiere die Rechnungsdaten aus folgendem Text:\n\n${text}`,
     temperature: 0.1,
   });
@@ -187,12 +190,13 @@ async function extractFromText(text: string): Promise<ExtractionResult> {
 async function extractFromImage(
   fileBuffer: Buffer,
   mimeType: string,
+  prompt: string = INVOICE_EXTRACTION_SYSTEM_PROMPT,
 ): Promise<ExtractionResult> {
   const base64 = fileBuffer.toString('base64');
 
   const response = await callLlm({
     task: 'invoice_extraction_vision',
-    systemPrompt: INVOICE_EXTRACTION_SYSTEM_PROMPT,
+    systemPrompt: prompt,
     userContent: [
       {
         type: 'text',

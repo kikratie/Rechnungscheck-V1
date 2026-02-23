@@ -28,14 +28,17 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users          User[]
-  invoices       Invoice[]
-  vendors        Vendor[]
-  bankAccounts   BankAccount[]
-  bankStatements BankStatement[]
-  matchings      Matching[]
-  exportConfigs  ExportConfig[]
-  auditLogs      AuditLog[]
+  users              User[]
+  invoices           Invoice[]
+  vendors            Vendor[]
+  customers          Customer[]
+  bankAccounts       BankAccount[]
+  bankStatements     BankStatement[]
+  matchings          Matching[]
+  exportConfigs      ExportConfig[]
+  auditLogs          AuditLog[]
+  sequentialNumbers  SequentialNumber[]
+  cancelledNumbers   CancelledNumber[]
 
   @@map("tenants")
 }
@@ -126,6 +129,7 @@ model Invoice {
 
   // Dokument-Metadaten
   documentType     String   @default("INVOICE") // INVOICE, CREDIT_NOTE, RECEIPT
+  direction        String   @default("INCOMING") // INCOMING, OUTGOING
   ingestionChannel String   @default("UPLOAD")  // UPLOAD, EMAIL, API
   originalFileName String
   storagePath      String
@@ -185,6 +189,16 @@ model Invoice {
   replacedByInvoiceId String? @unique  // This invoice was replaced by an Ersatzbeleg
   ersatzReason       String?           // Why the Ersatzbeleg was created
 
+  // Archivierung (gesetzt bei Genehmigung)
+  archivalNumber      String?   // Fortlaufende Nummer: "ER-2026-00001"
+  archivalPrefix      String?   // "ER", "AR", "GS"
+  archivedAt          DateTime?
+  archivedByUserId    String?
+  archivedStoragePath String?   // Pfad der gestempelten Archiv-Datei
+  archivedFileName    String?   // Neuer Dateiname: ER-2026-00001_Vendor_Date.pdf
+  stampFailed         Boolean   @default(false) // true wenn PDF-Stempel fehlgeschlagen
+  approvalComment     String?   // Optional: Begründung bei Genehmigung trotz Warnung/Ungültig
+
   // Workflow
   isLocked       Boolean   @default(false)
   lockedAt       DateTime?
@@ -193,6 +207,10 @@ model Invoice {
 
   // Lieferant (auto-verknüpft)
   vendorId String?
+
+  // Kunde (auto-verknüpft bei OUTGOING)
+  customerId   String?
+  customerName String?
 
   // Upload-Tracking
   uploadedByUserId String?
@@ -203,6 +221,7 @@ model Invoice {
   tenant            Tenant             @relation(fields: [tenantId], references: [id])
   uploadedBy        User?              @relation("UploadedBy", fields: [uploadedByUserId], references: [id])
   vendor            Vendor?            @relation(fields: [vendorId], references: [id])
+  customer          Customer?          @relation(fields: [customerId], references: [id])
   lineItems         InvoiceLineItem[]
   matchings         Matching[]
   documentVersions  DocumentVersion[]
@@ -210,14 +229,17 @@ model Invoice {
   validationResults ValidationResult[]
 
   @@unique([tenantId, belegNr])
+  @@unique([tenantId, archivalNumber])
   @@index([tenantId])
   @@index([tenantId, vendorName])
   @@index([tenantId, invoiceNumber])
   @@index([tenantId, invoiceDate])
   @@index([tenantId, validationStatus])
   @@index([tenantId, processingStatus])
+  @@index([tenantId, direction])
   @@index([storageHash])
   @@index([vendorId])
+  @@index([customerId])
   @@map("invoices")
 }
 
@@ -338,12 +360,49 @@ model ValidationResult {
   @@map("validation_results")
 }
 
+// ============================================================
+// SEQUENTIAL NUMBERING & ARCHIVAL
+// ============================================================
+
+model SequentialNumber {
+  id         String   @id @default(uuid())
+  tenantId   String
+  prefix     String   // "ER", "AR", "GS"
+  year       Int
+  lastNumber Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, prefix, year])
+  @@index([tenantId])
+  @@map("sequential_numbers")
+}
+
+model CancelledNumber {
+  id                String   @id @default(uuid())
+  tenantId          String
+  archivalNumber    String   // "ER-2026-00003"
+  invoiceId         String?
+  reason            String
+  cancelledByUserId String
+  cancelledAt       DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("cancelled_numbers")
+}
+
 enum ProcessingStatus {
   UPLOADED
   PROCESSING
   PROCESSED
   REVIEW_REQUIRED
-  APPROVED
+  ARCHIVED
+  RECONCILED
   EXPORTED
   ERROR
   REPLACED
@@ -406,6 +465,42 @@ enum VendorTrustLevel {
   NEW
   VERIFIED
   TRUSTED
+}
+
+// ============================================================
+// CUSTOMERS (Kunden — für Ausgangsrechnungen)
+// ============================================================
+
+model Customer {
+  id       String @id @default(uuid())
+  tenantId String
+
+  name    String
+  uid     String?    // UID des Kunden (z.B. ATU12345678)
+  address Json?      // { street, zip, city, country }
+  email   String?
+  phone   String?
+  iban    String?
+  bic     String?
+  website String?
+  notes   String?
+
+  // VIES-Daten (gecacht vom letzten UID-Check)
+  viesName      String?
+  viesAddress   String?
+  viesCheckedAt DateTime?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  invoices Invoice[]
+
+  @@unique([tenantId, uid])
+  @@index([tenantId])
+  @@index([tenantId, name])
+  @@map("customers")
 }
 
 // ============================================================

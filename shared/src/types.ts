@@ -57,6 +57,8 @@ export type UserRoleType = 'ADMIN' | 'ACCOUNTANT' | 'TAX_ADVISOR';
 
 export type VendorTrustLevel = 'NEW' | 'VERIFIED' | 'TRUSTED';
 
+export type InvoiceDirection = 'INCOMING' | 'OUTGOING';
+
 export interface UserProfile {
   id: string;
   tenantId: string;
@@ -109,7 +111,8 @@ export type ProcessingStatusType =
   | 'PROCESSING'
   | 'PROCESSED'
   | 'REVIEW_REQUIRED'
-  | 'APPROVED'
+  | 'ARCHIVED'
+  | 'RECONCILED'
   | 'EXPORTED'
   | 'REPLACED'
   | 'ERROR';
@@ -130,6 +133,8 @@ export interface InvoiceListItem {
   id: string;
   belegNr: number;
   originalFileName: string;
+  documentType: string;
+  direction: InvoiceDirection;
   vendorName: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
@@ -142,7 +147,12 @@ export interface InvoiceListItem {
   validationStatus: ValidationStatusType;
   isLocked: boolean;
   vendorId: string | null;
+  customerId: string | null;
+  customerName: string | null;
   replacedByInvoiceId: string | null;
+  archivalNumber: string | null;
+  archivalPrefix: string | null;
+  archivedAt: string | null;
   createdAt: string;
 }
 
@@ -270,6 +280,21 @@ export interface InvoiceDetailExtended extends InvoiceDetail {
   recipientUid: string | null;
   issuerEmail: string | null;
   issuerIban: string | null;
+  // Relations
+  vendor: { id: string; name: string; uid: string | null } | null;
+  customer: { id: string; name: string; uid: string | null } | null;
+  // Ersatzbeleg fields
+  replacesInvoiceId: string | null;
+  replacesBelegNr: number | null;
+  replacedByInvoiceId: string | null;
+  replacedByBelegNr: number | null;
+  ersatzReason: string | null;
+  // Archival fields
+  archivedByUserId: string | null;
+  archivedStoragePath: string | null;
+  archivedFileName: string | null;
+  stampFailed: boolean;
+  approvalComment: string | null;
 }
 
 // ============================================================

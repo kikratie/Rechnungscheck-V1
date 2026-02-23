@@ -87,6 +87,9 @@ function formatAuditDescription(log: {
     UPLOAD: 'hat hochgeladen',
     AI_PROCESSED: 'KI-Verarbeitung abgeschlossen',
     APPROVE: 'hat genehmigt',
+    APPROVE_AND_ARCHIVE: 'hat genehmigt & archiviert',
+    AUTO_APPROVE: 'automatisch genehmigt (Trusted Vendor)',
+    CANCEL_ARCHIVAL_NUMBER: 'Archivnummer storniert',
     CONFIRM: 'hat bestätigt',
     LOGIN: 'hat sich angemeldet',
     REGISTER: 'hat sich registriert',
@@ -95,5 +98,28 @@ function formatAuditDescription(log: {
   const action = actions[log.action] || log.action;
   return `${user}: ${action} (${log.entityType} ${log.entityId.substring(0, 8)}...)`;
 }
+
+// GET /api/v1/dashboard/number-gaps — Stornierte Nummern + Lücken-Prüfung
+router.get('/number-gaps', async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+
+    const cancelledNumbers = await prisma.cancelledNumber.findMany({
+      where: { tenantId },
+      orderBy: { cancelledAt: 'desc' },
+      take: 50,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        cancelledNumbers,
+        count: cancelledNumbers.length,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 export { router as dashboardRoutes };

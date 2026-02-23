@@ -154,8 +154,9 @@ export const paginationSchema = z.object({
 
 export const invoiceFilterSchema = paginationSchema.extend({
   search: z.string().optional(),
+  direction: z.enum(['INCOMING', 'OUTGOING']).optional(),
   processingStatus: z
-    .enum(['UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'APPROVED', 'EXPORTED', 'ERROR'])
+    .enum(['UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'ARCHIVED', 'RECONCILED', 'EXPORTED', 'ERROR'])
     .optional(),
   validationStatus: z.enum(['PENDING', 'VALID', 'WARNING', 'INVALID']).optional(),
   vendorName: z.string().optional(),
@@ -250,11 +251,28 @@ export const createErsatzbelegSchema = z.object({
 });
 
 // ============================================================
-// Batch Approve
+// Approve / Archive
+// ============================================================
+
+export const approveInvoiceSchema = z.object({
+  comment: z.string().max(2000).optional().nullable(),
+});
+
+// ============================================================
+// Batch Approve (now triggers archival)
 // ============================================================
 
 export const batchApproveSchema = z.object({
   invoiceIds: z.array(z.string().uuid()).min(1).max(100),
+  comment: z.string().max(2000).optional().nullable(),
+});
+
+// ============================================================
+// Cancel Archival Number (Storno)
+// ============================================================
+
+export const cancelNumberSchema = z.object({
+  reason: z.string().min(1, 'Begründung ist erforderlich').max(2000),
 });
 
 // ============================================================

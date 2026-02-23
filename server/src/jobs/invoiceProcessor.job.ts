@@ -6,12 +6,14 @@ import { extractInvoiceData } from '../services/ocr.service.js';
 import { runValidationAndSync } from '../services/invoice.service.js';
 import { writeAuditLog } from '../middleware/auditLogger.js';
 import { findOrCreateVendor } from '../services/vendor.service.js';
+import { findOrCreateCustomer } from '../services/customer.service.js';
 
 interface InvoiceJobData {
   invoiceId: string;
   tenantId: string;
   storagePath: string;
   mimeType: string;
+  direction?: 'INCOMING' | 'OUTGOING';
 }
 
 /**
@@ -47,7 +49,7 @@ function parseNumericField(value: unknown): number | null {
 }
 
 export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void> {
-  const { invoiceId, tenantId, storagePath, mimeType } = job.data;
+  const { invoiceId, tenantId, storagePath, mimeType, direction = 'INCOMING' } = job.data;
   const startTime = Date.now();
 
   try {
@@ -60,8 +62,8 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
     // Download file from S3
     const fileBuffer = await downloadFile(storagePath);
 
-    // Run OCR pipeline
-    const extraction = await extractInvoiceData(fileBuffer, mimeType);
+    // Run OCR pipeline (direction-aware prompt for OUTGOING invoices)
+    const extraction = await extractInvoiceData(fileBuffer, mimeType, direction);
     const fields = extraction.fields;
 
     // Compute overall confidence
@@ -155,11 +157,12 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
       tenantId,
       extracted: extractedData,
       extractedDataVersion: 1,
+      direction,
     });
 
-    // Auto-link to vendor (find or create)
+    // Auto-link to vendor (find or create) — skip for OUTGOING (issuer = self)
     let vendorId: string | undefined;
-    if (extractedData.issuerName) {
+    if (extractedData.issuerName && direction !== 'OUTGOING') {
       try {
         vendorId = await findOrCreateVendor({
           tenantId,
@@ -175,6 +178,23 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
       }
     }
 
+    // Auto-link to customer (find or create) — only for OUTGOING
+    let customerId: string | undefined;
+    if (extractedData.recipientName && direction === 'OUTGOING') {
+      try {
+        customerId = await findOrCreateCustomer({
+          tenantId,
+          name: extractedData.recipientName,
+          uid: extractedData.recipientUid,
+          address: extractedData.recipientAddress as Record<string, string> | null,
+          email: null,
+          iban: null,
+        });
+      } catch (err) {
+        console.error(`Customer auto-link failed for ${invoiceId}:`, err);
+      }
+    }
+
     // Worker-specific fields on top of what runValidationAndSync already set
     const processingStatus =
       validationOutput.overallStatus === 'GREEN' ? 'PROCESSED' : 'REVIEW_REQUIRED';
@@ -184,6 +204,8 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
       data: {
         processingStatus,
         vendorId: vendorId || undefined,
+        customerId: customerId || undefined,
+        customerName: direction === 'OUTGOING' ? extractedData.recipientName : undefined,
         aiConfidence: avgConfidence,
         aiRawResponse: extraction.rawResponse as Prisma.InputJsonValue,
       },

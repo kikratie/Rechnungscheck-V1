@@ -180,7 +180,14 @@ async function main() {
         validationStatus: 'VALID',
         uidValidationStatus: 'VALID',
         uidValidationDate: new Date('2026-01-15'),
-        processingStatus: 'APPROVED',
+        processingStatus: 'ARCHIVED',
+        archivalNumber: 'ER-2026-00001',
+        archivalPrefix: 'ER',
+        archivedAt: new Date('2026-01-16T10:30:00Z'),
+        archivedByUserId: admin.id,
+        isLocked: true,
+        lockedAt: new Date('2026-01-16T10:30:00Z'),
+        lockedByUserId: admin.id,
         aiConfidence: 0.9650,
         aiRawResponse: { model: 'gpt-4o', tokens: 1240 },
       },
@@ -385,7 +392,14 @@ async function main() {
         validationStatus: 'VALID',
         uidValidationStatus: 'VALID',
         uidValidationDate: new Date('2026-01-28'),
-        processingStatus: 'APPROVED',
+        processingStatus: 'ARCHIVED',
+        archivalNumber: 'ER-2026-00002',
+        archivalPrefix: 'ER',
+        archivedAt: new Date('2026-01-29T09:15:00Z'),
+        archivedByUserId: admin.id,
+        isLocked: true,
+        lockedAt: new Date('2026-01-29T09:15:00Z'),
+        lockedByUserId: admin.id,
         aiConfidence: 0.9540,
         aiRawResponse: { model: 'gpt-4o', tokens: 1100 },
       },
@@ -1027,7 +1041,7 @@ async function main() {
     data: [
       { tenantId: tenant.id, userId: admin.id, entityType: 'Invoice', entityId: 'inv-001', action: 'UPLOAD', metadata: { fileName: 'RE-2026-0042_Papyrus.pdf' }, createdAt: new Date('2026-01-15T08:30:00Z') },
       { tenantId: tenant.id, userId: null, entityType: 'Invoice', entityId: 'inv-001', action: 'AI_PROCESSED', metadata: { confidence: 0.965, duration_ms: 3200 }, createdAt: new Date('2026-01-15T08:30:45Z') },
-      { tenantId: tenant.id, userId: accountant.id, entityType: 'Invoice', entityId: 'inv-001', action: 'APPROVE', createdAt: new Date('2026-01-15T09:15:00Z') },
+      { tenantId: tenant.id, userId: accountant.id, entityType: 'Invoice', entityId: 'inv-001', action: 'APPROVE_AND_ARCHIVE', metadata: { archivalNumber: 'ER-2026-00001' }, createdAt: new Date('2026-01-16T10:30:00Z') },
       { tenantId: tenant.id, userId: accountant.id, entityType: 'Matching', entityId: 'match-002', action: 'CONFIRM', metadata: { invoiceId: 'inv-001', transactionId: 'bt-002' }, createdAt: new Date('2026-01-17T10:00:00Z') },
       { tenantId: tenant.id, userId: admin.id, entityType: 'Invoice', entityId: 'inv-006', action: 'UPLOAD', metadata: { fileName: 'RE_2026_Consulting_XY.pdf' }, createdAt: new Date('2026-02-01T14:00:00Z') },
       { tenantId: tenant.id, userId: null, entityType: 'Invoice', entityId: 'inv-006', action: 'UID_VALIDATION_FAILED', metadata: { uid: 'ATU99999999', reason: 'VIES: ungültig' }, createdAt: new Date('2026-02-01T14:01:00Z') },
@@ -1037,18 +1051,42 @@ async function main() {
 
   console.log('6 Audit-Log Einträge erstellt');
 
+  // ============================================================
+  // SEQUENTIAL NUMBER COUNTER (passend zu archivierten Rechnungen)
+  // ============================================================
+
+  await prisma.sequentialNumber.upsert({
+    where: {
+      tenantId_prefix_year: {
+        tenantId: tenant.id,
+        prefix: 'ER',
+        year: 2026,
+      },
+    },
+    update: { lastNumber: 2 },
+    create: {
+      tenantId: tenant.id,
+      prefix: 'ER',
+      year: 2026,
+      lastNumber: 2,
+    },
+  });
+
+  console.log('Sequential Number Counter erstellt (ER-2026: lastNumber=2)');
+
   console.log('\n--- Seed abgeschlossen ---');
   console.log('Demo-Logins:');
   console.log('  Admin:         admin@demo.at / Admin123!');
   console.log('  Buchhalter:    buchhalter@demo.at / Buchhalter123!');
   console.log('  Steuerberater: steuerberater@demo.at / Steuerberater123!');
   console.log('\nTestdaten:');
-  console.log('  10 Rechnungen (verschiedene Status: UPLOADED, PROCESSING, APPROVED, ERROR, REVIEW_REQUIRED, EXPORTED)');
+  console.log('  10 Rechnungen (verschiedene Status: UPLOADED, PROCESSING, ARCHIVED, ERROR, REVIEW_REQUIRED, EXPORTED)');
   console.log('  10 Rechnungspositionen');
   console.log('  2  Kontoauszüge (Jänner + Februar 2026)');
   console.log('  10 Banktransaktionen');
   console.log('  5  Matchings (3 bestätigt, 2 offen)');
   console.log('  6  Audit-Log Einträge');
+  console.log('  1  Sequential Number Counter (ER-2026)');
 }
 
 main()

@@ -5,6 +5,7 @@ import { prisma } from './config/database.js';
 import { ensureBucket } from './services/storage.service.js';
 import { createInvoiceWorker } from './jobs/queue.js';
 import { processInvoiceJob } from './jobs/invoiceProcessor.job.js';
+import { archiveInvoice } from './services/archival.service.js';
 
 /**
  * Pre-flight checks: verify OCR dependencies are functional before accepting work.
@@ -80,8 +81,15 @@ async function main() {
   // Pre-flight: OCR-Abhängigkeiten prüfen
   await runPreflightChecks();
 
-  // BullMQ Worker starten
-  const worker = createInvoiceWorker(processInvoiceJob);
+  // BullMQ Worker starten (dispatches by job name)
+  const worker = createInvoiceWorker(async (job) => {
+    if (job.name === 'archive-invoice') {
+      const { invoiceId, tenantId } = job.data;
+      await archiveInvoice(tenantId, 'SYSTEM', invoiceId);
+    } else {
+      await processInvoiceJob(job);
+    }
+  });
   console.log('Invoice-Processing Worker gestartet');
 
   // Server starten

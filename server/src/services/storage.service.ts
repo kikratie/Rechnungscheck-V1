@@ -2,6 +2,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  CopyObjectCommand,
   HeadBucketCommand,
   CreateBucketCommand,
 } from '@aws-sdk/client-s3';
@@ -62,4 +63,19 @@ export async function deleteFile(key: string): Promise<void> {
   await s3Client.send(
     new DeleteObjectCommand({ Bucket: bucket, Key: key }),
   );
+}
+
+export async function copyFile(sourceKey: string, destKey: string): Promise<void> {
+  await s3Client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      CopySource: `${bucket}/${sourceKey}`,
+      Key: destKey,
+    }),
+  );
+}
+
+export async function moveFile(sourceKey: string, destKey: string): Promise<void> {
+  await copyFile(sourceKey, destKey);
+  await deleteFile(sourceKey);
 }

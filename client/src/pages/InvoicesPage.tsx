@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listInvoicesApi,
@@ -18,10 +19,11 @@ import {
   FileText, Upload, Search, X, ChevronLeft, ChevronRight, Loader2,
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
   ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight, MinusCircle,
-  ArrowUp, ArrowDown, ArrowUpDown,
+  ArrowUp, ArrowDown, ArrowUpDown, Lock, Archive,
 } from 'lucide-react';
 
 export function InvoicesPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<InvoiceFilters>({ page: 1, limit: 20, sortBy: 'belegNr', sortOrder: 'desc' });
   const [search, setSearch] = useState('');
@@ -33,11 +35,13 @@ export function InvoicesPage() {
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [showErsatzbelegDialog, setShowErsatzbelegDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBatchApproveDialog, setShowBatchApproveDialog] = useState(false);
 
   const batchApproveMutation = useMutation({
-    mutationFn: (ids: string[]) => batchApproveInvoicesApi(ids),
+    mutationFn: ({ ids, comment }: { ids: string[]; comment?: string | null }) => batchApproveInvoicesApi(ids, comment),
     onSuccess: () => {
       setSelectedIds(new Set());
+      setShowBatchApproveDialog(false);
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       if (selectedId) queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
     },
@@ -198,8 +202,27 @@ export function InvoicesPage() {
           </button>
         </div>
 
-        {/* Filters */}
+        {/* Direction tabs + Filters */}
         <div className="card p-4 mb-4">
+          <div className="flex items-center gap-1 mb-3 border-b border-gray-200 pb-3">
+            {([
+              { value: undefined, label: 'Alle' },
+              { value: 'INCOMING' as const, label: 'Eingang' },
+              { value: 'OUTGOING' as const, label: 'Ausgang' },
+            ]).map((tab) => (
+              <button
+                key={tab.label}
+                onClick={() => setFilters((f) => ({ ...f, direction: tab.value, page: 1 }))}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  filters.direction === tab.value
+                    ? 'bg-primary-100 text-primary-700'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-3">
             <form onSubmit={handleSearch} className="flex gap-2 flex-1 min-w-[200px]">
               <div className="relative flex-1">
@@ -237,7 +260,8 @@ export function InvoicesPage() {
               <option value="PROCESSING">In Verarbeitung</option>
               <option value="PROCESSED">Verarbeitet</option>
               <option value="REVIEW_REQUIRED">Review nötig</option>
-              <option value="APPROVED">Genehmigt</option>
+              <option value="ARCHIVED">Archiviert</option>
+              <option value="RECONCILED">Abgeglichen</option>
               <option value="EXPORTED">Exportiert</option>
               <option value="ERROR">Fehler</option>
             </select>
@@ -250,14 +274,20 @@ export function InvoicesPage() {
             <span className="text-sm font-medium text-primary-800">
               {selectedIds.size} ausgewählt
             </span>
-            <button
-              onClick={() => batchApproveMutation.mutate(Array.from(selectedIds))}
-              disabled={batchApproveMutation.isPending}
-              className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-4 bg-green-600 hover:bg-green-700"
-            >
-              {batchApproveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
-              Genehmigen
-            </button>
+            {(() => {
+              const hasWarnings = invoices.some((inv) => selectedIds.has(inv.id) && (inv.validationStatus === 'WARNING' || inv.validationStatus === 'INVALID'));
+              return (
+                <button
+                  onClick={() => hasWarnings ? setShowBatchApproveDialog(true) : batchApproveMutation.mutate({ ids: Array.from(selectedIds) })}
+                  disabled={batchApproveMutation.isPending}
+                  className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-4 bg-green-600 hover:bg-green-700"
+                >
+                  {batchApproveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
+                  Genehmigen & Archivieren
+                  {hasWarnings && <AlertTriangle size={12} className="text-yellow-200" />}
+                </button>
+              );
+            })()}
             <button
               onClick={() => setSelectedIds(new Set())}
               className="btn-secondary text-sm py-1.5 px-3"
@@ -266,11 +296,21 @@ export function InvoicesPage() {
             </button>
             {batchApproveMutation.isSuccess && batchApproveMutation.data?.data && (
               <span className="text-xs text-green-700">
-                {batchApproveMutation.data.data.approved} genehmigt
-                {batchApproveMutation.data.data.skipped.length > 0 && `, ${batchApproveMutation.data.data.skipped.length} übersprungen`}
+                {batchApproveMutation.data.data.archived} archiviert
+                {batchApproveMutation.data.data.skipped?.length > 0 && `, ${batchApproveMutation.data.data.skipped.length} übersprungen`}
               </span>
             )}
           </div>
+        )}
+        {showBatchApproveDialog && (
+          <BatchApproveDialog
+            count={selectedIds.size}
+            hasWarnings={invoices.some((inv) => selectedIds.has(inv.id) && inv.validationStatus === 'WARNING')}
+            hasInvalid={invoices.some((inv) => selectedIds.has(inv.id) && inv.validationStatus === 'INVALID')}
+            isPending={batchApproveMutation.isPending}
+            onConfirm={(comment) => batchApproveMutation.mutate({ ids: Array.from(selectedIds), comment })}
+            onClose={() => setShowBatchApproveDialog(false)}
+          />
         )}
 
         {/* Table */}
@@ -329,9 +369,21 @@ export function InvoicesPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="font-mono text-xs font-semibold text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded">
-                          BEL-{String(inv.belegNr).padStart(3, '0')}
-                        </span>
+                        {inv.archivalNumber ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-mono text-xs font-semibold text-green-700 bg-green-50 px-1.5 py-0.5 rounded inline-flex items-center gap-1">
+                              <Lock size={10} />
+                              {inv.archivalNumber}
+                            </span>
+                            <span className="font-mono text-[10px] text-gray-400">
+                              BEL-{String(inv.belegNr).padStart(3, '0')}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-mono text-xs font-semibold text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded">
+                            BEL-{String(inv.belegNr).padStart(3, '0')}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {inv.vendorName ? (
@@ -339,7 +391,10 @@ export function InvoicesPage() {
                             <div className="font-medium text-gray-900 truncate max-w-[200px]">{inv.vendorName}</div>
                             <div className="flex items-center gap-1 mt-0.5">
                               <span className="text-xs text-gray-400 truncate max-w-[160px]">{inv.originalFileName}</span>
-                              {(inv as unknown as { documentType?: string }).documentType === 'ERSATZBELEG' && (
+                              {inv.direction === 'OUTGOING' && (
+                                <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1 py-0.5 rounded">Ausgang</span>
+                              )}
+                              {inv.documentType === 'ERSATZBELEG' && (
                                 <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>
                               )}
                             </div>
@@ -349,7 +404,10 @@ export function InvoicesPage() {
                             <div className="text-gray-400 truncate max-w-[200px] italic text-xs">{inv.originalFileName}</div>
                             <div className="flex items-center gap-1 mt-0.5">
                               <span className="text-[10px] text-gray-300">Lieferant wird erkannt...</span>
-                              {(inv as unknown as { documentType?: string }).documentType === 'ERSATZBELEG' && (
+                              {inv.direction === 'OUTGOING' && (
+                                <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1 py-0.5 rounded">Ausgang</span>
+                              )}
+                              {inv.documentType === 'ERSATZBELEG' && (
                                 <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>
                               )}
                             </div>
@@ -421,7 +479,12 @@ export function InvoicesPage() {
           <div className="card p-6 sticky top-0 max-h-[calc(100vh-6rem)] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                {detail && (
+                {detail && detail.archivalNumber ? (
+                  <span className="font-mono text-sm font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded inline-flex items-center gap-1">
+                    <Lock size={12} />
+                    {detail.archivalNumber}
+                  </span>
+                ) : detail && (
                   <span className="font-mono text-sm font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded">
                     BEL-{String(detail.belegNr).padStart(3, '0')}
                   </span>
@@ -429,13 +492,13 @@ export function InvoicesPage() {
                 <h2 className="text-lg font-semibold">Details</h2>
               </div>
               <div className="flex items-center gap-2">
-                {detail && !editMode && detail.extractedData && (
+                {detail && !editMode && detail.extractedData && !detail.isLocked && (
                   <button onClick={startEdit} className="text-gray-400 hover:text-primary-600" title="Bearbeiten">
                     <Edit3 size={16} />
                   </button>
                 )}
                 {detail && (
-                  <DownloadButton invoiceId={selectedId} />
+                  <DownloadButton invoiceId={selectedId} replacesInvoiceId={detail.replacesInvoiceId} />
                 )}
                 <button onClick={() => { setSelectedId(null); setEditMode(false); }} className="text-gray-400 hover:text-gray-600">
                   <X size={18} />
@@ -466,20 +529,20 @@ export function InvoicesPage() {
                 )}
 
                 {/* Ersatzbeleg reference box */}
-                {(detail as unknown as { documentType?: string }).documentType === 'ERSATZBELEG' && (
+                {detail.documentType === 'ERSATZBELEG' && (
                   <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
                     <div className="flex items-center gap-2 text-sm font-medium text-orange-800">
                       <FilePlus2 size={16} />
                       Ersatzbeleg
                     </div>
-                    {(detail as unknown as { replacesBelegNr?: number }).replacesBelegNr && (
+                    {detail.replacesBelegNr && (
                       <p className="text-xs text-orange-600 mt-1">
-                        Ersetzt Original: <span className="font-mono font-bold">BEL-{String((detail as unknown as { replacesBelegNr: number }).replacesBelegNr).padStart(3, '0')}</span>
+                        Ersetzt Original: <span className="font-mono font-bold">BEL-{String(detail.replacesBelegNr).padStart(3, '0')}</span>
                       </p>
                     )}
-                    {(detail as unknown as { ersatzReason?: string }).ersatzReason && (
+                    {detail.ersatzReason && (
                       <p className="text-xs text-orange-600 mt-1">
-                        Grund: {(detail as unknown as { ersatzReason: string }).ersatzReason}
+                        Grund: {detail.ersatzReason}
                       </p>
                     )}
                   </div>
@@ -492,11 +555,58 @@ export function InvoicesPage() {
                       <ArrowRight size={16} />
                       Ersetzt durch Ersatzbeleg
                     </div>
-                    {(detail as unknown as { replacedByBelegNr?: number }).replacedByBelegNr && (
+                    {detail.replacedByBelegNr && (
                       <p className="text-xs text-gray-500 mt-1">
-                        Ersatzbeleg: <span className="font-mono font-bold">BEL-{String((detail as unknown as { replacedByBelegNr: number }).replacedByBelegNr).padStart(3, '0')}</span>
+                        Ersatzbeleg: <span className="font-mono font-bold">BEL-{String(detail.replacedByBelegNr).padStart(3, '0')}</span>
                       </p>
                     )}
+                  </div>
+                )}
+
+                {/* Direction info box for outgoing */}
+                {detail.direction === 'OUTGOING' && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-blue-800">
+                      <Upload size={16} />
+                      Ausgangsrechnung
+                    </div>
+                    <p className="text-xs text-blue-600 mt-1">
+                      Ihr Unternehmen ist der Rechnungsaussteller
+                    </p>
+                  </div>
+                )}
+
+                {/* Archival info box */}
+                {detail.archivalNumber && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-green-800">
+                      <Archive size={16} />
+                      Archiviert
+                    </div>
+                    <div className="mt-1 space-y-0.5 text-xs text-green-700">
+                      <p className="font-mono font-bold">{detail.archivalNumber}</p>
+                      {detail.archivedAt && (
+                        <p>Archiviert am: {new Date(detail.archivedAt).toLocaleString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                      )}
+                      <p className="font-mono text-green-600">
+                        BEL-{String(detail.belegNr).padStart(3, '0')}
+                      </p>
+                    </div>
+                    {detail.approvalComment && (
+                      <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded p-2 text-xs text-yellow-800">
+                        <span className="font-medium">Anmerkung:</span> {detail.approvalComment}
+                      </div>
+                    )}
+                    {detail.stampFailed && (
+                      <p className="text-xs text-yellow-700 mt-1 flex items-center gap-1">
+                        <AlertTriangle size={12} />
+                        PDF-Stempel konnte nicht gesetzt werden
+                      </p>
+                    )}
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <ArchiveDownloadBtn invoiceId={selectedId} variant="archived" />
+                      <ArchiveDownloadBtn invoiceId={selectedId} variant="original" />
+                    </div>
                   </div>
                 )}
 
@@ -506,6 +616,7 @@ export function InvoicesPage() {
                     fields={editFields}
                     setFields={setEditFields}
                     invoiceId={selectedId}
+                    replacesInvoiceId={detail.replacesInvoiceId}
                     onCancel={() => setEditMode(false)}
                     onSaved={() => {
                       setEditMode(false);
@@ -515,12 +626,30 @@ export function InvoicesPage() {
                   />
                 ) : (
                   <>
-                    {/* Vendor info */}
+                    {/* Vendor/Customer info */}
                     <div>
-                      <h3 className="font-medium text-gray-900 mb-2">Lieferant</h3>
+                      <h3 className="font-medium text-gray-900 mb-2">{detail.direction === 'OUTGOING' ? 'Kunde' : 'Lieferant'}</h3>
                       <dl className="space-y-1">
-                        <DetailRow label="Name" value={detail.vendorName} />
-                        <DetailRow label="UID" value={detail.vendorUid} />
+                        {detail.direction === 'OUTGOING' && detail.customerName ? (
+                          <div className="flex justify-between text-sm">
+                            <dt className="text-gray-500">Name</dt>
+                            <dd className="text-right">
+                              {detail.customerId ? (
+                                <button
+                                  onClick={() => navigate(`/customers?selected=${detail.customerId}`)}
+                                  className="text-primary-600 hover:underline font-medium"
+                                >
+                                  {detail.customerName}
+                                </button>
+                              ) : (
+                                <span>{detail.customerName}</span>
+                              )}
+                            </dd>
+                          </div>
+                        ) : (
+                          <DetailRow label="Name" value={detail.vendorName} />
+                        )}
+                        <DetailRow label="UID" value={detail.direction === 'OUTGOING' ? detail.recipientUid : detail.vendorUid} />
                         <DetailRow label="Kategorie" value={detail.category} />
                       </dl>
                     </div>
@@ -534,7 +663,7 @@ export function InvoicesPage() {
                         <DetailRow label="Fällig" value={detail.dueDate ? formatDate(detail.dueDate) : null} />
                         <DetailRow label="Datei" value={detail.originalFileName} />
                       </dl>
-                      <ViewOriginalButton invoiceId={selectedId} />
+                      <ViewOriginalButton invoiceId={selectedId} replacesInvoiceId={detail.replacesInvoiceId} />
                     </div>
 
                     {/* Amounts */}
@@ -718,10 +847,11 @@ export function InvoicesPage() {
                     )}
 
                     {/* Action buttons */}
-                    {detail.processingStatus !== 'APPROVED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && (
+                    {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && (
                       <div className="border-t pt-4 flex gap-2">
                         <ApproveButton
                           invoiceId={selectedId}
+                          validationStatus={detail.validationStatus}
                           onSuccess={() => {
                             queryClient.invalidateQueries({ queryKey: ['invoices'] });
                             queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
@@ -739,7 +869,7 @@ export function InvoicesPage() {
 
                     {/* Ersatzbeleg erstellen button — for ERROR, REVIEW_REQUIRED and similar problematic invoices */}
                     {(detail.processingStatus === 'ERROR' || detail.processingStatus === 'REVIEW_REQUIRED' || detail.processingStatus === 'PROCESSED') &&
-                     !(detail as unknown as { replacedByInvoiceId?: string }).replacedByInvoiceId && (
+                     !detail.replacedByInvoiceId && (
                       <div className="border-t pt-4">
                         <button
                           onClick={() => setShowErsatzbelegDialog(true)}
@@ -787,6 +917,7 @@ interface FileUploadState {
 function UploadDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [dragOver, setDragOver] = useState(false);
   const [fileStates, setFileStates] = useState<FileUploadState[]>([]);
+  const [direction, setDirection] = useState<'INCOMING' | 'OUTGOING'>('INCOMING');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasStarted = fileStates.length > 0;
   const allDone = hasStarted && fileStates.every((f) => f.status === 'done' || f.status === 'error');
@@ -815,7 +946,7 @@ function UploadDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         );
 
         try {
-          await uploadInvoiceApi(file);
+          await uploadInvoiceApi(file, direction);
           setFileStates((prev) =>
             prev.map((f, i) => (i === index ? { ...f, status: 'done' as const } : f)),
           );
@@ -832,7 +963,7 @@ function UploadDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     }
 
     onSuccess();
-  }, [onSuccess]);
+  }, [onSuccess, direction]);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -841,6 +972,34 @@ function UploadDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
           <h2 className="text-lg font-semibold">Rechnungen hochladen</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
+
+        {/* Direction selector — hide when uploads are in progress */}
+        {!hasStarted && (
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => setDirection('INCOMING')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg border-2 text-sm font-medium transition-colors ${
+                direction === 'INCOMING'
+                  ? 'border-primary-500 bg-primary-50 text-primary-700'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              }`}
+            >
+              <Download size={16} />
+              Eingangsrechnung
+            </button>
+            <button
+              onClick={() => setDirection('OUTGOING')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg border-2 text-sm font-medium transition-colors ${
+                direction === 'OUTGOING'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              }`}
+            >
+              <Upload size={16} />
+              Ausgangsrechnung
+            </button>
+          </div>
+        )}
 
         {/* Drop zone — hide when uploads are in progress */}
         {!hasStarted && (
@@ -929,11 +1088,12 @@ function UploadDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
 }
 
 function EditForm({
-  fields, setFields, invoiceId, onCancel, onSaved,
+  fields, setFields, invoiceId, replacesInvoiceId, onCancel, onSaved,
 }: {
   fields: Record<string, unknown>;
   setFields: (f: Record<string, unknown>) => void;
   invoiceId: string;
+  replacesInvoiceId?: string | null;
   onCancel: () => void;
   onSaved: () => void;
 }) {
@@ -986,7 +1146,7 @@ function EditForm({
         <Edit3 size={14} />
         Daten korrigieren
       </h3>
-      <ViewOriginalButton invoiceId={invoiceId} />
+      <ViewOriginalButton invoiceId={invoiceId} replacesInvoiceId={replacesInvoiceId} />
       {field('Aussteller', 'issuerName')}
       {field('UID-Nummer', 'issuerUid')}
       {field('Rechnungsnummer', 'invoiceNumber')}
@@ -1024,12 +1184,16 @@ function EditForm({
   );
 }
 
-function ApproveButton({ invoiceId, onSuccess }: { invoiceId: string; onSuccess: () => void }) {
+function ApproveButton({ invoiceId, validationStatus, onSuccess }: { invoiceId: string; validationStatus: string; onSuccess: () => void }) {
   const [done, setDone] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
+  const needsComment = validationStatus === 'WARNING' || validationStatus === 'INVALID';
+
   const mutation = useMutation({
-    mutationFn: () => approveInvoiceApi(invoiceId),
+    mutationFn: (comment?: string | null) => approveInvoiceApi(invoiceId, comment),
     onSuccess: () => {
       setDone(true);
+      setShowDialog(false);
       onSuccess();
       setTimeout(() => setDone(false), 2000);
     },
@@ -1039,20 +1203,143 @@ function ApproveButton({ invoiceId, onSuccess }: { invoiceId: string; onSuccess:
     return (
       <div className="flex items-center gap-1.5 text-sm flex-1 justify-center py-2 bg-green-100 text-green-700 rounded-lg font-medium">
         <CheckCircle size={14} />
-        Genehmigt!
+        Archiviert!
       </div>
     );
   }
 
   return (
-    <button
-      onClick={() => mutation.mutate()}
-      disabled={mutation.isPending}
-      className="btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center bg-green-600 hover:bg-green-700"
-    >
-      {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
-      Genehmigen
-    </button>
+    <>
+      <button
+        onClick={() => needsComment ? setShowDialog(true) : mutation.mutate(undefined)}
+        disabled={mutation.isPending}
+        className="btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center bg-green-600 hover:bg-green-700"
+      >
+        {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+        Genehmigen & Archivieren
+      </button>
+      {showDialog && (
+        <ApproveDialog
+          validationStatus={validationStatus}
+          isPending={mutation.isPending}
+          error={mutation.isError ? 'Fehler beim Archivieren' : null}
+          onConfirm={(comment) => mutation.mutate(comment)}
+          onClose={() => setShowDialog(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function ApproveDialog({
+  validationStatus, isPending, error, onConfirm, onClose,
+}: {
+  validationStatus: string; isPending: boolean; error: string | null;
+  onConfirm: (comment?: string | null) => void; onClose: () => void;
+}) {
+  const [comment, setComment] = useState('');
+  const isInvalid = validationStatus === 'INVALID';
+  const canConfirm = isInvalid ? comment.trim().length > 0 : true;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-4">
+          <AlertTriangle size={20} className={isInvalid ? 'text-red-500' : 'text-yellow-500'} />
+          <h2 className="text-lg font-semibold">
+            {isInvalid ? 'Ungültige Rechnung genehmigen?' : 'Rechnung mit Warnung genehmigen?'}
+          </h2>
+        </div>
+
+        <div className={`rounded-lg p-3 mb-4 text-sm ${isInvalid ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+          {isInvalid
+            ? 'Diese Rechnung hat Validierungsfehler. Bitte begründen Sie, warum sie trotzdem genehmigt werden soll.'
+            : 'Diese Rechnung hat Warnungen. Sie können optional eine Anmerkung hinzufügen.'}
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Anmerkung {isInvalid ? '*' : '(optional)'}
+          </label>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder={isInvalid ? 'Begründung eingeben...' : 'z.B. Betrag geringfügig abweichend, manuell geprüft'}
+            className="input-field min-h-[80px] text-sm"
+            maxLength={2000}
+          />
+          {comment.length > 0 && (
+            <p className="text-xs text-gray-400 mt-1">{comment.length}/2000</p>
+          )}
+        </div>
+
+        {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => onConfirm(comment.trim() || null)}
+            disabled={!canConfirm || isPending}
+            className={`btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center ${isInvalid ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}`}
+          >
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+            Trotzdem genehmigen
+          </button>
+          <button onClick={onClose} className="btn-secondary text-sm px-4">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BatchApproveDialog({
+  count, hasWarnings, hasInvalid, isPending, onConfirm, onClose,
+}: {
+  count: number; hasWarnings: boolean; hasInvalid: boolean; isPending: boolean;
+  onConfirm: (comment?: string | null) => void; onClose: () => void;
+}) {
+  const [comment, setComment] = useState('');
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-4">
+          <AlertTriangle size={20} className={hasInvalid ? 'text-red-500' : 'text-yellow-500'} />
+          <h2 className="text-lg font-semibold">{count} Rechnungen genehmigen</h2>
+        </div>
+
+        <div className={`rounded-lg p-3 mb-4 text-sm ${hasInvalid ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+          Einige der ausgewählten Rechnungen haben {hasInvalid ? 'Validierungsfehler' : 'Warnungen'}.
+          {hasInvalid
+            ? ' Bitte begründen Sie die Sammelgenehmigung.'
+            : ' Sie können optional eine Anmerkung hinzufügen.'}
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Anmerkung {hasInvalid ? '*' : '(optional)'}
+          </label>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Begründung für die Sammelgenehmigung..."
+            className="input-field min-h-[80px] text-sm"
+            maxLength={2000}
+          />
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => onConfirm(comment.trim() || null)}
+            disabled={isPending || (hasInvalid && !comment.trim())}
+            className={`btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center ${hasInvalid ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}`}
+          >
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+            {count} Rechnungen genehmigen
+          </button>
+          <button onClick={onClose} className="btn-secondary text-sm px-4">Abbrechen</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1390,34 +1677,81 @@ function ProcessingProgress({ status, error }: { status: string; error?: string 
   );
 }
 
-function ViewOriginalButton({ invoiceId }: { invoiceId: string }) {
+function ArchiveDownloadBtn({ invoiceId, variant }: { invoiceId: string; variant: 'archived' | 'original' }) {
   const [loading, setLoading] = useState(false);
-  async function handleView() {
+  const [error, setError] = useState(false);
+  const isOriginal = variant === 'original';
+  async function handleClick() {
     setLoading(true);
+    setError(false);
     try {
-      const resp = await getInvoiceDownloadUrl(invoiceId);
+      const resp = await getInvoiceDownloadUrl(invoiceId, isOriginal);
       if (resp.data?.url) window.open(resp.data.url, '_blank');
-    } catch { /* ignore */ }
+    } catch {
+      setError(true);
+    }
     setLoading(false);
   }
   return (
     <button
-      onClick={handleView}
+      onClick={handleClick}
       disabled={loading}
-      className="mt-3 w-full btn-secondary flex items-center justify-center gap-2 text-sm py-2"
+      className={`flex items-center justify-center gap-1.5 text-xs py-1.5 px-2 rounded border transition-colors ${
+        error
+          ? 'border-red-200 text-red-500 bg-red-50'
+          : isOriginal
+            ? 'border-green-300 text-green-700 hover:bg-green-100'
+            : 'border-green-400 text-green-800 bg-green-100 hover:bg-green-200 font-medium'
+      }`}
+      title={error ? 'Datei nicht verfügbar' : undefined}
     >
-      {loading ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
-      Original anzeigen
+      {loading ? <Loader2 size={12} className="animate-spin" /> : isOriginal ? <Eye size={12} /> : <Download size={12} />}
+      {error ? 'Nicht verfügbar' : isOriginal ? 'Original' : 'Archiv-PDF'}
     </button>
   );
 }
 
-function DownloadButton({ invoiceId }: { invoiceId: string }) {
+function ViewOriginalButton({ invoiceId, replacesInvoiceId }: { invoiceId: string; replacesInvoiceId?: string | null }) {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // For Ersatzbelege: download the original invoice's file
+  const fileInvoiceId = replacesInvoiceId || invoiceId;
+  async function handleView() {
+    setLoading(true);
+    setError(null);
+    try {
+      // Always request the original (unstamped) version
+      const resp = await getInvoiceDownloadUrl(fileInvoiceId, true);
+      if (resp.data?.url) window.open(resp.data.url, '_blank');
+    } catch {
+      setError('Datei nicht verfügbar');
+    }
+    setLoading(false);
+  }
+  return (
+    <div>
+      <button
+        onClick={handleView}
+        disabled={loading}
+        className="mt-3 w-full btn-secondary flex items-center justify-center gap-2 text-sm py-2"
+      >
+        {loading ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
+        Original anzeigen
+      </button>
+      {error && <p className="text-xs text-red-500 mt-1 text-center">{error}</p>}
+    </div>
+  );
+}
+
+function DownloadButton({ invoiceId, replacesInvoiceId }: { invoiceId: string; replacesInvoiceId?: string | null }) {
+  const [loading, setLoading] = useState(false);
+  // For Ersatzbelege: download the original invoice's file
+  const fileInvoiceId = replacesInvoiceId || invoiceId;
   async function handleDownload() {
     setLoading(true);
     try {
-      const resp = await getInvoiceDownloadUrl(invoiceId);
+      // Default: returns archived (stamped) version if available, otherwise original
+      const resp = await getInvoiceDownloadUrl(fileInvoiceId);
       if (resp.data?.url) window.open(resp.data.url, '_blank');
     } catch { /* ignore */ }
     setLoading(false);
@@ -1470,7 +1804,8 @@ function ProcessingBadge({ status }: { status: string }) {
     PROCESSING: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Verarbeitung...', animate: true },
     PROCESSED: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Verarbeitet' },
     REVIEW_REQUIRED: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Review nötig' },
-    APPROVED: { bg: 'bg-green-100', text: 'text-green-700', label: 'Genehmigt' },
+    ARCHIVED: { bg: 'bg-green-100', text: 'text-green-700', label: 'Archiviert' },
+    RECONCILED: { bg: 'bg-teal-100', text: 'text-teal-700', label: 'Abgeglichen' },
     EXPORTED: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Exportiert' },
     ERROR: { bg: 'bg-red-100', text: 'text-red-700', label: 'Fehler' },
     REPLACED: { bg: 'bg-gray-200', text: 'text-gray-600', label: 'Ersetzt' },

@@ -1,0 +1,599 @@
+/**
+ * Archival Service — Genehmigungs- und Archivierungs-Workflow
+ *
+ * Handles:
+ * - Sequential number generation (ER-2026-00001) with SELECT FOR UPDATE
+ * - PDF stamping (digital Eingangsstempel)
+ * - Image-to-PDF conversion for non-PDF uploads
+ * - File rename + move to archive/
+ * - Single and batch archival
+ * - Storno (cancellation) tracking
+ */
+
+import { Prisma } from '@prisma/client';
+import { prisma } from '../config/database.js';
+import * as storageService from './storage.service.js';
+import { writeAuditLog } from '../middleware/auditLogger.js';
+import { NotFoundError, ConflictError } from '../utils/errors.js';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import sharp from 'sharp';
+
+// ============================================================
+// TYPES
+// ============================================================
+
+interface NextNumberResult {
+  number: number;
+  formatted: string; // "ER-2026-00001"
+}
+
+interface StampData {
+  archivalNumber: string;
+  eingangsdatum: Date;    // Upload date
+  archivedAt: Date;       // Approval timestamp
+  approvedBy: string;     // "Max Mustermann"
+  validationStatus: string; // "VALID", "WARNING", "INVALID"
+  comment?: string | null; // Optional: Begründung bei Warnung/Ungültig
+}
+
+interface ArchiveResult {
+  archivalNumber: string;
+  archivedStoragePath: string;
+  archivedFileName: string;
+  archivedAt: Date;
+}
+
+interface InvoiceForArchival {
+  id: string;
+  tenantId: string;
+  direction: string;
+  documentType: string;
+  vendorName: string | null;
+  invoiceDate: Date | null;
+  storagePath: string;
+  mimeType: string;
+  processingStatus: string;
+  isLocked: boolean;
+  archivalNumber: string | null;
+  validationStatus: string;
+  createdAt: Date; // Upload date (Eingangsdatum)
+}
+
+// ============================================================
+// SEQUENTIAL NUMBER GENERATION
+// ============================================================
+
+/**
+ * Gets next sequential number using SELECT FOR UPDATE to prevent duplicates.
+ * MUST be called inside a Prisma interactive transaction.
+ */
+export async function getNextSequentialNumber(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  prefix: string,
+  year: number,
+): Promise<NextNumberResult> {
+  // SELECT FOR UPDATE — locks the row for this transaction
+  const rows = await tx.$queryRaw<Array<{ id: string; lastNumber: number }>>`
+    SELECT id, "lastNumber"
+    FROM sequential_numbers
+    WHERE "tenantId" = ${tenantId}
+      AND prefix = ${prefix}
+      AND year = ${year}
+    FOR UPDATE
+  `;
+
+  let nextNumber: number;
+
+  if (rows.length === 0) {
+    // First number for this tenant/prefix/year
+    nextNumber = 1;
+    await tx.$executeRaw`
+      INSERT INTO sequential_numbers (id, "tenantId", prefix, year, "lastNumber", "createdAt", "updatedAt")
+      VALUES (gen_random_uuid(), ${tenantId}, ${prefix}, ${year}, 1, NOW(), NOW())
+    `;
+  } else {
+    nextNumber = rows[0].lastNumber + 1;
+    await tx.$executeRaw`
+      UPDATE sequential_numbers
+      SET "lastNumber" = ${nextNumber}, "updatedAt" = NOW()
+      WHERE id = ${rows[0].id}
+    `;
+  }
+
+  const formatted = `${prefix}-${year}-${String(nextNumber).padStart(5, '0')}`;
+  return { number: nextNumber, formatted };
+}
+
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
+
+/**
+ * Sanitizes vendor name for use in filenames.
+ * Umlauts → ae/oe/ue/ss, special chars removed, spaces → hyphens, max 50 chars.
+ */
+export function sanitizeVendorName(name: string | null): string {
+  if (!name) return 'Unbekannt';
+
+  return name
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+    .replace(/Ä/g, 'Ae').replace(/Ö/g, 'Oe').replace(/Ü/g, 'Ue')
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-zA-Z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 50)
+    || 'Unbekannt';
+}
+
+/**
+ * Determines the archival prefix based on document type and direction.
+ * CREDIT_NOTE → GS, OUTGOING → AR, default (INCOMING) → ER
+ */
+export function getArchivalPrefix(documentType: string, direction?: string): string {
+  if (documentType === 'CREDIT_NOTE') return 'GS';
+  if (direction === 'OUTGOING') return 'AR';
+  return 'ER'; // INVOICE, RECEIPT, ERSATZBELEG (INCOMING)
+}
+
+/**
+ * Builds the archived filename.
+ * Format: ER-2026-00001_Lieferantenname_2026-01-15.pdf
+ */
+export function buildArchivedFileName(
+  archivalNumber: string,
+  vendorName: string | null,
+  invoiceDate: Date | null,
+): string {
+  const sanitizedVendor = sanitizeVendorName(vendorName);
+  const dateStr = invoiceDate
+    ? invoiceDate.toISOString().slice(0, 10)
+    : 'kein-datum';
+  return `${archivalNumber}_${sanitizedVendor}_${dateStr}.pdf`;
+}
+
+/**
+ * Builds the archive storage path.
+ * Format: {tenantId}/archive/{year}/{filename}
+ */
+export function buildArchivePath(
+  tenantId: string,
+  archivalNumber: string,
+  vendorName: string | null,
+  invoiceDate: Date | null,
+): string {
+  const year = archivalNumber.split('-')[1]; // Extract year from "ER-2026-00001"
+  const fileName = buildArchivedFileName(archivalNumber, vendorName, invoiceDate);
+  return `${tenantId}/archive/${year}/${fileName}`;
+}
+
+// ============================================================
+// PDF STAMPING
+// ============================================================
+
+/**
+ * Adds a digital Eingangsstempel to the first page of a PDF.
+ * Returns the stamped PDF as a Buffer.
+ */
+export async function stampPdf(pdfBuffer: Buffer, stamp: StampData): Promise<Buffer> {
+  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const pages = pdfDoc.getPages();
+  if (pages.length === 0) throw new Error('PDF hat keine Seiten');
+
+  const firstPage = pages[0];
+  const { width, height } = firstPage.getSize();
+
+  // Truncate comment for stamp (full text stored in DB)
+  const commentText = stamp.comment ? stamp.comment.substring(0, 100) : null;
+  const hasComment = !!commentText;
+
+  // Stamp box dimensions (top-right corner) — taller when comment present
+  const boxWidth = 230;
+  const boxHeight = hasComment ? 86 : 72;
+  const margin = 8;
+  const x = width - boxWidth - margin;
+  const y = height - boxHeight - margin;
+
+  // Semi-transparent background
+  firstPage.drawRectangle({
+    x,
+    y,
+    width: boxWidth,
+    height: boxHeight,
+    color: rgb(0.96, 0.96, 0.96),
+    borderColor: rgb(0.2, 0.55, 0.2),
+    borderWidth: 1.2,
+    opacity: 0.92,
+  });
+
+  // Line 1: Archival number (bold)
+  firstPage.drawText(stamp.archivalNumber, {
+    x: x + 8,
+    y: y + boxHeight - 16,
+    size: 11,
+    font: helveticaBold,
+    color: rgb(0.1, 0.1, 0.1),
+  });
+
+  // Line 2: Status
+  const statusMap: Record<string, { text: string; color: ReturnType<typeof rgb> }> = {
+    VALID: { text: 'GUELTIG', color: rgb(0.1, 0.55, 0.1) },
+    WARNING: { text: 'WARNUNG', color: rgb(0.75, 0.55, 0) },
+    INVALID: { text: 'GEPRUEFT', color: rgb(0.7, 0.1, 0.1) },
+  };
+  const statusInfo = statusMap[stamp.validationStatus] || statusMap.VALID;
+  firstPage.drawText(statusInfo.text, {
+    x: x + 8,
+    y: y + boxHeight - 30,
+    size: 8,
+    font: helveticaBold,
+    color: statusInfo.color,
+  });
+
+  // Line 3: Eingangsdatum
+  const eingangStr = stamp.eingangsdatum.toLocaleDateString('de-AT', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+  });
+  firstPage.drawText(`Eingang: ${eingangStr}`, {
+    x: x + 8,
+    y: y + boxHeight - 44,
+    size: 7.5,
+    font: helvetica,
+    color: rgb(0.3, 0.3, 0.3),
+  });
+
+  // Line 4: Approved by + timestamp
+  const archiveStr = stamp.archivedAt.toLocaleDateString('de-AT', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+  const approvedText = `${stamp.approvedBy} | ${archiveStr}`;
+  firstPage.drawText(approvedText.substring(0, 45), {
+    x: x + 8,
+    y: y + boxHeight - 58,
+    size: 7,
+    font: helvetica,
+    color: rgb(0.4, 0.4, 0.4),
+  });
+
+  // Line 5 (optional): Approval comment
+  if (commentText) {
+    const displayComment = commentText.length >= 100 ? `Anm: ${commentText}...` : `Anm: ${commentText}`;
+    firstPage.drawText(displayComment.substring(0, 55), {
+      x: x + 8,
+      y: y + boxHeight - 72,
+      size: 6.5,
+      font: helvetica,
+      color: rgb(0.45, 0.35, 0.0),
+    });
+  }
+
+  const stamped = await pdfDoc.save();
+  return Buffer.from(stamped);
+}
+
+// ============================================================
+// IMAGE TO PDF CONVERSION
+// ============================================================
+
+/**
+ * Wraps an image (JPEG, PNG, TIFF, WebP) into a single-page A4 PDF.
+ * Used during archival so all archived documents can be stamped uniformly.
+ */
+export async function imageToPdf(imageBuffer: Buffer, mimeType: string): Promise<Buffer> {
+  let processedBuffer: Buffer;
+  let embedMethod: 'jpg' | 'png';
+
+  if (mimeType === 'image/jpeg') {
+    processedBuffer = imageBuffer;
+    embedMethod = 'jpg';
+  } else {
+    // Convert TIFF, WebP, PNG to PNG for pdf-lib compatibility
+    processedBuffer = await sharp(imageBuffer).png().toBuffer();
+    embedMethod = 'png';
+  }
+
+  const pdfDoc = await PDFDocument.create();
+
+  // Get image dimensions
+  const metadata = await sharp(processedBuffer).metadata();
+  const imgWidth = metadata.width || 595;
+  const imgHeight = metadata.height || 842;
+
+  // Scale to fit A4 page (595 x 842 points) with margin
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const pageMargin = 20;
+  const maxWidth = pageWidth - 2 * pageMargin;
+  const maxHeight = pageHeight - 2 * pageMargin;
+
+  const scale = Math.min(maxWidth / imgWidth, maxHeight / imgHeight, 1);
+  const scaledWidth = imgWidth * scale;
+  const scaledHeight = imgHeight * scale;
+
+  const page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+  const image = embedMethod === 'jpg'
+    ? await pdfDoc.embedJpg(processedBuffer)
+    : await pdfDoc.embedPng(processedBuffer);
+
+  page.drawImage(image, {
+    x: (pageWidth - scaledWidth) / 2,
+    y: pageHeight - scaledHeight - pageMargin, // top-aligned
+    width: scaledWidth,
+    height: scaledHeight,
+  });
+
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
+}
+
+// ============================================================
+// CORE ARCHIVAL FUNCTIONS
+// ============================================================
+
+/**
+ * Archives a single invoice inside an interactive Prisma transaction.
+ * This is the transaction body — called from archiveInvoice() or batchArchive().
+ */
+async function archiveInvoiceInTransaction(
+  tx: Prisma.TransactionClient,
+  invoice: InvoiceForArchival,
+  userId: string | undefined,
+  userName: string,
+  comment?: string | null,
+): Promise<ArchiveResult> {
+  // Guard: only PROCESSED or REVIEW_REQUIRED invoices can be archived
+  if (invoice.processingStatus !== 'PROCESSED' && invoice.processingStatus !== 'REVIEW_REQUIRED') {
+    throw new ConflictError(
+      `Rechnung kann nicht archiviert werden (Status: ${invoice.processingStatus}). Nur geprüfte Rechnungen sind archivierbar.`,
+    );
+  }
+
+  // Guard: already archived
+  if (invoice.archivalNumber) {
+    throw new ConflictError(
+      `Rechnung bereits archiviert als ${invoice.archivalNumber}`,
+    );
+  }
+
+  // 1. Get next sequential number (SELECT FOR UPDATE)
+  const prefix = getArchivalPrefix(invoice.documentType, invoice.direction);
+  const year = invoice.invoiceDate
+    ? invoice.invoiceDate.getFullYear()
+    : new Date().getFullYear();
+
+  const { formatted: archivalNumber } = await getNextSequentialNumber(
+    tx, invoice.tenantId, prefix, year,
+  );
+
+  // 2. Build archive path and filename
+  const archivedFileName = buildArchivedFileName(archivalNumber, invoice.vendorName, invoice.invoiceDate);
+  const archivedStoragePath = buildArchivePath(
+    invoice.tenantId, archivalNumber, invoice.vendorName, invoice.invoiceDate,
+  );
+
+  // 3. Download original file
+  let fileBuffer = await storageService.downloadFile(invoice.storagePath);
+
+  // 4. If image, convert to PDF first
+  if (invoice.mimeType !== 'application/pdf') {
+    fileBuffer = await imageToPdf(fileBuffer, invoice.mimeType);
+  }
+
+  // 5. Stamp the PDF (with error tolerance)
+  const archivedAt = new Date();
+  let stampFailed = false;
+  try {
+    fileBuffer = await stampPdf(fileBuffer, {
+      archivalNumber,
+      eingangsdatum: invoice.createdAt,
+      archivedAt,
+      approvedBy: userName,
+      validationStatus: invoice.validationStatus,
+      comment,
+    });
+  } catch (err) {
+    console.warn(`[Archival] PDF-Stempel fehlgeschlagen für ${invoice.id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    stampFailed = true;
+    // Continue without stamp — archival still proceeds
+  }
+
+  // 6. Upload stamped file to archive location
+  await storageService.uploadFile(archivedStoragePath, fileBuffer, 'application/pdf');
+
+  // 7. Update invoice in DB (within transaction)
+  await tx.invoice.update({
+    where: { id: invoice.id },
+    data: {
+      processingStatus: 'ARCHIVED',
+      archivalNumber,
+      archivalPrefix: prefix,
+      archivedAt,
+      archivedByUserId: userId || null,
+      archivedStoragePath,
+      archivedFileName,
+      stampFailed,
+      approvalComment: comment || null,
+      isLocked: true,
+      lockedAt: archivedAt,
+      lockedByUserId: userId || null,
+    },
+  });
+
+  return { archivalNumber, archivedStoragePath, archivedFileName, archivedAt };
+}
+
+// ============================================================
+// PUBLIC API
+// ============================================================
+
+const ARCHIVAL_SELECT = {
+  id: true, tenantId: true, direction: true, documentType: true, vendorName: true,
+  invoiceDate: true, storagePath: true, mimeType: true,
+  processingStatus: true, isLocked: true, archivalNumber: true,
+  validationStatus: true, createdAt: true,
+} as const;
+
+/**
+ * Archives a single invoice. Full workflow:
+ * sequential number → download → stamp PDF → upload to archive → update DB → audit log
+ */
+export async function archiveInvoice(
+  tenantId: string,
+  userId: string | undefined,
+  invoiceId: string,
+  comment?: string | null,
+): Promise<ArchiveResult> {
+  const [invoice, user] = await Promise.all([
+    prisma.invoice.findFirst({
+      where: { id: invoiceId, tenantId },
+      select: ARCHIVAL_SELECT,
+    }),
+    userId ? prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    }) : null,
+  ]);
+
+  if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
+  const userName = user ? `${user.firstName} ${user.lastName}` : 'System';
+
+  // Interactive transaction with 30s timeout (file operations may be slow)
+  const result = await prisma.$transaction(
+    async (tx) => archiveInvoiceInTransaction(tx, invoice, userId, userName, comment),
+    { timeout: 30_000 },
+  );
+
+  // Audit log (fire-and-forget, outside transaction)
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Invoice',
+    entityId: invoiceId,
+    action: 'APPROVE_AND_ARCHIVE',
+    newData: {
+      archivalNumber: result.archivalNumber,
+      archivedStoragePath: result.archivedStoragePath,
+      archivedFileName: result.archivedFileName,
+      approvalComment: comment || undefined,
+    },
+  });
+
+  return result;
+}
+
+/**
+ * Archives multiple invoices in a single transaction.
+ * Each gets the next sequential number (guaranteed sequential, no gaps within batch).
+ */
+export async function batchArchiveInvoices(
+  tenantId: string,
+  userId: string,
+  invoiceIds: string[],
+  comment?: string | null,
+): Promise<{ archived: number; results: Array<{ invoiceId: string; archivalNumber: string }>; skipped: string[] }> {
+  const [invoices, user] = await Promise.all([
+    prisma.invoice.findMany({
+      where: { id: { in: invoiceIds }, tenantId },
+      select: { ...ARCHIVAL_SELECT, belegNr: true },
+    }),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    }),
+  ]);
+
+  const userName = user ? `${user.firstName} ${user.lastName}` : 'System';
+  const foundMap = new Map(invoices.map((i) => [i.id, i]));
+  const skipped: string[] = [];
+  const toArchive: InvoiceForArchival[] = [];
+
+  for (const id of invoiceIds) {
+    const inv = foundMap.get(id);
+    if (!inv) { skipped.push(id); continue; }
+    if (inv.processingStatus !== 'PROCESSED' && inv.processingStatus !== 'REVIEW_REQUIRED') {
+      skipped.push(`BEL-${String(inv.belegNr).padStart(3, '0')} (${inv.processingStatus})`);
+      continue;
+    }
+    if (inv.archivalNumber) {
+      skipped.push(`${inv.archivalNumber} (bereits archiviert)`);
+      continue;
+    }
+    toArchive.push(inv);
+  }
+
+  const results: Array<{ invoiceId: string; archivalNumber: string }> = [];
+
+  if (toArchive.length > 0) {
+    // Single transaction for all — guarantees sequential numbers without gaps
+    await prisma.$transaction(
+      async (tx) => {
+        for (const inv of toArchive) {
+          const res = await archiveInvoiceInTransaction(tx, inv, userId, userName, comment);
+          results.push({ invoiceId: inv.id, archivalNumber: res.archivalNumber });
+        }
+      },
+      { timeout: toArchive.length * 15_000 },
+    );
+
+    // Audit logs (fire-and-forget, outside transaction)
+    for (const res of results) {
+      writeAuditLog({
+        tenantId,
+        userId,
+        entityType: 'Invoice',
+        entityId: res.invoiceId,
+        action: 'APPROVE_AND_ARCHIVE',
+        newData: { archivalNumber: res.archivalNumber },
+        metadata: { trigger: 'BATCH', batchSize: toArchive.length },
+      });
+    }
+  }
+
+  return { archived: results.length, results, skipped };
+}
+
+/**
+ * Cancels an archival number (Storno).
+ * The number is NOT reused — it's documented in cancelled_numbers.
+ */
+export async function cancelArchivalNumber(
+  tenantId: string,
+  userId: string,
+  invoiceId: string,
+  reason: string,
+): Promise<void> {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, tenantId, archivalNumber: { not: null } },
+    select: { id: true, archivalNumber: true },
+  });
+
+  if (!invoice || !invoice.archivalNumber) {
+    throw new NotFoundError('Archivierte Rechnung', invoiceId);
+  }
+
+  await prisma.cancelledNumber.create({
+    data: {
+      tenantId,
+      archivalNumber: invoice.archivalNumber,
+      invoiceId,
+      reason,
+      cancelledByUserId: userId,
+    },
+  });
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Invoice',
+    entityId: invoiceId,
+    action: 'CANCEL_ARCHIVAL_NUMBER',
+    newData: { archivalNumber: invoice.archivalNumber, reason },
+  });
+}

@@ -29,6 +29,7 @@ interface ValidationInput {
   extractedFields: ExtractedFields;
   tenantId: string;
   invoiceId: string;
+  direction?: 'INCOMING' | 'OUTGOING';
   estimatedEurGross?: number | null;
   exchangeRate?: number | null;
   exchangeRateDate?: string | null;
@@ -70,6 +71,7 @@ const EU_UID_PREFIXES = [
   'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK',
   'XI', // Nordirland (NI Protocol, post-Brexit)
 ];
+const EU_COUNTRY_CODES = new Set(EU_UID_PREFIXES);
 
 // ============================================================
 // Vendor location detection (Inland / EU / Drittland)
@@ -630,12 +632,15 @@ function validateIbanCheckDigit(ibanClean: string): boolean {
   }
 }
 
-function checkIbanSyntax(fields: ExtractedFields, tenantIbans: string[] = []): ValidationCheck {
+function checkIbanSyntax(fields: ExtractedFields, tenantIbans: string[] = [], direction: 'INCOMING' | 'OUTGOING' = 'INCOMING'): ValidationCheck {
   const rule = VALIDATION_RULES.IBAN_SYNTAX;
   const iban = fields.issuerIban;
 
   if (!iban) {
-    return { rule: rule.id, status: 'YELLOW', message: 'Keine IBAN vorhanden', legalBasis: rule.legalBasis };
+    // For outgoing: no IBAN is less critical (customer doesn't need our IBAN for payment to us)
+    const status = direction === 'OUTGOING' ? 'GRAY' : 'YELLOW';
+    const message = direction === 'OUTGOING' ? 'Keine IBAN auf Ausgangsrechnung (optional)' : 'Keine IBAN vorhanden';
+    return { rule: rule.id, status, message, legalBasis: rule.legalBasis };
   }
 
   const ibanClean = iban.replace(/\s/g, '').toUpperCase();
@@ -670,6 +675,10 @@ function checkIbanSyntax(fields: ExtractedFields, tenantIbans: string[] = []): V
   for (const tenantIban of tenantIbans) {
     const tenantIbanClean = tenantIban.replace(/\s/g, '').toUpperCase();
     if (ibanClean === tenantIbanClean) {
+      // For OUTGOING: own IBAN is EXPECTED (we're the issuer)
+      if (direction === 'OUTGOING') {
+        return { rule: rule.id, status: 'GREEN', message: `Eigene Firmen-IBAN korrekt: ${iban}`, legalBasis: rule.legalBasis };
+      }
       return {
         rule: rule.id, status: 'YELLOW',
         message: `Dies ist Ihre eigene Firmen-IBAN (${iban}) — bei Eingangsrechnungen wird die IBAN des Lieferanten erwartet`,
@@ -681,8 +690,14 @@ function checkIbanSyntax(fields: ExtractedFields, tenantIbans: string[] = []): V
   return { rule: rule.id, status: 'GREEN', message: `IBAN-Syntax und Prüfziffer korrekt: ${iban}`, legalBasis: rule.legalBasis };
 }
 
-function checkReverseCharge(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
+function checkReverseCharge(fields: ExtractedFields, amountClass: AmountClass, direction: 'INCOMING' | 'OUTGOING' = 'INCOMING'): ValidationCheck {
   const rule = VALIDATION_RULES.REVERSE_CHARGE;
+
+  // For outgoing invoices: RC responsibility lies with recipient, not us
+  if (direction === 'OUTGOING') {
+    return { rule: rule.id, status: 'GRAY', message: 'Reverse Charge Prüfung: bei Ausgangsrechnungen nicht anwendbar', legalBasis: rule.legalBasis };
+  }
+
   const vendorLoc = detectVendorLocation(fields);
   if (!isRequiredFor(rule.id, amountClass) && vendorLoc.region !== 'EU') {
     return { rule: rule.id, status: 'GRAY', message: `${rule.label}: nicht erforderlich für Kleinbetragsrechnung`, legalBasis: rule.legalBasis };
@@ -707,11 +722,35 @@ function checkReverseCharge(fields: ExtractedFields, amountClass: AmountClass): 
 }
 
 
-function checkForeignVat(fields: ExtractedFields): ValidationCheck {
+function checkForeignVat(fields: ExtractedFields, direction: 'INCOMING' | 'OUTGOING' = 'INCOMING'): ValidationCheck {
   const rule = VALIDATION_RULES.FOREIGN_VAT_CHECK;
   const vatAmount = toNum(fields.vatAmount);
   const vatRate = toNum(fields.vatRate);
   const vatCharged = (vatAmount !== null && vatAmount > 0) || (vatRate !== null && vatRate > 0);
+
+  // For OUTGOING: check customer location (recipient) instead of vendor location (issuer)
+  if (direction === 'OUTGOING') {
+    // Detect customer location from recipient UID
+    const customerUid = fields.recipientUid?.trim();
+    if (!customerUid) {
+      return { rule: rule.id, status: 'GREEN', message: 'USt-Verrechnung plausibel für Ausgangsrechnung', legalBasis: rule.legalBasis };
+    }
+    const customerCountry = customerUid.substring(0, 2).toUpperCase();
+    if (customerCountry === 'AT') {
+      return { rule: rule.id, status: 'GREEN', message: 'Inländischer Kunde — USt-Ausweis korrekt', legalBasis: rule.legalBasis };
+    }
+    // EU customer with VAT charged → hint about reverse charge
+    const isEu = EU_COUNTRY_CODES.has(customerCountry);
+    if (isEu && vatCharged) {
+      return {
+        rule: rule.id, status: 'YELLOW',
+        message: `EU-Kunde (${customerCountry}) — bei B2B evtl. Reverse Charge anwenden (USt nicht verrechnen)`,
+        legalBasis: rule.legalBasis,
+      };
+    }
+    return { rule: rule.id, status: 'GREEN', message: 'USt-Verrechnung plausibel für Ausgangsrechnung', legalBasis: rule.legalBasis };
+  }
+
   const location = detectVendorLocation(fields);
 
   // Inland: USt-Ausweis ist normal
@@ -906,7 +945,7 @@ interface TenantInfo {
   ibans: string[];
 }
 
-async function checkIssuerIsNotSelf(tenantId: string, fields: ExtractedFields, tenantInfo?: TenantInfo | null): Promise<ValidationCheck> {
+async function checkIssuerIsNotSelf(tenantId: string, fields: ExtractedFields, tenantInfo?: TenantInfo | null, direction: 'INCOMING' | 'OUTGOING' = 'INCOMING'): Promise<ValidationCheck> {
   const rule = VALIDATION_RULES.ISSUER_SELF_CHECK;
 
   let tenant: TenantInfo | null = tenantInfo ?? null;
@@ -928,6 +967,30 @@ async function checkIssuerIsNotSelf(tenantId: string, fields: ExtractedFields, t
     return { rule: rule.id, status: 'GREEN', message: 'Mandant nicht gefunden — Prüfung übersprungen', legalBasis: rule.legalBasis };
   }
 
+  // OUTGOING: issuer SHOULD be our company
+  if (direction === 'OUTGOING') {
+    let selfMatch = false;
+    if (tenant.uidNumber && fields.issuerUid) {
+      const tenantUid = tenant.uidNumber.replace(/\s/g, '').toUpperCase();
+      const issuerUid = fields.issuerUid.replace(/\s/g, '').toUpperCase();
+      if (tenantUid === issuerUid) selfMatch = true;
+    }
+    if (!selfMatch && tenant.name && fields.issuerName) {
+      const tenantNameLower = tenant.name.toLowerCase();
+      const issuerNameLower = fields.issuerName.toLowerCase();
+      if (issuerNameLower.includes(tenantNameLower) || tenantNameLower.includes(issuerNameLower)) selfMatch = true;
+    }
+    if (selfMatch) {
+      return { rule: rule.id, status: 'GREEN', message: 'Aussteller ist die eigene Firma (korrekt für Ausgangsrechnung)', legalBasis: rule.legalBasis };
+    }
+    return {
+      rule: rule.id, status: 'YELLOW',
+      message: 'Aussteller konnte nicht als eigene Firma bestätigt werden — bei Ausgangsrechnungen sollte Ihr Unternehmen der Aussteller sein',
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  // INCOMING: issuer should NOT be our company
   // Check if issuer UID matches tenant UID (= own company listed as issuer = wrong)
   if (tenant.uidNumber && fields.issuerUid) {
     const tenantUid = tenant.uidNumber.replace(/\s/g, '').toUpperCase();
@@ -1188,7 +1251,7 @@ function checkCurrencyInfo(
 // ============================================================
 
 export async function validateInvoice(input: ValidationInput): Promise<ValidationOutput> {
-  const { extractedFields: fields, tenantId, invoiceId, estimatedEurGross, exchangeRate, exchangeRateDate } = input;
+  const { extractedFields: fields, tenantId, invoiceId, direction = 'INCOMING', estimatedEurGross, exchangeRate, exchangeRateDate } = input;
   const gross = toNum(fields.grossAmount);
   const currency = fields.currency || 'EUR';
   const amountClass = determineAmountClass(gross, currency, estimatedEurGross);
@@ -1228,9 +1291,9 @@ export async function validateInvoice(input: ValidationInput): Promise<Validatio
     checkMath(fields),
     checkVatRateValid(fields),
     checkUidSyntax(fields, amountClass),
-    checkIbanSyntax(fields, tenantIbans),
-    checkReverseCharge(fields, amountClass),
-    checkForeignVat(fields),
+    checkIbanSyntax(fields, tenantIbans, direction),
+    checkReverseCharge(fields, amountClass, direction),
+    checkForeignVat(fields, direction),
     checkPlzUidConsistency(fields, amountClass),
     checkCurrencyInfo(fields, estimatedEurGross, exchangeRate, exchangeRateDate),
   ];
@@ -1239,7 +1302,7 @@ export async function validateInvoice(input: ValidationInput): Promise<Validatio
   const duplicateCheck = await checkDuplicate(tenantId, invoiceId, fields);
   checks.push(duplicateCheck);
 
-  const selfCheck = await checkIssuerIsNotSelf(tenantId, fields, tenantInfo);
+  const selfCheck = await checkIssuerIsNotSelf(tenantId, fields, tenantInfo, direction);
   checks.push(selfCheck);
 
   // VIES UID validation (live EU API call)

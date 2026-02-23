@@ -5,6 +5,7 @@ export interface InvoiceFilters {
   page?: number;
   limit?: number;
   search?: string;
+  direction?: 'INCOMING' | 'OUTGOING';
   processingStatus?: string;
   validationStatus?: string;
   sortBy?: string;
@@ -21,9 +22,10 @@ export async function getInvoiceApi(id: string) {
   return response.data;
 }
 
-export async function uploadInvoiceApi(file: File) {
+export async function uploadInvoiceApi(file: File, direction: 'INCOMING' | 'OUTGOING' = 'INCOMING') {
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('direction', direction);
   const response = await apiClient.post<ApiResponse<InvoiceListItem>>('/invoices', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
@@ -35,8 +37,8 @@ export async function updateInvoiceApi(id: string, data: Record<string, unknown>
   return response.data;
 }
 
-export async function approveInvoiceApi(id: string) {
-  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/approve`);
+export async function approveInvoiceApi(id: string, comment?: string | null) {
+  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/approve`, { comment: comment || undefined });
   return response.data;
 }
 
@@ -55,13 +57,14 @@ export async function createErsatzbelegApi(originalInvoiceId: string, data: Reco
   return response.data;
 }
 
-export async function batchApproveInvoicesApi(invoiceIds: string[]) {
-  const response = await apiClient.post<ApiResponse<{ approved: number; skipped: string[] }>>('/invoices/batch-approve', { invoiceIds });
+export async function batchApproveInvoicesApi(invoiceIds: string[], comment?: string | null) {
+  const response = await apiClient.post<ApiResponse<{ archived: number; skipped: string[]; results: Array<{ invoiceId: string; archivalNumber: string }> }>>('/invoices/batch-approve', { invoiceIds, comment: comment || undefined });
   return response.data;
 }
 
-export async function getInvoiceDownloadUrl(id: string) {
-  const response = await apiClient.get<ApiResponse<{ url: string }>>(`/invoices/${id}/download`);
+export async function getInvoiceDownloadUrl(id: string, original?: boolean) {
+  const params = original ? { original: 'true' } : {};
+  const response = await apiClient.get<ApiResponse<{ url: string; isArchived?: boolean }>>(`/invoices/${id}/download`, { params });
   return response.data;
 }
 

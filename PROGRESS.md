@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 23. Februar 2026 (Session 8)
+**Letzte Aktualisierung:** 23. Februar 2026 (Session 10)
 
 ---
 
@@ -27,7 +27,7 @@
 | `bank_accounts` | Separate Bankkontenverwaltung (Multi-Konto) | ✅ IMPLEMENTIERT (Phase 4) |
 | `extracted_data` | Versionierte KI-Extraktionsdaten | ✅ IMPLEMENTIERT |
 | `validation_results` | Separates Prüfprotokoll (Regel-Engine Output) | ✅ IMPLEMENTIERT |
-| `sequential_numbers` | Fortlaufende Nummerierung ER/AR-JJJJ-NNNNN | OFFEN — Prio 2 |
+| `sequential_numbers` | Fortlaufende Nummerierung ER/AR-JJJJ-NNNNN | ✅ IMPLEMENTIERT (Phase 5) |
 | `llm_config` | Admin-konfigurierbare LLM-Einstellungen | OFFEN — MVP nutzt env-Konfiguration |
 | `storage_config` | Admin-konfigurierbare Storage-Einstellungen | NIEDRIG — hardcoded reicht für MVP |
 
@@ -39,7 +39,7 @@
 | `/modules/ocr` | Dreistufige Erkennungs-Pipeline | ✅ Implementiert (pdf-parse → Vision → sharp) |
 | `/modules/llm` | LLM-Abstraktionsschicht | ✅ Implementiert (OpenAI, env-konfiguriert) |
 | `/modules/validation` | Regel-Engine (§11 UStG) | ✅ 18 Prüfregeln + Ampel-Logik |
-| `/modules/workflow` | Ampel, Nummerierung, Archivierung | ✅ Ampel + Approve/Reject, Nummerierung offen |
+| `/modules/workflow` | Ampel, Nummerierung, Archivierung | ✅ Ampel + Archivierung + Nummerierung (Phase 5) |
 | `/modules/reconciliation` | Bankabgleich-Algorithmen | Nur DB-Matchings, keine Algorithmen |
 | `/modules/export` | CSV/BMD-Export-Generierung | Stub-Route |
 | `/modules/communication` | Mail-Versand | Nicht implementiert |
@@ -163,12 +163,36 @@
 - [x] **174 Unit-Tests**: Validation-Service vollständig getestet (alle 18+ Prüfregeln, EU-Ländermuster, Grenzwerte, Integration)
 - [x] **`_testing` Export**: Alle internen Funktionen über Namespace exportiert für direktes Unit-Testing
 
-### Prio 2: Workflow & Bankabgleich
+### Phase 5: Archivierungs-Workflow (Genehmigung → Nummerierung → Stempel → Archiv) ✅
 
-- [ ] **Fortlaufende Nummerierung** (ER-JJJJ-NNNNN / AR-JJJJ-NNNNN)
-  - `sequential_numbers` Tabelle
-  - Nummernlücken-Warnung
-- [ ] **Bankkonten-Verwaltung** (CRUD `/api/bank-accounts`)
+- [x] **ProcessingStatus Refactoring**: APPROVED entfernt → ARCHIVED (Genehmigung = sofortige Archivierung) + RECONCILED
+- [x] **SequentialNumber-Model**: Lückenlose fortlaufende Nummerierung (ER-2026-00001), SELECT FOR UPDATE via Prisma Raw SQL
+- [x] **CancelledNumber-Model**: Storno-Tracking mit Grund, Zeitpunkt, User (für Betriebsprüfung)
+- [x] **Invoice Archivierungsfelder**: archivalNumber, archivalPrefix, archivedAt, archivedByUserId, archivedStoragePath, archivedFileName, stampFailed
+- [x] **Archival Service** (Kernstück): getNextSequentialNumber, stampPdf (pdf-lib), imageToPdf (sharp→pdf-lib), archiveInvoice, batchArchiveInvoices, cancelArchivalNumber
+- [x] **PDF-Stempel**: Eingangsstempel oben rechts auf erster Seite (Archivnummer, Status, Datum, Genehmiger)
+- [x] **Bild→PDF-Konvertierung**: JPEG/PNG/TIFF/WebP werden bei Archivierung automatisch in A4-PDF gewrappt
+- [x] **Upload-Pfad geändert**: Neue Uploads → `{tenantId}/temp/`, Archivierung → `{tenantId}/archive/{year}/`
+- [x] **Storage Service erweitert**: copyFile + moveFile (S3 CopyObjectCommand)
+- [x] **Archiv-Immutabilität**: isLocked bei Archivierung, PUT-Endpoint lehnt Änderungen ab (HTTP 409)
+- [x] **Stamp-Fehler-Toleranz**: Archivierung läuft auch bei kaputtem PDF, stampFailed Flag
+- [x] **Auto-Approve via BullMQ**: TRUSTED-Vendor Rechnungen werden asynchron archiviert
+- [x] **Duale Nummern-Anzeige**: ER-2026-00001 grün + prominent, BEL-001 klein/grau (Tabelle + Detail)
+- [x] **Client UI komplett**: Archivierungs-Info-Box, "Genehmigen & Archivieren" Button, ARCHIVED/RECONCILED Filter + Badges
+- [x] **Routes**: cancel-number Endpoint, number-gaps Dashboard-Endpoint, Download mit ?original=true
+- [x] **Seed aktualisiert**: 2 archivierte Rechnungen + Sequential Number Counter
+- [x] **Genehmigungs-Kommentar**: Optionaler Kommentar bei Genehmigung trotz Warnung/Ungültig
+  - `approvalComment` Feld auf Invoice-Model
+  - Kommentar wird auf PDF-Stempel geschrieben (gekürzt auf 100 Zeichen, "Anm: ...")
+  - Stempel-Box wächst dynamisch bei vorhandenem Kommentar (72px → 86px)
+  - INVALID: Kommentar Pflicht (Modal-Dialog) / WARNING: optional (Modal-Dialog) / VALID: kein Dialog
+  - Batch-Genehmigung: Kommentar-Dialog wenn Auswahl WARNING/INVALID enthält
+  - Voller Kommentar in Archivierungs-Info-Box + Audit-Log sichtbar
+  - `approveInvoiceSchema` (Zod) für Body-Validierung
+
+### Prio 2: Bankabgleich
+
+- [x] **Bankkonten-Verwaltung** (CRUD `/api/bank-accounts`) → Phase 4
 - [ ] **CSV-Import für Kontoauszüge** (Parsing verschiedener Bankformate)
 - [ ] **Matching-Algorithmen** (3-stufig)
   - Exakt: Betrag + Rechnungsnr. im Verwendungszweck
@@ -261,3 +285,10 @@ VIES-Abfrage ist implementiert (validateUid + compareCompanyNames in vies.servic
 |-------|-------|
 | `server/vitest.config.ts` | Vitest-Konfiguration (globals, node environment) |
 | `server/src/services/__tests__/validation.service.test.ts` | 174 Unit-Tests für Regel-Engine |
+
+## Neue Dateien (Phase 5)
+
+| Datei | Zweck |
+|-------|-------|
+| `server/src/services/archival.service.ts` | Kernlogik: Nummerierung + PDF-Stempel + Archivierung |
+| `prisma/migrations/20260223200000_add_archival_workflow/` | DB-Migration: SequentialNumber, CancelledNumber, Invoice-Archivfelder, APPROVED→ARCHIVED |

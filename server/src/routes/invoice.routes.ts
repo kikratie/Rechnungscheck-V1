@@ -5,8 +5,10 @@ import { validateBody } from '../middleware/validate.js';
 import { invoiceUpload } from '../middleware/upload.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
-import { updateExtractedDataSchema, rejectInvoiceSchema, createErsatzbelegSchema, batchApproveSchema } from '@buchungsai/shared';
+import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, batchApproveSchema, cancelNumberSchema } from '@buchungsai/shared';
 import * as invoiceService from '../services/invoice.service.js';
+import { cancelArchivalNumber } from '../services/archival.service.js';
+import * as storageService from '../services/storage.service.js';
 
 const router = Router();
 
@@ -22,6 +24,7 @@ router.get('/', async (req, res, next) => {
 
     const where: Record<string, unknown> = { tenantId };
 
+    if (req.query.direction) where.direction = req.query.direction;
     if (req.query.processingStatus) where.processingStatus = req.query.processingStatus;
     if (req.query.validationStatus) where.validationStatus = req.query.validationStatus;
     if (req.query.vendorName) where.vendorName = { contains: req.query.vendorName, mode: 'insensitive' };
@@ -53,6 +56,7 @@ router.get('/', async (req, res, next) => {
         select: {
           id: true,
           belegNr: true,
+          direction: true,
           documentType: true,
           originalFileName: true,
           vendorName: true,
@@ -67,7 +71,12 @@ router.get('/', async (req, res, next) => {
           validationStatus: true,
           isLocked: true,
           vendorId: true,
+          customerId: true,
+          customerName: true,
           replacedByInvoiceId: true,
+          archivalNumber: true,
+          archivalPrefix: true,
+          archivedAt: true,
           createdAt: true,
         },
       }),
@@ -94,6 +103,7 @@ router.get('/:id', async (req, res, next) => {
       include: {
         lineItems: { orderBy: { position: 'asc' } },
         vendor: { select: { id: true, name: true, uid: true } },
+        customer: { select: { id: true, name: true, uid: true } },
       },
     });
 
@@ -162,10 +172,15 @@ router.post('/', invoiceUpload.single('file'), async (req, res, next) => {
       return;
     }
 
+    // direction kommt als FormData-Feld neben dem File
+    const directionRaw = req.body.direction as string | undefined;
+    const direction = directionRaw === 'OUTGOING' ? 'OUTGOING' as const : 'INCOMING' as const;
+
     const invoice = await invoiceService.uploadInvoice({
       tenantId: req.tenantId!,
       userId: req.userId!,
       file: req.file,
+      direction,
     });
 
     res.status(201).json({ success: true, data: invoice });
@@ -177,6 +192,19 @@ router.post('/', invoiceUpload.single('file'), async (req, res, next) => {
 // PUT /api/v1/invoices/:id — Manual correction
 router.put('/:id', validateBody(updateExtractedDataSchema), async (req, res, next) => {
   try {
+    // Guard: archived invoices are immutable
+    const existing = await prisma.invoice.findFirst({
+      where: { id: req.params.id as string, tenantId: req.tenantId! },
+      select: { isLocked: true },
+    });
+    if (existing?.isLocked) {
+      res.status(409).json({
+        success: false,
+        error: { code: 'LOCKED', message: 'Archivierte Rechnung kann nicht bearbeitet werden' },
+      });
+      return;
+    }
+
     const extractedData = await invoiceService.updateExtractedData({
       tenantId: req.tenantId!,
       userId: req.userId!,
@@ -192,12 +220,13 @@ router.put('/:id', validateBody(updateExtractedDataSchema), async (req, res, nex
 });
 
 // POST /api/v1/invoices/:id/approve
-router.post('/:id/approve', async (req, res, next) => {
+router.post('/:id/approve', validateBody(approveInvoiceSchema), async (req, res, next) => {
   try {
     const invoice = await invoiceService.approveInvoice(
       req.tenantId!,
       req.userId!,
       req.params.id as string,
+      req.body.comment as string | undefined,
     );
     res.json({ success: true, data: invoice });
   } catch (err) {
@@ -251,13 +280,29 @@ router.delete('/:id', async (req, res, next) => {
 });
 
 // GET /api/v1/invoices/:id/download — Presigned URL
+// ?original=true → returns the unarchived original; default returns archived (stamped) version if available
 router.get('/:id/download', async (req, res, next) => {
   try {
-    const url = await invoiceService.getInvoiceDownloadUrl(
-      req.tenantId!,
-      req.params.id as string,
-    );
-    res.json({ success: true, data: { url } });
+    const invoice = await prisma.invoice.findFirst({
+      where: { id: req.params.id as string, tenantId: req.tenantId! },
+      select: { storagePath: true, archivedStoragePath: true, archivedFileName: true },
+    });
+    if (!invoice) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Rechnung nicht gefunden' } });
+      return;
+    }
+
+    const wantOriginal = req.query.original === 'true';
+    const path = (!wantOriginal && invoice.archivedStoragePath) ? invoice.archivedStoragePath : invoice.storagePath;
+    const url = await storageService.getPresignedUrl(path);
+    res.json({
+      success: true,
+      data: {
+        url,
+        fileName: (!wantOriginal && invoice.archivedFileName) ? invoice.archivedFileName : undefined,
+        isArchived: !wantOriginal && !!invoice.archivedStoragePath,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -283,6 +328,22 @@ router.post('/batch-approve', validateBody(batchApproveSchema), async (req, res,
       req.tenantId!,
       req.userId!,
       req.body.invoiceIds as string[],
+      req.body.comment as string | undefined,
+    );
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/cancel-number — Storno einer Archivnummer
+router.post('/:id/cancel-number', validateBody(cancelNumberSchema), async (req, res, next) => {
+  try {
+    const result = await cancelArchivalNumber(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+      req.body.reason as string,
     );
     res.json({ success: true, data: result });
   } catch (err) {

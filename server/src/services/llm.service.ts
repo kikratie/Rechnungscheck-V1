@@ -153,3 +153,19 @@ Antworte ausschließlich als JSON-Objekt in folgendem Format:
   "confidence": { ...Konfidenzwerte pro Feld... },
   "notes": "optionale Anmerkungen zur Zuordnung"
 }`;
+
+const OUTGOING_INVOICE_CONTEXT = `
+
+KONTEXT: Dies ist eine AUSGANGSRECHNUNG (Rechnung die WIR SELBST ausstellen).
+- Der AUSSTELLER (issuer) ist UNSER Unternehmen (wir stellen die Rechnung aus).
+- Der EMPFÄNGER (recipient) ist der KUNDE (er erhält und bezahlt die Rechnung).
+- Die IBAN/Bankverbindung gehört zu UNS (wir empfangen die Zahlung).
+- Die UID in der Fußzeile gehört zu UNS (unserem Unternehmen).
+- Extrahiere trotzdem korrekt: issuer = unser Unternehmen, recipient = Kunde.`;
+
+export function getExtractionPrompt(direction: 'INCOMING' | 'OUTGOING' = 'INCOMING'): string {
+  if (direction === 'OUTGOING') {
+    return INVOICE_EXTRACTION_SYSTEM_PROMPT + OUTGOING_INVOICE_CONTEXT;
+  }
+  return INVOICE_EXTRACTION_SYSTEM_PROMPT;
+}
