@@ -6,6 +6,59 @@ import { ensureBucket } from './services/storage.service.js';
 import { createInvoiceWorker } from './jobs/queue.js';
 import { processInvoiceJob } from './jobs/invoiceProcessor.job.js';
 
+/**
+ * Pre-flight checks: verify OCR dependencies are functional before accepting work.
+ * Failures log warnings but don't prevent server start (manual workflows still work).
+ */
+async function runPreflightChecks() {
+  const results: Record<string, 'ok' | 'warn' | 'fail'> = {};
+
+  // pdf-parse: verify import + basic API works
+  try {
+    // @ts-expect-error pdf-parse v2 ESM types not resolved
+    const { PDFParse } = await import('pdf-parse');
+    if (typeof PDFParse !== 'function') throw new Error('PDFParse is not a constructor');
+    results['pdf-parse'] = 'ok';
+  } catch (err) {
+    results['pdf-parse'] = 'fail';
+    console.error('[PREFLIGHT] pdf-parse FEHLER:', (err as Error).message);
+  }
+
+  // mupdf: verify WASM module loads
+  try {
+    const mupdf = await import('mupdf');
+    if (!mupdf.Document) throw new Error('mupdf.Document not available');
+    results['mupdf'] = 'ok';
+  } catch (err) {
+    results['mupdf'] = 'fail';
+    console.error('[PREFLIGHT] mupdf FEHLER:', (err as Error).message);
+  }
+
+  // sharp: verify native bindings
+  try {
+    const sharp = (await import('sharp')).default;
+    await sharp({ create: { width: 1, height: 1, channels: 3, background: '#000' } }).png().toBuffer();
+    results['sharp'] = 'ok';
+  } catch (err) {
+    results['sharp'] = 'fail';
+    console.error('[PREFLIGHT] sharp FEHLER:', (err as Error).message);
+  }
+
+  // OpenAI API key
+  if (env.OPENAI_API_KEY) {
+    results['openai-key'] = 'ok';
+  } else {
+    results['openai-key'] = 'warn';
+    console.warn('[PREFLIGHT] OPENAI_API_KEY nicht gesetzt — KI-Extraktion deaktiviert');
+  }
+
+  // Summary
+  const failCount = Object.values(results).filter(v => v === 'fail').length;
+  const warnCount = Object.values(results).filter(v => v === 'warn').length;
+  const status = failCount > 0 ? 'DEGRADED' : warnCount > 0 ? 'WARNUNG' : 'OK';
+  console.log(`[PREFLIGHT] Status: ${status}`, results);
+}
+
 async function main() {
   // Datenbank-Verbindung testen
   try {
@@ -23,6 +76,9 @@ async function main() {
   } catch (error) {
     console.warn('Storage-Bucket Warnung:', (error as Error).message);
   }
+
+  // Pre-flight: OCR-Abhängigkeiten prüfen
+  await runPreflightChecks();
 
   // BullMQ Worker starten
   const worker = createInvoiceWorker(processInvoiceJob);

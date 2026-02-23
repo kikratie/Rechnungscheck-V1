@@ -52,6 +52,32 @@ export async function callLlm(request: LlmRequest): Promise<LlmResponse> {
     throw new Error('Keine Antwort vom LLM erhalten');
   }
 
+  // Check for truncated response (token limit reached)
+  if (choice.finish_reason === 'length') {
+    console.warn('[LLM] Antwort wurde abgeschnitten (max_tokens erreicht). Versuche erneut mit höherem Limit...');
+    const retryResponse = await client.chat.completions.create({
+      model,
+      messages,
+      temperature: 0,
+      max_tokens: 8192,
+      response_format: { type: 'json_object' },
+    });
+    const retryChoice = retryResponse.choices[0];
+    if (retryChoice?.message?.content && retryChoice.finish_reason !== 'length') {
+      return {
+        content: retryChoice.message.content,
+        model: retryResponse.model,
+        usage: {
+          promptTokens: retryResponse.usage?.prompt_tokens ?? 0,
+          completionTokens: retryResponse.usage?.completion_tokens ?? 0,
+          totalTokens: retryResponse.usage?.total_tokens ?? 0,
+        },
+      };
+    }
+    // Still truncated — use whatever we got from the first attempt
+    console.error('[LLM] Antwort auch nach Retry abgeschnitten');
+  }
+
   return {
     content: choice.message.content,
     model: response.model,

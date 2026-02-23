@@ -58,6 +58,7 @@ function isRequiredFor(ruleId: string, amountClass: AmountClass): boolean {
 // EU-Länderkürzel für UID-Nummern
 const EU_UID_PREFIXES = [
   'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES',
+  'EU', // EU OSS (One Stop Shop) — Unternehmen mit EU-weiter Umsatzsteuerregistrierung
   'FI', 'FR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT',
   'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK',
 ];
@@ -544,6 +545,7 @@ function checkUidSyntax(fields: ExtractedFields, amountClass: AmountClass): Vali
     EE: /^EE\d{9}$/,
     EL: /^EL\d{9}$/,
     ES: /^ES[A-Z0-9]\d{7}[A-Z0-9]$/,
+    EU: /^EU\d{9}$/, // EU OSS (One Stop Shop) — z.B. Midjourney, Paddle
     FI: /^FI\d{8}$/,
     FR: /^FR[A-Z0-9]{2}\d{9}$/,
     HR: /^HR\d{11}$/,
@@ -1036,6 +1038,15 @@ async function checkUidVies(
     return {
       check: { rule: rule.id, status: 'YELLOW', message: `UID ${uid} ist keine EU-UID — VIES-Prüfung nicht möglich`, legalBasis: rule.legalBasis },
       viesInfo: noCheckInfo,
+    };
+  }
+
+  // EU OSS Non-Union-Scheme (Präfix "EU"): kann nicht über VIES validiert werden
+  // Diese Nummern werden von Drittland-Unternehmen (z.B. US) für EU-B2C-Verkäufe genutzt
+  if (prefix === 'EU') {
+    return {
+      check: { rule: rule.id, status: 'GREEN', message: `EU OSS Registrierung ${uid} — VIES-Prüfung für Non-Union-Scheme nicht verfügbar`, legalBasis: rule.legalBasis },
+      viesInfo: { ...noCheckInfo, checked: false },
     };
   }
 

@@ -13,7 +13,15 @@ function parseRedisUrl(url: string) {
 
 const connection = parseRedisUrl(env.REDIS_URL);
 
-export const invoiceQueue = new Queue('invoice-processing', { connection });
+export const invoiceQueue = new Queue('invoice-processing', {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 }, // 2s → 4s → 8s
+    removeOnComplete: 100, // keep last 100 completed jobs for debugging
+    removeOnFail: 200,
+  },
+});
 
 export function createInvoiceWorker(
   processor: (job: import('bullmq').Job) => Promise<void>,
@@ -21,6 +29,7 @@ export function createInvoiceWorker(
   const worker = new Worker('invoice-processing', processor, {
     connection,
     concurrency: 3,
+    lockDuration: 120_000, // 2 min — OpenAI Vision can take 30-60s
   });
 
   worker.on('completed', (job) => {
@@ -28,8 +37,17 @@ export function createInvoiceWorker(
   });
 
   worker.on('failed', (job, err) => {
-    console.error(`Job ${job?.id} fehlgeschlagen:`, err.message);
+    const attempt = job?.attemptsMade ?? 0;
+    const maxAttempts = job?.opts?.attempts ?? 3;
+    if (attempt < maxAttempts) {
+      console.warn(`Job ${job?.id} fehlgeschlagen (Versuch ${attempt}/${maxAttempts}, Retry):`, err.message);
+    } else {
+      console.error(`Job ${job?.id} endgültig fehlgeschlagen nach ${attempt} Versuchen:`, err.message);
+    }
   });
 
   return worker;
 }
+
+/** Expose connection for health checks */
+export { connection as redisConnection };

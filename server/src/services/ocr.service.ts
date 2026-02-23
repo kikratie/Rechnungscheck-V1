@@ -1,6 +1,5 @@
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse') as (buffer: Buffer) => Promise<{ text: string; numpages: number }>;
+// @ts-expect-error pdf-parse v2 ESM types not resolved by bundler moduleResolution
+import { PDFParse } from 'pdf-parse';
 import sharp from 'sharp';
 import { callLlm, INVOICE_EXTRACTION_SYSTEM_PROMPT } from './llm.service.js';
 
@@ -11,7 +10,7 @@ interface ExtractionResult {
   pipelineStage: 'TEXT_EXTRACTION' | 'VISION_OCR' | 'VISION_OCR_ENHANCED';
 }
 
-const MIN_TEXT_LENGTH = 10;
+const MIN_TEXT_LENGTH = 50;
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
 /**
@@ -26,53 +25,75 @@ export async function extractInvoiceData(
   fileBuffer: Buffer,
   mimeType: string,
 ): Promise<ExtractionResult> {
+  const t0 = Date.now();
+  console.log(`[OCR] Start: ${mimeType}, ${(fileBuffer.length / 1024).toFixed(0)} KB`);
+
+  let result: ExtractionResult;
+
   if (mimeType === 'application/pdf') {
-    return await extractPdf(fileBuffer);
-  }
-
-  // TIFF: convert to PNG first
-  if (mimeType === 'image/tiff') {
+    result = await extractPdf(fileBuffer);
+  } else if (mimeType === 'image/tiff') {
+    // TIFF: convert to PNG first
     const pngBuffer = await sharp(fileBuffer).png().toBuffer();
-    return await extractWithVision(pngBuffer, 'image/png', fileBuffer);
+    result = await extractWithVision(pngBuffer, 'image/png', fileBuffer);
+  } else {
+    // JPEG, PNG, WebP: direct Vision OCR
+    result = await extractWithVision(fileBuffer, mimeType, fileBuffer);
   }
 
-  // JPEG, PNG, WebP: direct Vision OCR
-  return await extractWithVision(fileBuffer, mimeType, fileBuffer);
+  console.log(`[OCR] Fertig: ${result.pipelineStage} in ${Date.now() - t0}ms`);
+  return result;
 }
 
 async function extractPdf(fileBuffer: Buffer): Promise<ExtractionResult> {
   // Stage 1: Try text extraction for digital PDFs
   let extractedText = '';
+  let parser: InstanceType<typeof PDFParse> | null = null;
   try {
-    const pdfData = await pdfParse(fileBuffer);
-    extractedText = pdfData.text?.trim() || '';
+    parser = new PDFParse({ data: new Uint8Array(fileBuffer) });
+    const textResult = await parser.getText();
+    extractedText = textResult.text?.trim() || '';
   } catch (err) {
-    console.error('pdf-parse failed:', err);
+    console.error('[OCR] pdf-parse failed:', err);
+  } finally {
+    try { await parser?.destroy(); } catch { /* ignore cleanup errors */ }
   }
 
   if (extractedText.length >= MIN_TEXT_LENGTH) {
-    return await extractFromText(extractedText);
+    console.log(`[OCR] Text-Layer OK (${extractedText.length} Zeichen) → LLM-Extraktion`);
+    const t0 = Date.now();
+    const result = await extractFromText(extractedText);
+    console.log(`[OCR] TEXT_EXTRACTION abgeschlossen in ${Date.now() - t0}ms`);
+    return result;
   }
 
   // Stage 2: Scan-PDF — render first page to PNG with mupdf, then Vision OCR
-  console.log('PDF hat keinen Text — rendere als Bild mit mupdf...');
+  console.log(`[OCR] Text-Layer zu kurz (${extractedText.length} Zeichen) → Vision OCR`);
+  const t0 = Date.now();
   const pngBuffer = await renderPdfPageToPng(fileBuffer);
   // Pass partial text layer for IBAN cross-check (even short text may contain an IBAN)
-  return await extractWithVision(pngBuffer, 'image/png', pngBuffer, extractedText || undefined);
+  const result = await extractWithVision(pngBuffer, 'image/png', pngBuffer, extractedText || undefined);
+  console.log(`[OCR] ${result.pipelineStage} abgeschlossen in ${Date.now() - t0}ms`);
+  return result;
 }
 
 async function renderPdfPageToPng(pdfBuffer: Buffer): Promise<Buffer> {
   const mupdf = await import('mupdf');
   const doc = mupdf.Document.openDocument(pdfBuffer, 'application/pdf');
-  const page = doc.loadPage(0);
-
-  // Render at 2x resolution for better OCR quality (default 72 DPI → 144 DPI)
-  const scale = 2;
-  const matrix = mupdf.Matrix.scale(scale, scale);
-  const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true);
-  const pngData = pixmap.asPNG();
-
-  return Buffer.from(pngData);
+  let page, pixmap;
+  try {
+    page = doc.loadPage(0);
+    // Render at 2x resolution for better OCR quality (default 72 DPI → 144 DPI)
+    const scale = 2;
+    const matrix = mupdf.Matrix.scale(scale, scale);
+    pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true);
+    const pngData = pixmap.asPNG();
+    return Buffer.from(pngData);
+  } finally {
+    try { pixmap?.destroy(); } catch { /* ignore */ }
+    try { page?.destroy(); } catch { /* ignore */ }
+    try { doc.destroy(); } catch { /* ignore */ }
+  }
 }
 
 async function extractWithVision(
@@ -100,7 +121,7 @@ async function extractWithVision(
         if (pdfTextLayer) {
           const corrected = crossCheckIban(retryResult.fields.issuerIban as string | null, pdfTextLayer);
           if (corrected && corrected !== retryResult.fields.issuerIban) {
-            console.log(`IBAN korrigiert (enhanced): LLM="${retryResult.fields.issuerIban}" → Regex="${corrected}"`);
+            console.log(`[OCR] IBAN korrigiert (enhanced): LLM="${retryResult.fields.issuerIban}" → Regex="${corrected}"`);
             retryResult.fields.issuerIban = corrected;
           }
         }
@@ -115,12 +136,26 @@ async function extractWithVision(
   if (pdfTextLayer) {
     const corrected = crossCheckIban(result.fields.issuerIban as string | null, pdfTextLayer);
     if (corrected && corrected !== result.fields.issuerIban) {
-      console.log(`IBAN korrigiert (vision): LLM="${result.fields.issuerIban}" → Regex="${corrected}"`);
+      console.log(`[OCR] IBAN korrigiert (vision): LLM="${result.fields.issuerIban}" → Regex="${corrected}"`);
       result.fields.issuerIban = corrected;
     }
   }
 
   return result;
+}
+
+/**
+ * Parse JSON from LLM response with clear error message.
+ * LLM responses should always be valid JSON (response_format: json_object),
+ * but truncated or malformed responses can still occur.
+ */
+function safeJsonParse(content: string): { fields?: Record<string, unknown>; confidence?: Record<string, number>; notes?: string; [key: string]: unknown } {
+  try {
+    return JSON.parse(content);
+  } catch (err) {
+    const preview = content.substring(0, 200);
+    throw new Error(`LLM-Antwort ist kein gültiges JSON: ${(err as Error).message}\nAnfang der Antwort: "${preview}..."`);
+  }
 }
 
 async function extractFromText(text: string): Promise<ExtractionResult> {
@@ -131,13 +166,13 @@ async function extractFromText(text: string): Promise<ExtractionResult> {
     temperature: 0.1,
   });
 
-  const parsed = JSON.parse(response.content);
+  const parsed = safeJsonParse(response.content);
   const fields = normalizeFields(parsed.fields || {});
 
   // Cross-check IBAN: if LLM extracted one that fails Mod-97, try regex from text
   const correctedIban = crossCheckIban(fields.issuerIban as string | null, text);
   if (correctedIban && correctedIban !== fields.issuerIban) {
-    console.log(`IBAN korrigiert: LLM="${fields.issuerIban}" → Regex="${correctedIban}"`);
+    console.log(`[OCR] IBAN korrigiert: LLM="${fields.issuerIban}" → Regex="${correctedIban}"`);
     fields.issuerIban = correctedIban;
   }
 
@@ -174,7 +209,7 @@ async function extractFromImage(
     temperature: 0.1,
   });
 
-  const parsed = JSON.parse(response.content);
+  const parsed = safeJsonParse(response.content);
 
   return {
     fields: normalizeFields(parsed.fields || {}),

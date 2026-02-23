@@ -47,7 +47,15 @@
       "Bash(export DATABASE_URL)",
       "Bash(export DATABASE_URL:*)",
       "Bash(echo:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(wmic process:*)",
+      "Bash(cmd.exe //c \"netstat -ano | findstr 3001\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2N2U3MGM4Mi01ZWZjLTQ2MjEtOTdhOC1iY2YyYWVkYzIyZWQiLCJ0ZW5hbnRJZCI6ImYxODBiOThkLTU5ZmUtNDRhNC05NTg4LTUzZDNkMjBjODc1YiIsImVtYWlsIjoiYWRtaW5AZGVtby5hdCIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MTg0Nzk2MiwiZXhwIjoxNzcxODQ4ODYyfQ.o0HEZlDuXJ0EoTNfAKv38ORkgfFmwnwRDB47FScoOWY\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2N2U3MGM4Mi01ZWZjLTQ2MjEtOTdhOC1iY2YyYWVkYzIyZWQiLCJ0ZW5hbnRJZCI6ImYxODBiOThkLTU5ZmUtNDRhNC05NTg4LTUzZDNkMjBjODc1YiIsImVtYWlsIjoiYWRtaW5AZGVtby5hdCIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MTg0ODM1NSwiZXhwIjoxNzcxODQ5MjU1fQ.2gA1RN4tPFAKaDAZrPypF5QI2VxBY9sXubn7PL3yxxM\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\josef"
     ]
   }
 }

@@ -15,6 +15,19 @@ interface InvoiceJobData {
 }
 
 /**
+ * Sichere Date-Konvertierung: gibt null bei Invalid Date zurück statt ein kaputtes Date-Objekt.
+ */
+function safeDateParse(value: unknown): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  if (typeof value === 'string') {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/**
  * Robuste Konvertierung von LLM-Feldern zu number | null.
  * Das LLM gibt Beträge manchmal als String zurück ("1234.56" statt 1234.56).
  */
@@ -61,10 +74,9 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
         : 0;
 
     // Fallback: Kein Leistungszeitraum → Rechnungsdatum übernehmen
-    const invoiceDate = fields.invoiceDate ? new Date(fields.invoiceDate as string) : null;
-    const deliveryDate = fields.deliveryDate
-      ? new Date(fields.deliveryDate as string)
-      : invoiceDate; // §11 Abs 1 Z 4 UStG: Rechnungsdatum gilt als Leistungsdatum
+    const invoiceDate = safeDateParse(fields.invoiceDate);
+    const deliveryDate = safeDateParse(fields.deliveryDate)
+      ?? invoiceDate; // §11 Abs 1 Z 4 UStG: Rechnungsdatum gilt als Leistungsdatum
 
     // Parse amounts robustly (LLM may return strings)
     let netAmount = parseNumericField(fields.netAmount);
@@ -121,7 +133,7 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
         sequentialNumber: (fields.sequentialNumber as string) || null,
         invoiceDate,
         deliveryDate,
-        dueDate: fields.dueDate ? new Date(fields.dueDate as string) : null,
+        dueDate: safeDateParse(fields.dueDate),
         description: (fields.description as string) || null,
         netAmount,
         vatAmount,

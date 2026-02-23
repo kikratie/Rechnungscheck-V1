@@ -13,6 +13,8 @@ import { exportRoutes } from './routes/export.routes.js';
 import { auditLogRoutes } from './routes/auditLog.routes.js';
 import { dashboardRoutes } from './routes/dashboard.routes.js';
 import vendorRoutes from './routes/vendor.routes.js';
+import { prisma } from './config/database.js';
+import { invoiceQueue } from './jobs/queue.js';
 import type { ApiResponse } from '@buchungsai/shared';
 
 const app = express();
@@ -63,16 +65,33 @@ app.use(globalLimiter);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Health Check
-app.get('/api/v1/health', (_req, res) => {
-  const response: ApiResponse<{ status: string; timestamp: string }> = {
+// Health Check — prüft alle Abhängigkeiten
+app.get('/api/v1/health', async (_req, res) => {
+  const services: Record<string, 'ok' | 'error'> = {};
+
+  // Database
+  try {
+    await prisma.$queryRawUnsafe('SELECT 1');
+    services.db = 'ok';
+  } catch { services.db = 'error'; }
+
+  // Redis (BullMQ)
+  try {
+    const client = await invoiceQueue.client;
+    const pong = await client.ping();
+    services.redis = pong === 'PONG' ? 'ok' : 'error';
+  } catch { services.redis = 'error'; }
+
+  // LLM (key configured?)
+  services.llm = env.OPENAI_API_KEY ? 'ok' : 'error';
+
+  const hasErrors = Object.values(services).includes('error');
+  const status = hasErrors ? 'degraded' : 'ok';
+
+  res.status(hasErrors ? 503 : 200).json({
     success: true,
-    data: {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-    },
-  };
-  res.json(response);
+    data: { status, timestamp: new Date().toISOString(), services },
+  });
 });
 
 // Routes

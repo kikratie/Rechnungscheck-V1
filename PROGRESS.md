@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 20. Februar 2026 (Session 7)
+**Letzte Aktualisierung:** 23. Februar 2026 (Session 8)
 
 ---
 
@@ -138,6 +138,17 @@
 - [x] **Client API-Layer**: getTenantApi, updateTenantApi, completeOnboardingApi
 - [x] **Auth Store**: setOnboardingComplete() Helper
 - [x] **Seed**: Demo-Tenant mit Bankdaten + onboardingComplete: true
+
+### Phase 4: Multi-Bankkonto + vatBreakdown ✅
+
+- [x] **Multi-Bankkonto**: `BankAccount`-Tabelle (1:n pro Tenant), CRUD-Endpoints, Settings-UI mit Multi-Konto-Liste
+- [x] **Onboarding erstellt erstes BankAccount** automatisch aus Tenant-IBAN
+- [x] **IBAN-Validierung** gegen ALLE Tenant-IBANs (nicht nur eine)
+- [x] **Seed**: 2 Demo-Konten (Girokonto + Kreditkarte)
+- [x] **vatBreakdown (Multi-USt)**: `vatBreakdown Json?` auf Invoice + ExtractedData, LLM-Prompt, OCR-Normalisierung, Mathe-Check pro USt-Satz, Sync, Client-UI Aufschlüsselung
+- [x] **IBAN Mod-97 Cross-Check**: Regex-Extraktion aus PDF-Textlayer als Fallback bei LLM-OCR-Fehlern
+- [x] **Spalten-Sortierung**: Alle Spalten in Rechnungstabelle sortierbar, Backend-Whitelist
+- [x] **Vendor-Display verbessert**: Dateiname kursiv + "Lieferant wird erkannt..." bei neuen Belegen
 
 ### Prio 2: Workflow & Bankabgleich
 
