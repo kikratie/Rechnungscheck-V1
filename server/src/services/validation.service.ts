@@ -59,8 +59,10 @@ function isRequiredFor(ruleId: string, amountClass: AmountClass): boolean {
 const EU_UID_PREFIXES = [
   'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES',
   'EU', // EU OSS (One Stop Shop) — Unternehmen mit EU-weiter Umsatzsteuerregistrierung
-  'FI', 'FR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT',
+  'FI', 'FR', 'GR', // GR = ISO-Code für Griechenland (UID-Präfix ist EL, aber GR kommt aus OCR/Adressen)
+  'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT',
   'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK',
+  'XI', // Nordirland (NI Protocol, post-Brexit)
 ];
 
 // ============================================================
@@ -103,9 +105,20 @@ function resolveCountryName(raw: string): string | null {
     'RUMÄNIEN': 'RO', 'ROMANIA': 'RO', 'RO': 'RO',
     'BULGARIEN': 'BG', 'BULGARIA': 'BG', 'BG': 'BG',
     'IRLAND': 'IE', 'IRELAND': 'IE', 'IE': 'IE',
+    'GRIECHENLAND': 'EL', 'GREECE': 'EL', 'GR': 'EL', 'HELLAS': 'EL', 'EL': 'EL',
+    'ZYPERN': 'CY', 'CYPRUS': 'CY', 'CY': 'CY',
+    'ESTLAND': 'EE', 'ESTONIA': 'EE', 'EE': 'EE',
+    'LETTLAND': 'LV', 'LATVIA': 'LV', 'LV': 'LV',
+    'LITAUEN': 'LT', 'LITHUANIA': 'LT', 'LT': 'LT',
+    'MALTA': 'MT', 'MT': 'MT',
+    'FINNLAND': 'FI', 'FINLAND': 'FI', 'FI': 'FI',
+    'SCHWEDEN': 'SE', 'SWEDEN': 'SE', 'SE': 'SE',
+    'DÄNEMARK': 'DK', 'DENMARK': 'DK', 'DK': 'DK',
+    'NORDIRLAND': 'XI', 'NORTHERN IRELAND': 'XI',
     'SINGAPUR': 'SG', 'SINGAPORE': 'SG', 'SG': 'SG',
     'USA': 'US', 'VEREINIGTE STAATEN': 'US', 'UNITED STATES': 'US', 'US': 'US',
     'GROSSBRITANNIEN': 'GB', 'VEREINIGTES KÖNIGREICH': 'GB', 'UNITED KINGDOM': 'GB', 'UK': 'GB', 'GB': 'GB',
+    'NORWEGEN': 'NO', 'NORWAY': 'NO', 'NO': 'NO',
     'CHINA': 'CN', 'CN': 'CN',
     'JAPAN': 'JP', 'JP': 'JP',
     'INDIEN': 'IN', 'INDIA': 'IN', 'IN': 'IN',
@@ -563,6 +576,7 @@ function checkUidSyntax(fields: ExtractedFields, amountClass: AmountClass): Vali
     SE: /^SE\d{12}$/,
     SI: /^SI\d{8}$/,
     SK: /^SK\d{10}$/,
+    XI: /^XI(\d{9}|\d{12})$/, // Nordirland (NI Protocol, post-Brexit — Format wie GB)
   };
 
   const prefix = uid.substring(0, 2);
@@ -1200,3 +1214,38 @@ export async function validateInvoice(input: ValidationInput): Promise<Validatio
 
   return { overallStatus, amountClass, checks, viesInfo };
 }
+
+// Exported for unit testing — NOT part of the public API
+export const _testing = {
+  toNum,
+  determineAmountClass,
+  isRequiredFor,
+  resolveCountryName,
+  detectCountryFromPlz,
+  detectVendorLocation,
+  checkIssuerName,
+  checkIssuerAddress,
+  checkIssuerUid,
+  checkRecipientName,
+  checkRecipientUid,
+  checkInvoiceNumber,
+  checkInvoiceDate,
+  checkDeliveryDate,
+  checkDescription,
+  checkNetAmount,
+  checkVatRate,
+  checkVatAmount,
+  checkGrossAmount,
+  checkMath,
+  checkVatRateValid,
+  checkUidSyntax,
+  validateIbanCheckDigit,
+  checkIbanSyntax,
+  checkReverseCharge,
+  checkForeignVat,
+  checkPlzUidConsistency,
+  checkIssuerIsNotSelf,
+  checkDuplicate,
+  checkUidVies,
+  EU_UID_PREFIXES,
+};
