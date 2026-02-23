@@ -12,6 +12,7 @@ import { ExportPage } from './pages/ExportPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { VendorsPage } from './pages/VendorsPage';
+import { CustomersPage } from './pages/CustomersPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useAuthStore();
@@ -80,6 +81,7 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="invoices" element={<InvoicesPage />} />
         <Route path="vendors" element={<VendorsPage />} />
+        <Route path="customers" element={<CustomersPage />} />
         <Route path="bank-statements" element={<BankStatementsPage />} />
         <Route path="matching" element={<MatchingPage />} />
         <Route path="export" element={<ExportPage />} />
