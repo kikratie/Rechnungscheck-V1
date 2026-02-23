@@ -135,6 +135,9 @@ export interface InvoiceListItem {
   invoiceDate: string | null;
   grossAmount: string | null;
   currency: string;
+  estimatedEurGross: string | null;
+  exchangeRate: string | null;
+  exchangeRateDate: string | null;
   processingStatus: ProcessingStatusType;
   validationStatus: ValidationStatusType;
   isLocked: boolean;
@@ -331,6 +334,7 @@ export interface DashboardStats {
     pending: number;
   };
   totalAmount: string;
+  foreignCurrencyCount: number;
   recentActivity: ActivityItem[];
 }
 

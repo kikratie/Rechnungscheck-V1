@@ -150,6 +150,19 @@
 - [x] **Spalten-Sortierung**: Alle Spalten in Rechnungstabelle sortierbar, Backend-Whitelist
 - [x] **Vendor-Display verbessert**: Dateiname kursiv + "Lieferant wird erkannt..." bei neuen Belegen
 
+### Phase 4.5: Validation-Tests + UID-Bugfixes ✅
+
+- [x] **EU OSS UID-Erkennung**: `'EU'` Präfix zu `EU_UID_PREFIXES` hinzugefügt — Midjourney (EU372045196) wurde fälschlich als "DRITTLAND" klassifiziert
+- [x] **EU OSS VIES-Skip**: VIES API unterstützt EU OSS Non-Union-Scheme nicht → Early Return mit GREEN + Info-Message
+- [x] **GR-Präfix (Griechenland)**: `'GR'` zu `EU_UID_PREFIXES` hinzugefügt — Griechenland nutzt `EL` als UID-Präfix aber `GR` als ISO-Code
+- [x] **XI-Präfix (Nordirland)**: `'XI'` + UID-Pattern für NI Protocol (post-Brexit) hinzugefügt
+- [x] **resolveCountryName()** vervollständigt: 11 fehlende EU-Länder (GR, CY, EE, LV, LT, MT, FI, SE, DK + XI, NO)
+- [x] **OCR-Pipeline Robustness** (8 Verbesserungen): Regex-Fallback für Beträge, fehlertolerantere UID-Extraktion, IBAN Cross-Check aus PDF-Textlayer
+- [x] **vatBreakdown (Multi-USt)**: LLM-Prompt + Normalisierung + Mathe-Check pro USt-Satz
+- [x] **Vitest-Konfiguration**: `server/vitest.config.ts` + `npm run test` Script
+- [x] **174 Unit-Tests**: Validation-Service vollständig getestet (alle 18+ Prüfregeln, EU-Ländermuster, Grenzwerte, Integration)
+- [x] **`_testing` Export**: Alle internen Funktionen über Namespace exportiert für direktes Unit-Testing
+
 ### Prio 2: Workflow & Bankabgleich
 
 - [ ] **Fortlaufende Nummerierung** (ER-JJJJ-NNNNN / AR-JJJJ-NNNNN)
@@ -206,7 +219,7 @@ VIES-Abfrage ist implementiert (validateUid + compareCompanyNames in vies.servic
 |--------|-----------|---------|
 | Prisma-Schema läuft von `server/` aber liegt unter `/prisma` | Migration-Befehle brauchen `--schema ../prisma/schema.prisma` | Klein — Prisma config anpassen |
 | Kein `.env.example` im Root | Neue Entwickler müssen `.env` manuell erstellen | Klein |
-| Keine Tests vorhanden | Keine Absicherung bei Refactoring | Mittel |
+| ~~Keine Tests vorhanden~~ | ~~Keine Absicherung bei Refactoring~~ | ✅ 174 Unit-Tests (Phase 4.5) |
 | `url.parse()` Deprecation Warning | Node.js 24 Warnung bei jedem Start | Klein |
 | Pre-existing auth.service.ts TS error | JWT sign type mismatch | Klein |
 
@@ -241,3 +254,10 @@ VIES-Abfrage ist implementiert (validateUid + compareCompanyNames in vies.servic
 | `client/src/api/tenant.ts` | Tenant API-Client (get, update, completeOnboarding) |
 | `client/src/pages/OnboardingPage.tsx` | Onboarding-Formular (4 Sections) |
 | `prisma/migrations/20260220_add_tenant_onboarding_fields/` | DB-Migration für Tenant-Felder |
+
+## Neue Dateien (Phase 4.5)
+
+| Datei | Zweck |
+|-------|-------|
+| `server/vitest.config.ts` | Vitest-Konfiguration (globals, node environment) |
+| `server/src/services/__tests__/validation.service.test.ts` | 174 Unit-Tests für Regel-Engine |

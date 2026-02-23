@@ -3,6 +3,7 @@ import { prisma } from '../config/database.js';
 import { invoiceQueue } from '../jobs/queue.js';
 import * as storageService from './storage.service.js';
 import { validateInvoice } from './validation.service.js';
+import { toEurEstimate } from './exchangeRate.service.js';
 import { writeAuditLog } from '../middleware/auditLogger.js';
 import { ConflictError, NotFoundError } from '../utils/errors.js';
 import { Prisma } from '@prisma/client';
@@ -603,7 +604,24 @@ export async function runValidationAndSync(params: {
 }) {
   const { invoiceId, tenantId, extracted, extractedDataVersion } = params;
 
-  // 1. Run validation with current rules
+  // 1. Compute EUR estimate for foreign currency invoices (needed for validation thresholds)
+  let estimatedEurGross: number | null = null;
+  let exchangeRate: number | null = null;
+  let exchangeRateDate: Date | null = null;
+  let exchangeRateDateStr: string | null = null;
+
+  const currency = extracted.currency || 'EUR';
+  if (currency !== 'EUR' && extracted.grossAmount) {
+    const estimate = await toEurEstimate(Number(extracted.grossAmount), currency);
+    if (estimate) {
+      estimatedEurGross = estimate.eurAmount;
+      exchangeRate = estimate.rate;
+      exchangeRateDate = new Date(estimate.date);
+      exchangeRateDateStr = estimate.date;
+    }
+  }
+
+  // 2. Run validation with current rules (uses EUR estimate for amount class)
   const validationOutput = await validateInvoice({
     extractedFields: {
       issuerName: extracted.issuerName,
@@ -623,12 +641,16 @@ export async function runValidationAndSync(params: {
       isReverseCharge: extracted.isReverseCharge,
       issuerIban: extracted.issuerIban,
       issuerEmail: extracted.issuerEmail,
+      currency,
     },
     tenantId,
     invoiceId,
+    estimatedEurGross,
+    exchangeRate,
+    exchangeRateDate: exchangeRateDateStr,
   });
 
-  // 2. Save validation result (append, keeps history)
+  // 3. Save validation result (append, keeps history)
   await prisma.validationResult.create({
     data: {
       invoiceId,
@@ -639,12 +661,12 @@ export async function runValidationAndSync(params: {
     },
   });
 
-  // 3. Sync ALL denormalized fields to invoice (consistent across all paths)
+  // 4. Sync ALL denormalized fields to invoice (consistent across all paths)
   const validationStatus =
     validationOutput.overallStatus === 'GREEN' ? 'VALID' :
     validationOutput.overallStatus === 'YELLOW' ? 'WARNING' : 'INVALID';
 
-  // 3a. Check if vendor is TRUSTED → auto-approve GREEN invoices
+  // 4a. Check if vendor is TRUSTED → auto-approve GREEN invoices
   let autoApprove = false;
   if (validationOutput.overallStatus === 'GREEN') {
     const invoice = await prisma.invoice.findUnique({
@@ -686,6 +708,9 @@ export async function runValidationAndSync(params: {
       costCenter: extracted.costCenter,
       category: extracted.category,
       currency: extracted.currency,
+      estimatedEurGross,
+      exchangeRate,
+      exchangeRateDate,
       validationStatus,
       ...(autoApprove ? { processingStatus: 'APPROVED' as const } : {}),
       // Felder die vorher nur im Worker gesetzt wurden — jetzt überall konsistent
@@ -706,7 +731,7 @@ export async function runValidationAndSync(params: {
     },
   });
 
-  // 3b. Write audit log for auto-approve
+  // 4b. Write audit log for auto-approve
   if (autoApprove) {
     writeAuditLog({
       tenantId,

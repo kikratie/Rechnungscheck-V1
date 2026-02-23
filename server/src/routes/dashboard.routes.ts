@@ -20,7 +20,9 @@ router.get('/stats', async (req, res, next) => {
       pendingCount,
       pendingReview,
       matchedInvoices,
-      totalAmountResult,
+      eurAmountResult,
+      foreignEurEstimateResult,
+      foreignCurrencyCount,
       recentLogs,
     ] = await Promise.all([
       prisma.invoice.count({ where: { tenantId } }),
@@ -30,7 +32,9 @@ router.get('/stats', async (req, res, next) => {
       prisma.invoice.count({ where: { tenantId, validationStatus: 'PENDING' } }),
       prisma.invoice.count({ where: { tenantId, processingStatus: 'REVIEW_REQUIRED' } }),
       prisma.matching.count({ where: { tenantId, status: 'CONFIRMED' } }),
-      prisma.invoice.aggregate({ where: { tenantId, grossAmount: { not: null } }, _sum: { grossAmount: true } }),
+      prisma.invoice.aggregate({ where: { tenantId, grossAmount: { not: null }, currency: 'EUR' }, _sum: { grossAmount: true } }),
+      prisma.invoice.aggregate({ where: { tenantId, estimatedEurGross: { not: null }, currency: { not: 'EUR' } }, _sum: { estimatedEurGross: true } }),
+      prisma.invoice.count({ where: { tenantId, currency: { not: 'EUR' } } }),
       prisma.auditLog.findMany({
         where: { tenantId },
         orderBy: { createdAt: 'desc' },
@@ -59,7 +63,11 @@ router.get('/stats', async (req, res, next) => {
           invalid: invalidCount,
           pending: pendingCount,
         },
-        totalAmount: totalAmountResult._sum.grossAmount?.toString() ?? '0',
+        totalAmount: (
+          Number(eurAmountResult._sum.grossAmount ?? 0) +
+          Number(foreignEurEstimateResult._sum.estimatedEurGross ?? 0)
+        ).toFixed(2),
+        foreignCurrencyCount,
         recentActivity,
       },
     });

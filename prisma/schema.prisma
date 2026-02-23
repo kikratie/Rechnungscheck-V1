@@ -148,6 +148,12 @@ model Invoice {
   currency         String    @default("EUR")
   vatRate          Decimal?  @db.Decimal(5, 2)
   vatBreakdown     Json?     // Array<{rate, netAmount, vatAmount}> bei gemischten USt-Sätzen
+
+  // EUR-Schätzwert für Fremdwährungsrechnungen (informativ, für Validierungsgrenzen + Anzeige)
+  estimatedEurGross Decimal?  @db.Decimal(12, 2) // ≈ EUR-Gegenwert des grossAmount
+  exchangeRate      Decimal?  @db.Decimal(12, 6) // 1 EUR = X Fremdwährung (ECB-Kurs)
+  exchangeRateDate  DateTime?                     // Datum des ECB-Kurses
+
   isReverseCharge  Boolean   @default(false)
   recipientUid     String?
   issuerEmail      String?

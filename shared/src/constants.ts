@@ -128,4 +128,5 @@ export const VALIDATION_RULES = {
   ISSUER_SELF_CHECK: { id: 'ISSUER_SELF_CHECK', label: 'Aussteller-Empfänger Verwechslung', legalBasis: '§11 UStG', requiredFor: ['SMALL', 'STANDARD', 'LARGE'] },
   UID_VIES_CHECK: { id: 'UID_VIES_CHECK', label: 'UID-Prüfung (VIES)', legalBasis: 'Art 28 MwStSystRL / VO (EU) 904/2010', requiredFor: ['STANDARD', 'LARGE'] },
   PLZ_UID_CHECK: { id: 'PLZ_UID_CHECK', label: 'PLZ-UID Plausibilität', legalBasis: '§11 Abs 1 Z 1–2 UStG', requiredFor: ['STANDARD', 'LARGE'] },
+  CURRENCY_INFO: { id: 'CURRENCY_INFO', label: 'Fremdwährungs-Info', legalBasis: '§20 Abs 2 UStG', requiredFor: [] },
 } as const;

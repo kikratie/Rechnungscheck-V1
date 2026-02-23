@@ -22,12 +22,16 @@ interface ExtractedFields {
   isReverseCharge: boolean;
   issuerIban: string | null;
   issuerEmail?: string | null;
+  currency?: string;
 }
 
 interface ValidationInput {
   extractedFields: ExtractedFields;
   tenantId: string;
   invoiceId: string;
+  estimatedEurGross?: number | null;
+  exchangeRate?: number | null;
+  exchangeRateDate?: string | null;
 }
 
 export interface ValidationOutput {
@@ -42,10 +46,12 @@ function toNum(v: number | Prisma.Decimal | null | undefined): number | null {
   return typeof v === 'number' ? v : parseFloat(v.toString());
 }
 
-function determineAmountClass(grossAmount: number | null): AmountClass {
+function determineAmountClass(grossAmount: number | null, currency?: string, estimatedEurGross?: number | null): AmountClass {
   if (grossAmount === null) return 'STANDARD';
-  if (grossAmount <= AMOUNT_CLASS_THRESHOLDS.SMALL_MAX) return 'SMALL';
-  if (grossAmount > AMOUNT_CLASS_THRESHOLDS.LARGE_MIN) return 'LARGE';
+  // For non-EUR: use estimated EUR gross for threshold comparison
+  const eurAmount = (currency && currency !== 'EUR' && estimatedEurGross != null) ? estimatedEurGross : grossAmount;
+  if (eurAmount <= AMOUNT_CLASS_THRESHOLDS.SMALL_MAX) return 'SMALL';
+  if (eurAmount > AMOUNT_CLASS_THRESHOLDS.LARGE_MIN) return 'LARGE';
   return 'STANDARD';
 }
 
@@ -1140,13 +1146,52 @@ async function checkUidVies(
 }
 
 // ============================================================
+// Currency info check
+// ============================================================
+
+function checkCurrencyInfo(
+  fields: ExtractedFields,
+  estimatedEurGross: number | null | undefined,
+  exchangeRate: number | null | undefined,
+  exchangeRateDate: string | null | undefined,
+): ValidationCheck {
+  const rule = VALIDATION_RULES.CURRENCY_INFO;
+  const currency = fields.currency || 'EUR';
+
+  if (currency === 'EUR') {
+    return { rule: rule.id, status: 'GRAY', message: 'Rechnung in EUR — keine Umrechnung nötig', legalBasis: rule.legalBasis };
+  }
+
+  const gross = toNum(fields.grossAmount);
+
+  if (estimatedEurGross != null && exchangeRate != null && exchangeRateDate) {
+    const formattedDate = new Date(exchangeRateDate).toLocaleDateString('de-AT');
+    const grossStr = gross != null ? `${gross.toFixed(2)} ${currency}` : currency;
+    return {
+      rule: rule.id,
+      status: 'GREEN',
+      message: `Fremdwährungsrechnung: ${grossStr} ≈ ${estimatedEurGross.toFixed(2)} € (EZB-Kurs vom ${formattedDate}, 1 EUR = ${exchangeRate} ${currency})`,
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  return {
+    rule: rule.id,
+    status: 'YELLOW',
+    message: `Fremdwährungsrechnung in ${currency} — EUR-Schätzwert nicht verfügbar (EZB nicht erreichbar)`,
+    legalBasis: rule.legalBasis,
+  };
+}
+
+// ============================================================
 // Main validation function
 // ============================================================
 
 export async function validateInvoice(input: ValidationInput): Promise<ValidationOutput> {
-  const { extractedFields: fields, tenantId, invoiceId } = input;
+  const { extractedFields: fields, tenantId, invoiceId, estimatedEurGross, exchangeRate, exchangeRateDate } = input;
   const gross = toNum(fields.grossAmount);
-  const amountClass = determineAmountClass(gross);
+  const currency = fields.currency || 'EUR';
+  const amountClass = determineAmountClass(gross, currency, estimatedEurGross);
 
   // Load tenant info once for IBAN comparison and self-check
   const tenantRaw = await prisma.tenant.findUnique({
@@ -1187,6 +1232,7 @@ export async function validateInvoice(input: ValidationInput): Promise<Validatio
     checkReverseCharge(fields, amountClass),
     checkForeignVat(fields),
     checkPlzUidConsistency(fields, amountClass),
+    checkCurrencyInfo(fields, estimatedEurGross, exchangeRate, exchangeRateDate),
   ];
 
   // Async checks
@@ -1247,5 +1293,6 @@ export const _testing = {
   checkIssuerIsNotSelf,
   checkDuplicate,
   checkUidVies,
+  checkCurrencyInfo,
   EU_UID_PREFIXES,
 };

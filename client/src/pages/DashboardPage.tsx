@@ -115,6 +115,9 @@ export function DashboardPage() {
                 <div>
                   <p className="text-sm text-gray-500">Gesamtbetrag</p>
                   <p className="text-2xl font-bold">{formatCurrency(stats.totalAmount)}</p>
+                  {stats.foreignCurrencyCount > 0 && (
+                    <p className="text-xs text-gray-400 mt-0.5">inkl. {stats.foreignCurrencyCount} Fremdwährungsrechnung{stats.foreignCurrencyCount > 1 ? 'en' : ''} (geschätzt)</p>
+                  )}
                 </div>
               </div>
             </div>

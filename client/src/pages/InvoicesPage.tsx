@@ -359,7 +359,16 @@ export function InvoicesPage() {
                       <td className="px-4 py-3 text-gray-600">{inv.invoiceNumber || '—'}</td>
                       <td className="px-4 py-3 text-gray-600">{inv.invoiceDate ? formatDate(inv.invoiceDate) : '—'}</td>
                       <td className="px-4 py-3 text-right font-medium">
-                        {inv.grossAmount ? formatCurrency(String(inv.grossAmount)) : '—'}
+                        {inv.grossAmount ? (
+                          inv.currency !== 'EUR' ? (
+                            <div>
+                              <div>{formatCurrency(String(inv.grossAmount), inv.currency)}</div>
+                              {inv.estimatedEurGross && (
+                                <div className="text-xs text-gray-400 font-normal">≈ {formatCurrency(inv.estimatedEurGross)}</div>
+                              )}
+                            </div>
+                          ) : formatCurrency(String(inv.grossAmount))
+                        ) : '—'}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <ValidationBadge status={inv.validationStatus} />
@@ -538,25 +547,31 @@ export function InvoicesPage() {
                               <div key={i} className="flex justify-between text-sm">
                                 <dt className="text-gray-500">Netto ({line.rate}%)</dt>
                                 <dd className="flex gap-4">
-                                  <span>{formatCurrency(line.netAmount)}</span>
-                                  <span className="text-gray-400">USt {formatCurrency(line.vatAmount)}</span>
+                                  <span>{formatCurrency(line.netAmount, detail.currency)}</span>
+                                  <span className="text-gray-400">USt {formatCurrency(line.vatAmount, detail.currency)}</span>
                                 </dd>
                               </div>
                             ))}
                             <div className="border-t border-dashed my-1" />
-                            <DetailRow label="Netto gesamt" value={detail.netAmount ? formatCurrency(detail.netAmount) : null} />
-                            <DetailRow label="USt gesamt" value={detail.vatAmount ? formatCurrency(detail.vatAmount) : null} />
+                            <DetailRow label="Netto gesamt" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
+                            <DetailRow label="USt gesamt" value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
                           </>
                         ) : (
                           <>
-                            <DetailRow label="Netto" value={detail.netAmount ? formatCurrency(detail.netAmount) : null} />
-                            <DetailRow label={`USt (${detail.vatRate ?? '?'}%)`} value={detail.vatAmount ? formatCurrency(detail.vatAmount) : null} />
+                            <DetailRow label="Netto" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
+                            <DetailRow label={`USt (${detail.vatRate ?? '?'}%)`} value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
                           </>
                         )}
                         <div className="flex justify-between font-semibold pt-1">
                           <dt>Brutto</dt>
-                          <dd>{detail.grossAmount ? formatCurrency(detail.grossAmount) : '—'}</dd>
+                          <dd>{detail.grossAmount ? formatCurrency(detail.grossAmount, detail.currency) : '—'}</dd>
                         </div>
+                        {detail.currency !== 'EUR' && detail.estimatedEurGross && (
+                          <div className="flex justify-between text-xs text-gray-400 pt-0.5">
+                            <dt>≈ EUR</dt>
+                            <dd>{formatCurrency(detail.estimatedEurGross)} (EZB-Kurs{detail.exchangeRateDate ? ` vom ${formatDate(detail.exchangeRateDate)}` : ''})</dd>
+                          </div>
+                        )}
                       </dl>
                     </div>
 
@@ -661,7 +676,7 @@ export function InvoicesPage() {
                                 {item.quantity && <span className="text-gray-400 ml-1">({item.quantity} {item.unit})</span>}
                               </div>
                               <span className="font-medium ml-2 shrink-0">
-                                {item.grossAmount ? formatCurrency(item.grossAmount) : '—'}
+                                {item.grossAmount ? formatCurrency(item.grossAmount, detail.currency) : '—'}
                               </span>
                             </div>
                           ))}
@@ -1473,10 +1488,15 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function formatCurrency(value: string | number): string {
+function formatCurrency(value: string | number, cur: string = 'EUR'): string {
   const num = typeof value === 'number' ? value : parseFloat(value);
   if (isNaN(num)) return '—';
-  return num.toLocaleString('de-AT', { style: 'currency', currency: 'EUR' });
+  try {
+    return num.toLocaleString('de-AT', { style: 'currency', currency: cur });
+  } catch {
+    // Fallback for unknown currency codes
+    return `${num.toLocaleString('de-AT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
+  }
 }
 
 function SortHeader({
