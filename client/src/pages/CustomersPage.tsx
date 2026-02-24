@@ -10,9 +10,12 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { SendEmailDialog } from '../components/SendEmailDialog';
+import { useIsMobile } from '../hooks/useIsMobile';
+import { FullScreenPanel } from '../components/mobile/FullScreenPanel';
 
 export function CustomersPage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [filters, setFilters] = useState<CustomerFilters>({ page: 1, limit: 50 });
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -41,15 +44,40 @@ export function CustomersPage() {
   };
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-8rem)]">
+    <div className={isMobile ? '' : 'flex gap-6 h-[calc(100vh-8rem)]'}>
+      {/* Mobile: FullScreenPanel for detail */}
+      {isMobile && (
+        <FullScreenPanel
+          isOpen={!!selectedId}
+          onClose={() => setSelectedId(null)}
+          title="Kunde"
+        >
+          <div className="p-4">
+            {detailLoading ? (
+              <div className="flex items-center justify-center h-48">
+                <Loader2 className="animate-spin text-primary-600" size={32} />
+              </div>
+            ) : detail ? (
+              <CustomerDetailPanel
+                customer={detail}
+                onClose={() => setSelectedId(null)}
+                onNavigateToInvoice={(id) => navigate(`/invoices?selected=${id}`)}
+              />
+            ) : (
+              <div className="text-center text-gray-400 py-12">Kunde nicht gefunden</div>
+            )}
+          </div>
+        </FullScreenPanel>
+      )}
+
       {/* Customer List */}
-      <div className={`flex flex-col ${selectedId ? 'w-1/2' : 'w-full'} transition-all`}>
+      <div className={isMobile ? '' : `flex flex-col ${selectedId ? 'w-1/2' : 'w-full'} transition-all`}>
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4 lg:mb-6">
           <div className="flex items-center gap-3">
-            <UserCheck className="text-primary-600" size={28} />
+            {!isMobile && <UserCheck className="text-primary-600" size={28} />}
             <div>
-              <h1 className="text-2xl font-bold">Kunden</h1>
+              <h1 className={isMobile ? 'text-lg font-bold' : 'text-2xl font-bold'}>Kunden</h1>
               <p className="text-sm text-gray-500">
                 {pagination?.total ?? 0} Kunden
               </p>
@@ -83,8 +111,8 @@ export function CustomersPage() {
           </button>
         </div>
 
-        {/* Table */}
-        <div className="card flex-1 overflow-auto">
+        {/* Table / Cards */}
+        <div className={isMobile ? '' : 'card flex-1 overflow-auto'}>
           {isLoading ? (
             <div className="flex items-center justify-center h-48">
               <Loader2 className="animate-spin text-primary-600" size={32} />
@@ -95,7 +123,42 @@ export function CustomersPage() {
               <p>Keine Kunden gefunden</p>
               <p className="text-xs mt-1">Kunden werden automatisch aus Ausgangsrechnungen erstellt</p>
             </div>
+          ) : isMobile ? (
+            /* Mobile: Card List */
+            <div className="space-y-3">
+              {customers.map((customer) => (
+                <div
+                  key={customer.id}
+                  onClick={() => setSelectedId(customer.id)}
+                  className="mobile-card"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-700 font-semibold text-sm shrink-0">
+                        {customer.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-gray-900 truncate">{customer.name}</div>
+                        {customer.uid && (
+                          <span className="font-mono text-xs text-gray-500">{customer.uid}</span>
+                        )}
+                        <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
+                          {customer.address && (customer.address as Record<string, string>).city && (
+                            <span>{(customer.address as Record<string, string>).city}</span>
+                          )}
+                          <span className="inline-flex items-center gap-0.5 text-blue-600">
+                            <FileText size={10} /> {customer.invoiceCount}
+                          </span>
+                          <ViesBadge viesName={customer.viesName} viesCheckedAt={customer.viesCheckedAt} uid={customer.uid} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
+            /* Desktop: Table */
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-gray-500 text-xs uppercase tracking-wider">
@@ -182,8 +245,8 @@ export function CustomersPage() {
         )}
       </div>
 
-      {/* Detail Panel */}
-      {selectedId && (
+      {/* Desktop Detail Panel */}
+      {!isMobile && selectedId && (
         <div className="w-1/2 card p-6 overflow-auto">
           {detailLoading ? (
             <div className="flex items-center justify-center h-48">
@@ -383,12 +446,12 @@ function CustomerDetailPanel({
                 <label className="block text-xs font-medium text-gray-500 mb-1">Straße</label>
                 <input type="text" value={fields.street} onChange={(e) => updateField('street', e.target.value)} className="input-field text-sm" />
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">PLZ</label>
                   <input type="text" value={fields.zip} onChange={(e) => updateField('zip', e.target.value)} className="input-field text-sm" />
                 </div>
-                <div className="col-span-2">
+                <div className="sm:col-span-2">
                   <label className="block text-xs font-medium text-gray-500 mb-1">Ort</label>
                   <input type="text" value={fields.city} onChange={(e) => updateField('city', e.target.value)} className="input-field text-sm" />
                 </div>

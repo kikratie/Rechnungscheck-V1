@@ -19,11 +19,14 @@ import {
   FileText, Upload, Search, X, ChevronLeft, ChevronRight, Loader2,
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
   ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight, MinusCircle,
-  ArrowUp, ArrowDown, ArrowUpDown, Lock, Archive, Mail,
+  ArrowUp, ArrowDown, ArrowUpDown, Lock, Archive, Mail, SlidersHorizontal,
 } from 'lucide-react';
 import { SendEmailDialog } from '../components/SendEmailDialog';
 import { InvoiceUploadDialog } from '../components/InvoiceUploadDialog';
 import { BelegFormDialog } from '../components/BelegFormDialog';
+import { useIsMobile } from '../hooks/useIsMobile';
+import { FullScreenPanel } from '../components/mobile/FullScreenPanel';
+import { BottomSheet } from '../components/mobile/BottomSheet';
 
 export function InvoicesPage() {
   const navigate = useNavigate();
@@ -40,6 +43,8 @@ export function InvoicesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchApproveDialog, setShowBatchApproveDialog] = useState(false);
   const [showEmailDialog, setShowEmailDialog] = useState(false);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const isMobile = useIsMobile();
 
   const batchApproveMutation = useMutation({
     mutationFn: ({ ids, comment }: { ids: string[]; comment?: string | null }) => batchApproveInvoicesApi(ids, comment),
@@ -145,7 +150,7 @@ export function InvoicesPage() {
   }
 
   return (
-    <div className="flex gap-6">
+    <div className={isMobile ? '' : 'flex gap-6'}>
       {/* Upload dialog */}
       {showUpload && (
         <InvoiceUploadDialog
@@ -238,23 +243,25 @@ Mit freundlichen Grüßen`;
       })()}
 
       {/* Main list */}
-      <div className={selectedId ? 'flex-1 min-w-0' : 'w-full'}>
-        <div className="flex items-center justify-between mb-6">
+      <div className={!isMobile && selectedId ? 'flex-1 min-w-0' : 'w-full'}>
+        <div className="flex items-center justify-between mb-4 lg:mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Rechnungen</h1>
-            <p className="text-gray-500 mt-1">
+            <h1 className="text-xl lg:text-2xl font-bold text-gray-900">Rechnungen</h1>
+            <p className="text-gray-500 text-sm mt-1">
               {pagination ? `${pagination.total} Rechnungen` : 'Rechnungen hochladen, prüfen und verwalten'}
             </p>
           </div>
-          <button className="btn-primary flex items-center gap-2" onClick={() => setShowUpload(true)}>
-            <Upload size={18} />
-            Hochladen
-          </button>
+          {!isMobile && (
+            <button className="btn-primary flex items-center gap-2" onClick={() => setShowUpload(true)}>
+              <Upload size={18} />
+              Hochladen
+            </button>
+          )}
         </div>
 
         {/* Direction tabs + Filters */}
-        <div className="card p-4 mb-4">
-          <div className="flex items-center gap-1 mb-3 border-b border-gray-200 pb-3">
+        <div className="card p-3 lg:p-4 mb-4">
+          <div className="flex items-center gap-1 mb-3 border-b border-gray-200 pb-3 overflow-x-auto">
             {([
               { value: undefined, label: 'Alle' },
               { value: 'INCOMING' as const, label: 'Eingang' },
@@ -263,7 +270,7 @@ Mit freundlichen Grüßen`;
               <button
                 key={tab.label}
                 onClick={() => setFilters((f) => ({ ...f, direction: tab.value, page: 1 }))}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap ${
                   filters.direction === tab.value
                     ? 'bg-primary-100 text-primary-700'
                     : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
@@ -273,51 +280,131 @@ Mit freundlichen Grüßen`;
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap gap-3">
-            <form onSubmit={handleSearch} className="flex gap-2 flex-1 min-w-[200px]">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                <input
-                  type="text"
-                  placeholder="Suche: Lieferant, Rechnungsnr., BEL-001..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="input-field pl-9 !py-2 text-sm"
-                />
-              </div>
-              <button type="submit" className="btn-secondary text-sm px-3">Suchen</button>
-            </form>
 
-            <select
-              value={filters.validationStatus || ''}
-              onChange={(e) => handleFilterChange('validationStatus', e.target.value)}
-              className="input-field !w-auto !py-2 text-sm"
-            >
-              <option value="">Alle Validierung</option>
-              <option value="VALID">Gültig</option>
-              <option value="WARNING">Warnung</option>
-              <option value="INVALID">Ungültig</option>
-              <option value="PENDING">Ausstehend</option>
-            </select>
+          {/* Mobile: search + filter icon */}
+          {isMobile ? (
+            <div className="flex gap-2">
+              <form onSubmit={handleSearch} className="flex gap-2 flex-1">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                  <input
+                    type="text"
+                    placeholder="Suche..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="input-field pl-9 !py-2.5 text-sm"
+                    onBlur={() => { if (search) handleSearch(new Event('submit') as unknown as React.FormEvent); }}
+                  />
+                </div>
+                <button type="submit" className="btn-secondary px-3">
+                  <Search size={18} />
+                </button>
+              </form>
+              <button
+                onClick={() => setShowFilterSheet(true)}
+                className={`btn-secondary px-3 ${filters.validationStatus || filters.processingStatus ? 'border-primary-300 text-primary-600' : ''}`}
+              >
+                <SlidersHorizontal size={18} />
+              </button>
+            </div>
+          ) : (
+            /* Desktop: inline filters */
+            <div className="flex flex-wrap gap-3">
+              <form onSubmit={handleSearch} className="flex gap-2 flex-1 min-w-[200px]">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                  <input
+                    type="text"
+                    placeholder="Suche: Lieferant, Rechnungsnr., BEL-001..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="input-field pl-9 !py-2 text-sm"
+                  />
+                </div>
+                <button type="submit" className="btn-secondary text-sm px-3">Suchen</button>
+              </form>
 
-            <select
-              value={filters.processingStatus || ''}
-              onChange={(e) => handleFilterChange('processingStatus', e.target.value)}
-              className="input-field !w-auto !py-2 text-sm"
-            >
-              <option value="">Alle Status</option>
-              <option value="UPLOADED">Hochgeladen</option>
-              <option value="PROCESSING">In Verarbeitung</option>
-              <option value="PROCESSED">Verarbeitet</option>
-              <option value="REVIEW_REQUIRED">Review nötig</option>
-              <option value="REJECTED">Abgelehnt</option>
-              <option value="ARCHIVED">Archiviert</option>
-              <option value="RECONCILED">Abgeglichen</option>
-              <option value="EXPORTED">Exportiert</option>
-              <option value="ERROR">Fehler</option>
-            </select>
-          </div>
+              <select
+                value={filters.validationStatus || ''}
+                onChange={(e) => handleFilterChange('validationStatus', e.target.value)}
+                className="input-field !w-auto !py-2 text-sm"
+              >
+                <option value="">Alle Validierung</option>
+                <option value="VALID">Gültig</option>
+                <option value="WARNING">Warnung</option>
+                <option value="INVALID">Ungültig</option>
+                <option value="PENDING">Ausstehend</option>
+              </select>
+
+              <select
+                value={filters.processingStatus || ''}
+                onChange={(e) => handleFilterChange('processingStatus', e.target.value)}
+                className="input-field !w-auto !py-2 text-sm"
+              >
+                <option value="">Alle Status</option>
+                <option value="UPLOADED">Hochgeladen</option>
+                <option value="PROCESSING">In Verarbeitung</option>
+                <option value="PROCESSED">Verarbeitet</option>
+                <option value="REVIEW_REQUIRED">Review nötig</option>
+                <option value="REJECTED">Abgelehnt</option>
+                <option value="ARCHIVED">Archiviert</option>
+                <option value="RECONCILED">Abgeglichen</option>
+                <option value="EXPORTED">Exportiert</option>
+                <option value="ERROR">Fehler</option>
+              </select>
+            </div>
+          )}
         </div>
+
+        {/* Mobile filter bottom sheet */}
+        {isMobile && (
+          <BottomSheet isOpen={showFilterSheet} onClose={() => setShowFilterSheet(false)} title="Filter">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Validierung</label>
+                <select
+                  value={filters.validationStatus || ''}
+                  onChange={(e) => { handleFilterChange('validationStatus', e.target.value); }}
+                  className="input-field text-base"
+                >
+                  <option value="">Alle</option>
+                  <option value="VALID">Gültig</option>
+                  <option value="WARNING">Warnung</option>
+                  <option value="INVALID">Ungültig</option>
+                  <option value="PENDING">Ausstehend</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={filters.processingStatus || ''}
+                  onChange={(e) => { handleFilterChange('processingStatus', e.target.value); }}
+                  className="input-field text-base"
+                >
+                  <option value="">Alle</option>
+                  <option value="UPLOADED">Hochgeladen</option>
+                  <option value="PROCESSING">In Verarbeitung</option>
+                  <option value="PROCESSED">Verarbeitet</option>
+                  <option value="REVIEW_REQUIRED">Review nötig</option>
+                  <option value="REJECTED">Abgelehnt</option>
+                  <option value="ARCHIVED">Archiviert</option>
+                  <option value="RECONCILED">Abgeglichen</option>
+                  <option value="EXPORTED">Exportiert</option>
+                  <option value="ERROR">Fehler</option>
+                </select>
+              </div>
+              <button
+                onClick={() => {
+                  setFilters((f) => ({ ...f, validationStatus: undefined, processingStatus: undefined, page: 1 }));
+                  setShowFilterSheet(false);
+                }}
+                className="btn-secondary w-full"
+              >
+                Filter zurücksetzen
+              </button>
+            </div>
+          </BottomSheet>
+        )}
 
         {/* Batch selection toolbar */}
         {selectedIds.size > 0 && (
@@ -364,19 +451,68 @@ Mit freundlichen Grüßen`;
           />
         )}
 
-        {/* Table */}
+        {/* Table / Card List */}
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="animate-spin text-primary-600" size={32} />
           </div>
         ) : invoices.length === 0 ? (
-          <div className="card p-12 text-center">
+          <div className="card p-8 lg:p-12 text-center">
             <FileText className="mx-auto text-gray-300 mb-4" size={48} />
             <h3 className="text-lg font-medium text-gray-900 mb-2">Keine Rechnungen gefunden</h3>
-            <p className="text-gray-500">Passe die Filter an oder lade eine neue Rechnung hoch.</p>
+            <p className="text-gray-500 text-sm">Passe die Filter an oder lade eine neue Rechnung hoch.</p>
           </div>
         ) : (
           <>
+            {/* Mobile card view */}
+            {isMobile ? (
+              <div className="space-y-3">
+                {invoices.map((inv) => {
+                  const shadowColor =
+                    inv.validationStatus === 'VALID' ? '#22c55e' :
+                    inv.validationStatus === 'WARNING' ? '#f59e0b' :
+                    inv.validationStatus === 'INVALID' ? '#ef4444' :
+                    '#d1d5db';
+                  return (
+                    <div
+                      key={inv.id}
+                      className={`mobile-card ${selectedId === inv.id ? 'ring-2 ring-primary-300' : ''}`}
+                      style={{ borderLeft: `4px solid ${shadowColor}` }}
+                      onClick={() => { setSelectedId(inv.id); setEditMode(false); }}
+                    >
+                      <div className="flex items-start justify-between mb-1.5">
+                        <span className="font-mono text-xs font-semibold text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded">
+                          {inv.archivalNumber || `BEL-${String(inv.belegNr).padStart(3, '0')}`}
+                        </span>
+                        <ValidationBadge status={inv.validationStatus} />
+                      </div>
+                      <div className="font-medium text-gray-900 truncate">
+                        {inv.vendorName || <span className="text-gray-400 italic text-sm">Wird erkannt...</span>}
+                      </div>
+                      <div className="flex items-center justify-between mt-1.5">
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                          <span>{inv.invoiceNumber || '—'}</span>
+                          {inv.invoiceDate && <span>· {formatDate(inv.invoiceDate)}</span>}
+                        </div>
+                        <span className="font-semibold text-gray-900">
+                          {inv.grossAmount ? formatCurrency(String(inv.grossAmount), inv.currency) : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        <ProcessingBadge status={inv.processingStatus} />
+                        {inv.direction === 'OUTGOING' && (
+                          <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1 py-0.5 rounded">Ausgang</span>
+                        )}
+                        {inv.documentType === 'ERSATZBELEG' && (
+                          <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+            /* Desktop table view */
             <div className="card overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
@@ -503,6 +639,7 @@ Mit freundlichen Grüßen`;
                 </tbody>
               </table>
             </div>
+            )}
 
             {/* Pagination */}
             {pagination && pagination.totalPages > 1 && (
@@ -532,445 +669,74 @@ Mit freundlichen Grüßen`;
         )}
       </div>
 
-      {/* Detail panel */}
-      {selectedId && (
+      {/* Detail panel — FullScreenPanel on mobile, inline on desktop */}
+      {isMobile ? (
+        <FullScreenPanel
+          isOpen={!!selectedId}
+          onClose={() => { setSelectedId(null); setEditMode(false); }}
+          title="Rechnungsdetails"
+        >
+          <div className="p-4">
+            {selectedId && <InvoiceDetailContent
+              selectedId={selectedId}
+              detail={detail}
+              detailLoading={detailLoading}
+              detailError={detailError}
+              editMode={editMode}
+              editFields={editFields}
+              setEditFields={setEditFields}
+              setEditMode={setEditMode}
+              setSelectedId={setSelectedId}
+              setShowRejectDialog={setShowRejectDialog}
+              setRejectReason={setRejectReason}
+              setShowErsatzbelegDialog={setShowErsatzbelegDialog}
+              setShowEmailDialog={setShowEmailDialog}
+              startEdit={startEdit}
+              navigate={navigate}
+              queryClient={queryClient}
+            />}
+          </div>
+        </FullScreenPanel>
+      ) : selectedId ? (
         <div className="w-[480px] shrink-0">
           <div className="card p-6 sticky top-0 max-h-[calc(100vh-6rem)] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                {detail && detail.archivalNumber ? (
-                  <span className="font-mono text-sm font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded inline-flex items-center gap-1">
-                    <Lock size={12} />
-                    {detail.archivalNumber}
-                  </span>
-                ) : detail && (
-                  <span className="font-mono text-sm font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded">
-                    BEL-{String(detail.belegNr).padStart(3, '0')}
-                  </span>
-                )}
-                <h2 className="text-lg font-semibold">Details</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                {detail && !editMode && detail.extractedData && !detail.isLocked && (
-                  <button onClick={startEdit} className="text-gray-400 hover:text-primary-600" title="Bearbeiten">
-                    <Edit3 size={16} />
-                  </button>
-                )}
-                {detail && (
-                  <DownloadButton invoiceId={selectedId} replacesInvoiceId={detail.replacesInvoiceId} />
-                )}
-                <button onClick={() => { setSelectedId(null); setEditMode(false); }} className="text-gray-400 hover:text-gray-600">
-                  <X size={18} />
-                </button>
-              </div>
+              <h2 className="text-lg font-semibold">Details</h2>
+              <button onClick={() => { setSelectedId(null); setEditMode(false); }} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
             </div>
-
-            {detailLoading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="animate-spin text-primary-600" size={24} />
-              </div>
-            ) : detailError ? (
-              <div className="text-center py-8">
-                <XCircle size={24} className="mx-auto text-red-400 mb-2" />
-                <p className="text-red-600 text-sm">Fehler beim Laden</p>
-                <p className="text-xs text-gray-400 mt-1">{(detailError as Error).message}</p>
-              </div>
-            ) : !detail ? (
-              <div className="text-center text-gray-400 py-8">
-                <p>Keine Details verfügbar</p>
-                <p className="text-xs mt-1">Rechnung wird möglicherweise noch verarbeitet</p>
-              </div>
-            ) : (
-              <div className="space-y-4 text-sm">
-                {/* Processing progress bar */}
-                {(detail.processingStatus === 'UPLOADED' || detail.processingStatus === 'PROCESSING' || detail.processingStatus === 'ERROR') && (
-                  <ProcessingProgress status={detail.processingStatus} error={(detail as unknown as { processingError?: string }).processingError} />
-                )}
-
-                {/* Ersatzbeleg reference box */}
-                {detail.documentType === 'ERSATZBELEG' && (
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-orange-800">
-                      <FilePlus2 size={16} />
-                      Ersatzbeleg
-                    </div>
-                    {detail.replacesBelegNr && (
-                      <p className="text-xs text-orange-600 mt-1">
-                        Ersetzt Original: <span className="font-mono font-bold">BEL-{String(detail.replacesBelegNr).padStart(3, '0')}</span>
-                      </p>
-                    )}
-                    {detail.ersatzReason && (
-                      <p className="text-xs text-orange-600 mt-1">
-                        Grund: {detail.ersatzReason}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* Replaced by Ersatzbeleg notice */}
-                {detail.processingStatus === 'REPLACED' && (
-                  <div className="bg-gray-100 border border-gray-300 rounded-lg p-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                      <ArrowRight size={16} />
-                      Ersetzt durch Ersatzbeleg
-                    </div>
-                    {detail.replacedByBelegNr && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Ersatzbeleg: <span className="font-mono font-bold">BEL-{String(detail.replacedByBelegNr).padStart(3, '0')}</span>
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* Direction info box for outgoing */}
-                {detail.direction === 'OUTGOING' && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-blue-800">
-                      <Upload size={16} />
-                      Ausgangsrechnung
-                    </div>
-                    <p className="text-xs text-blue-600 mt-1">
-                      Ihr Unternehmen ist der Rechnungsaussteller
-                    </p>
-                  </div>
-                )}
-
-                {/* Archival info box */}
-                {detail.archivalNumber && (
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-green-800">
-                      <Archive size={16} />
-                      Archiviert
-                    </div>
-                    <div className="mt-1 space-y-0.5 text-xs text-green-700">
-                      <p className="font-mono font-bold">{detail.archivalNumber}</p>
-                      {detail.archivedAt && (
-                        <p>Archiviert am: {new Date(detail.archivedAt).toLocaleString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                      )}
-                      <p className="font-mono text-green-600">
-                        BEL-{String(detail.belegNr).padStart(3, '0')}
-                      </p>
-                    </div>
-                    {detail.approvalComment && (
-                      <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded p-2 text-xs text-yellow-800">
-                        <span className="font-medium">Anmerkung:</span> {detail.approvalComment}
-                      </div>
-                    )}
-                    {detail.stampFailed && (
-                      <p className="text-xs text-yellow-700 mt-1 flex items-center gap-1">
-                        <AlertTriangle size={12} />
-                        PDF-Stempel konnte nicht gesetzt werden
-                      </p>
-                    )}
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <ArchiveDownloadBtn invoiceId={selectedId} variant="archived" />
-                      <ArchiveDownloadBtn invoiceId={selectedId} variant="original" />
-                    </div>
-                  </div>
-                )}
-
-                {/* Edit mode */}
-                {editMode ? (
-                  <EditForm
-                    fields={editFields}
-                    setFields={setEditFields}
-                    invoiceId={selectedId}
-                    replacesInvoiceId={detail.replacesInvoiceId}
-                    onCancel={() => setEditMode(false)}
-                    onSaved={() => {
-                      setEditMode(false);
-                      queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
-                      queryClient.invalidateQueries({ queryKey: ['invoices'] });
-                    }}
-                  />
-                ) : (
-                  <>
-                    {/* Vendor/Customer info */}
-                    <div>
-                      <h3 className="font-medium text-gray-900 mb-2">{detail.direction === 'OUTGOING' ? 'Kunde' : 'Lieferant'}</h3>
-                      <dl className="space-y-1">
-                        {detail.direction === 'OUTGOING' && detail.customerName ? (
-                          <div className="flex justify-between text-sm">
-                            <dt className="text-gray-500">Name</dt>
-                            <dd className="text-right">
-                              {detail.customerId ? (
-                                <button
-                                  onClick={() => navigate(`/customers?selected=${detail.customerId}`)}
-                                  className="text-primary-600 hover:underline font-medium"
-                                >
-                                  {detail.customerName}
-                                </button>
-                              ) : (
-                                <span>{detail.customerName}</span>
-                              )}
-                            </dd>
-                          </div>
-                        ) : (
-                          <DetailRow label="Name" value={detail.vendorName} />
-                        )}
-                        <DetailRow label="UID" value={detail.direction === 'OUTGOING' ? detail.recipientUid : detail.vendorUid} />
-                        <DetailRow label="Kategorie" value={detail.category} />
-                      </dl>
-                    </div>
-
-                    {/* Invoice info */}
-                    <div className="border-t pt-4">
-                      <h3 className="font-medium text-gray-900 mb-2">Rechnung</h3>
-                      <dl className="space-y-1">
-                        <DetailRow label="Nummer" value={detail.invoiceNumber} />
-                        <DetailRow label="Datum" value={detail.invoiceDate ? formatDate(detail.invoiceDate) : null} />
-                        <DetailRow label="Fällig" value={detail.dueDate ? formatDate(detail.dueDate) : null} />
-                        <DetailRow label="Datei" value={detail.originalFileName} />
-                      </dl>
-                      <ViewOriginalButton invoiceId={selectedId} replacesInvoiceId={detail.replacesInvoiceId} />
-                    </div>
-
-                    {/* Amounts */}
-                    <div className="border-t pt-4">
-                      <h3 className="font-medium text-gray-900 mb-2">Beträge</h3>
-                      <dl className="space-y-1">
-                        {Array.isArray(detail.vatBreakdown) && detail.vatBreakdown.length > 1 ? (
-                          <>
-                            {(detail.vatBreakdown as Array<{ rate: number; netAmount: number; vatAmount: number }>).map((line, i) => (
-                              <div key={i} className="flex justify-between text-sm">
-                                <dt className="text-gray-500">Netto ({line.rate}%)</dt>
-                                <dd className="flex gap-4">
-                                  <span>{formatCurrency(line.netAmount, detail.currency)}</span>
-                                  <span className="text-gray-400">USt {formatCurrency(line.vatAmount, detail.currency)}</span>
-                                </dd>
-                              </div>
-                            ))}
-                            <div className="border-t border-dashed my-1" />
-                            <DetailRow label="Netto gesamt" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
-                            <DetailRow label="USt gesamt" value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
-                          </>
-                        ) : (
-                          <>
-                            <DetailRow label="Netto" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
-                            <DetailRow label={`USt (${detail.vatRate ?? '?'}%)`} value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
-                          </>
-                        )}
-                        <div className="flex justify-between font-semibold pt-1">
-                          <dt>Brutto</dt>
-                          <dd>{detail.grossAmount ? formatCurrency(detail.grossAmount, detail.currency) : '—'}</dd>
-                        </div>
-                        {detail.currency !== 'EUR' && detail.estimatedEurGross && (
-                          <div className="flex justify-between text-xs text-gray-400 pt-0.5">
-                            <dt>≈ EUR</dt>
-                            <dd>{formatCurrency(detail.estimatedEurGross)} (EZB-Kurs{detail.exchangeRateDate ? ` vom ${formatDate(detail.exchangeRateDate)}` : ''})</dd>
-                          </div>
-                        )}
-                      </dl>
-                    </div>
-
-                    {/* Status */}
-                    <div className="border-t pt-4">
-                      <h3 className="font-medium text-gray-900 mb-2">Status</h3>
-                      <div className="flex flex-wrap gap-2">
-                        <ValidationBadge status={detail.validationStatus} />
-                        <ProcessingBadge status={detail.processingStatus} />
-                        {detail.isDuplicate && (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">Duplikat</span>
-                        )}
-                      </div>
-                      {detail.aiConfidence && (
-                        <p className="text-xs text-gray-400 mt-2">KI-Konfidenz: {(parseFloat(detail.aiConfidence) * 100).toFixed(1)}%</p>
-                      )}
-                    </div>
-
-                    {/* Validation result with structured checks */}
-                    {detail.validationResult && (
-                      <div className="border-t pt-4">
-                        <div className="flex items-center gap-2 mb-3">
-                          <Scale size={16} className="text-gray-500" />
-                          <h3 className="font-medium text-gray-900">Prüfprotokoll</h3>
-                          <TrafficLight status={detail.validationResult.overallStatus as TrafficLightStatus} />
-                          <span className="text-xs text-gray-400 ml-auto">
-                            {detail.validationResult.amountClass === 'SMALL' ? 'Kleinbetrag' :
-                             detail.validationResult.amountClass === 'LARGE' ? 'Großbetrag' : 'Standard'}
-                          </span>
-                        </div>
-                        <div className="space-y-1.5">
-                          {[...(detail.validationResult.checks as ValidationCheck[])]
-                            .sort((a, b) => {
-                              const order = { RED: 0, YELLOW: 1, GREEN: 2, GRAY: 3 };
-                              return (order[a.status] ?? 2) - (order[b.status] ?? 2);
-                            })
-                            .map((check, i) => (
-                            <div
-                              key={i}
-                              className={`flex items-start gap-2 text-xs rounded p-2 ${
-                                check.status === 'GRAY' ? 'bg-gray-50 border border-gray-100 opacity-60' :
-                                check.status === 'GREEN' ? 'bg-green-50 border border-green-100' :
-                                check.status === 'YELLOW' ? 'bg-yellow-50 border border-yellow-200' :
-                                'bg-red-50 border border-red-200'
-                              }`}
-                            >
-                              {check.status === 'GRAY' ? <MinusCircle size={13} className="text-gray-400 shrink-0 mt-0.5" /> :
-                               check.status === 'GREEN' ? <CheckCircle size={13} className="text-green-600 shrink-0 mt-0.5" /> :
-                               check.status === 'YELLOW' ? <AlertTriangle size={13} className="text-yellow-600 shrink-0 mt-0.5" /> :
-                               <XCircle size={13} className="text-red-600 shrink-0 mt-0.5" />}
-                              <div className="flex-1 min-w-0">
-                                <span>{check.message}</span>
-                                {check.legalBasis && (
-                                  <span className="text-gray-400 ml-1">({check.legalBasis})</span>
-                                )}
-                                {check.details && (check.details as Record<string, unknown>).actions ? (
-                                  <div className="mt-1.5 pl-2 border-l-2 border-red-300 space-y-0.5">
-                                    <span className="font-medium text-red-700 block">Empfohlene Maßnahmen:</span>
-                                    {((check.details as { actions: string[] }).actions).map((action, j) => (
-                                      <div key={j} className="flex items-start gap-1 text-red-600">
-                                        <span className="shrink-0">→</span>
-                                        <span>{action}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Legacy validation details (old format) */}
-                    {!detail.validationResult && detail.validationDetails && (detail.validationDetails as unknown[]).length > 0 && (
-                      <div className="border-t pt-4">
-                        <h3 className="font-medium text-gray-900 mb-2">Validierungshinweise</h3>
-                        <div className="space-y-2">
-                          {(detail.validationDetails as Array<{ field?: string; message: string }>).map((v, i) => (
-                            <div key={i} className="flex items-start gap-2 text-xs bg-yellow-50 border border-yellow-200 rounded p-2">
-                              <AlertTriangle size={14} className="text-yellow-600 shrink-0 mt-0.5" />
-                              <span>{v.message}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Line items */}
-                    {detail.lineItems && (detail.lineItems as unknown[]).length > 0 && (
-                      <div className="border-t pt-4">
-                        <h3 className="font-medium text-gray-900 mb-2">Positionen</h3>
-                        <div className="space-y-2">
-                          {(detail.lineItems as Array<{
-                            id: string; position: number; description: string | null;
-                            quantity: string | null; unit: string | null; grossAmount: string | null;
-                          }>).map((item) => (
-                            <div key={item.id} className="flex justify-between text-xs bg-gray-50 rounded p-2">
-                              <div className="flex-1 min-w-0">
-                                <span className="text-gray-400 mr-1">{item.position}.</span>
-                                <span className="truncate">{item.description || '—'}</span>
-                                {item.quantity && <span className="text-gray-400 ml-1">({item.quantity} {item.unit})</span>}
-                              </div>
-                              <span className="font-medium ml-2 shrink-0">
-                                {item.grossAmount ? formatCurrency(item.grossAmount, detail.currency) : '—'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Rejection note */}
-                    {(detail as unknown as { notes?: string }).notes && (
-                      <div className="border-t pt-4">
-                        <div className="bg-orange-50 border border-orange-200 rounded p-3 text-xs text-orange-700">
-                          <ThumbsDown size={14} className="inline mr-1" />
-                          <span className="font-medium">Abgelehnt:</span> {(detail as unknown as { notes?: string }).notes}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Processing error */}
-                    {(detail as unknown as { processingError?: string }).processingError && (
-                      <div className="border-t pt-4">
-                        <div className="bg-red-50 border border-red-200 rounded p-3 text-xs text-red-700">
-                          <XCircle size={14} className="inline mr-1" />
-                          {(detail as unknown as { processingError?: string }).processingError}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Extracted data version info */}
-                    {detail.extractedData && (
-                      <div className="border-t pt-4">
-                        <div className="flex items-center gap-2 text-xs text-gray-400">
-                          <FileCheck size={13} />
-                          <span>
-                            Version {detail.extractedData.version} — {detail.extractedData.source === 'AI' ? 'KI-Extraktion' : 'Manuelle Korrektur'}
-                            {detail.extractedData.pipelineStage && ` (${detail.extractedData.pipelineStage})`}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Action buttons */}
-                    {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && detail.processingStatus !== 'REJECTED' && (
-                      <div className="border-t pt-4 flex gap-2">
-                        <ApproveButton
-                          invoiceId={selectedId}
-                          validationStatus={detail.validationStatus}
-                          onSuccess={() => {
-                            queryClient.invalidateQueries({ queryKey: ['invoices'] });
-                            queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
-                          }}
-                        />
-                        <button
-                          className="btn-secondary flex items-center gap-1.5 text-sm flex-1 justify-center"
-                          onClick={() => { setRejectReason(''); setShowRejectDialog(true); }}
-                        >
-                          <ThumbsDown size={14} />
-                          Ablehnen
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Ersatzbeleg erstellen button — for ERROR, REVIEW_REQUIRED and similar problematic invoices */}
-                    {(detail.processingStatus === 'ERROR' || detail.processingStatus === 'REVIEW_REQUIRED' || detail.processingStatus === 'PROCESSED' || detail.processingStatus === 'REJECTED') &&
-                     !detail.replacedByInvoiceId && (
-                      <div className="border-t pt-4">
-                        <button
-                          onClick={() => setShowErsatzbelegDialog(true)}
-                          className="btn-secondary flex items-center gap-1.5 text-sm w-full justify-center text-orange-600 hover:text-orange-700 hover:border-orange-300"
-                        >
-                          <FilePlus2 size={14} />
-                          Ersatzbeleg erstellen
-                        </button>
-                      </div>
-                    )}
-
-                    {/* E-Mail senden — for processed invoices */}
-                    {detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && (
-                      <div className="border-t pt-4">
-                        <button
-                          onClick={() => setShowEmailDialog(true)}
-                          className="btn-secondary flex items-center gap-1.5 text-sm w-full justify-center"
-                        >
-                          <Mail size={14} />
-                          E-Mail senden
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Delete button for ERROR/UPLOADED */}
-                    {(detail.processingStatus === 'ERROR' || detail.processingStatus === 'UPLOADED') && (
-                      <div className="border-t pt-4">
-                        <DeleteButton
-                          invoiceId={selectedId}
-                          onSuccess={() => {
-                            setSelectedId(null);
-                            queryClient.invalidateQueries({ queryKey: ['invoices'] });
-                          }}
-                        />
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
+            <InvoiceDetailContent
+              selectedId={selectedId}
+              detail={detail}
+              detailLoading={detailLoading}
+              detailError={detailError}
+              editMode={editMode}
+              editFields={editFields}
+              setEditFields={setEditFields}
+              setEditMode={setEditMode}
+              setSelectedId={setSelectedId}
+              setShowRejectDialog={setShowRejectDialog}
+              setRejectReason={setRejectReason}
+              setShowErsatzbelegDialog={setShowErsatzbelegDialog}
+              setShowEmailDialog={setShowEmailDialog}
+              startEdit={startEdit}
+              navigate={navigate}
+              queryClient={queryClient}
+            />
           </div>
         </div>
+      ) : null}
+
+      {/* Mobile FAB for upload */}
+      {isMobile && (
+        <button
+          onClick={() => setShowUpload(true)}
+          className="fixed bottom-[88px] right-4 z-30 w-14 h-14 rounded-full bg-primary-600 text-white shadow-lg flex items-center justify-center active:scale-95 transition-transform"
+          aria-label="Rechnung hochladen"
+        >
+          <Upload size={24} />
+        </button>
       )}
     </div>
   );
@@ -979,6 +745,395 @@ Mit freundlichen Grüßen`;
 // ============================================================
 // Sub-components
 // ============================================================
+
+/** Shared detail content — used by both inline desktop panel and mobile FullScreenPanel */
+function InvoiceDetailContent({
+  selectedId, detail, detailLoading, detailError,
+  editMode, editFields, setEditFields, setEditMode, setSelectedId,
+  setShowRejectDialog, setRejectReason, setShowErsatzbelegDialog, setShowEmailDialog,
+  startEdit, navigate, queryClient,
+}: {
+  selectedId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  detail: any;
+  detailLoading: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  detailError: any;
+  editMode: boolean;
+  editFields: Record<string, unknown>;
+  setEditFields: (f: Record<string, unknown>) => void;
+  setEditMode: (v: boolean) => void;
+  setSelectedId: (v: string | null) => void;
+  setShowRejectDialog: (v: boolean) => void;
+  setRejectReason: (v: string) => void;
+  setShowErsatzbelegDialog: (v: boolean) => void;
+  setShowEmailDialog: (v: boolean) => void;
+  startEdit: () => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  navigate: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  queryClient: any;
+}) {
+  if (detailLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="animate-spin text-primary-600" size={24} />
+      </div>
+    );
+  }
+  if (detailError) {
+    return (
+      <div className="text-center py-8">
+        <XCircle size={24} className="mx-auto text-red-400 mb-2" />
+        <p className="text-red-600 text-sm">Fehler beim Laden</p>
+      </div>
+    );
+  }
+  if (!detail) {
+    return (
+      <div className="text-center text-gray-400 py-8">
+        <p>Keine Details verfügbar</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 text-sm">
+      {/* Header badges */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {detail.archivalNumber ? (
+          <span className="font-mono text-sm font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded inline-flex items-center gap-1">
+            <Lock size={12} />
+            {detail.archivalNumber}
+          </span>
+        ) : (
+          <span className="font-mono text-sm font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded">
+            BEL-{String(detail.belegNr).padStart(3, '0')}
+          </span>
+        )}
+        <ValidationBadge status={detail.validationStatus} />
+        <ProcessingBadge status={detail.processingStatus} />
+      </div>
+
+      {/* Action bar */}
+      <div className="flex items-center gap-2">
+        {!editMode && detail.extractedData && !detail.isLocked && (
+          <button onClick={startEdit} className="btn-secondary text-sm flex items-center gap-1.5 py-2 px-3">
+            <Edit3 size={14} />
+            Bearbeiten
+          </button>
+        )}
+        <DownloadButton invoiceId={selectedId} replacesInvoiceId={detail.replacesInvoiceId} />
+      </div>
+
+      {/* Processing progress bar */}
+      {(detail.processingStatus === 'UPLOADED' || detail.processingStatus === 'PROCESSING' || detail.processingStatus === 'ERROR') && (
+        <ProcessingProgress status={detail.processingStatus} error={(detail as unknown as { processingError?: string }).processingError} />
+      )}
+
+      {/* Ersatzbeleg reference */}
+      {detail.documentType === 'ERSATZBELEG' && (
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-orange-800">
+            <FilePlus2 size={16} />
+            Ersatzbeleg
+          </div>
+          {detail.replacesBelegNr && (
+            <p className="text-xs text-orange-600 mt-1">
+              Ersetzt Original: <span className="font-mono font-bold">BEL-{String(detail.replacesBelegNr).padStart(3, '0')}</span>
+            </p>
+          )}
+          {detail.ersatzReason && (
+            <p className="text-xs text-orange-600 mt-1">Grund: {detail.ersatzReason}</p>
+          )}
+        </div>
+      )}
+
+      {/* Replaced by notice */}
+      {detail.processingStatus === 'REPLACED' && (
+        <div className="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <ArrowRight size={16} />
+            Ersetzt durch Ersatzbeleg
+          </div>
+          {detail.replacedByBelegNr && (
+            <p className="text-xs text-gray-500 mt-1">
+              Ersatzbeleg: <span className="font-mono font-bold">BEL-{String(detail.replacedByBelegNr).padStart(3, '0')}</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Direction info */}
+      {detail.direction === 'OUTGOING' && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-blue-800">
+            <Upload size={16} />
+            Ausgangsrechnung
+          </div>
+          <p className="text-xs text-blue-600 mt-1">Ihr Unternehmen ist der Rechnungsaussteller</p>
+        </div>
+      )}
+
+      {/* Archival info */}
+      {detail.archivalNumber && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-green-800">
+            <Archive size={16} />
+            Archiviert
+          </div>
+          <div className="mt-1 space-y-0.5 text-xs text-green-700">
+            <p className="font-mono font-bold">{detail.archivalNumber}</p>
+            {detail.archivedAt && (
+              <p>Archiviert am: {new Date(detail.archivedAt).toLocaleString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+            )}
+          </div>
+          {detail.approvalComment && (
+            <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded p-2 text-xs text-yellow-800">
+              <span className="font-medium">Anmerkung:</span> {detail.approvalComment}
+            </div>
+          )}
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <ArchiveDownloadBtn invoiceId={selectedId} variant="archived" />
+            <ArchiveDownloadBtn invoiceId={selectedId} variant="original" />
+          </div>
+        </div>
+      )}
+
+      {/* Edit mode */}
+      {editMode ? (
+        <EditForm
+          fields={editFields}
+          setFields={setEditFields}
+          invoiceId={selectedId}
+          replacesInvoiceId={detail.replacesInvoiceId}
+          onCancel={() => setEditMode(false)}
+          onSaved={() => {
+            setEditMode(false);
+            queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
+          }}
+        />
+      ) : (
+        <>
+          {/* Vendor/Customer */}
+          <div>
+            <h3 className="font-medium text-gray-900 mb-2">{detail.direction === 'OUTGOING' ? 'Kunde' : 'Lieferant'}</h3>
+            <dl className="space-y-1">
+              {detail.direction === 'OUTGOING' && detail.customerName ? (
+                <div className="flex justify-between text-sm">
+                  <dt className="text-gray-500">Name</dt>
+                  <dd className="text-right">
+                    {detail.customerId ? (
+                      <button
+                        onClick={() => navigate(`/customers?selected=${detail.customerId}`)}
+                        className="text-primary-600 hover:underline font-medium"
+                      >
+                        {detail.customerName}
+                      </button>
+                    ) : (
+                      <span>{detail.customerName}</span>
+                    )}
+                  </dd>
+                </div>
+              ) : (
+                <DetailRow label="Name" value={detail.vendorName} />
+              )}
+              <DetailRow label="UID" value={detail.direction === 'OUTGOING' ? detail.recipientUid : detail.vendorUid} />
+              <DetailRow label="Kategorie" value={detail.category} />
+            </dl>
+          </div>
+
+          {/* Invoice info */}
+          <div className="border-t pt-4">
+            <h3 className="font-medium text-gray-900 mb-2">Rechnung</h3>
+            <dl className="space-y-1">
+              <DetailRow label="Nummer" value={detail.invoiceNumber} />
+              <DetailRow label="Datum" value={detail.invoiceDate ? formatDate(detail.invoiceDate) : null} />
+              <DetailRow label="Fällig" value={detail.dueDate ? formatDate(detail.dueDate) : null} />
+              <DetailRow label="Datei" value={detail.originalFileName} />
+            </dl>
+            <ViewOriginalButton invoiceId={selectedId} replacesInvoiceId={detail.replacesInvoiceId} />
+          </div>
+
+          {/* Amounts */}
+          <div className="border-t pt-4">
+            <h3 className="font-medium text-gray-900 mb-2">Beträge</h3>
+            <dl className="space-y-1">
+              {Array.isArray(detail.vatBreakdown) && detail.vatBreakdown.length > 1 ? (
+                <>
+                  {(detail.vatBreakdown as Array<{ rate: number; netAmount: number; vatAmount: number }>).map((line, i) => (
+                    <div key={i} className="flex justify-between text-sm">
+                      <dt className="text-gray-500">Netto ({line.rate}%)</dt>
+                      <dd className="flex gap-4">
+                        <span>{formatCurrency(line.netAmount, detail.currency)}</span>
+                        <span className="text-gray-400">USt {formatCurrency(line.vatAmount, detail.currency)}</span>
+                      </dd>
+                    </div>
+                  ))}
+                  <div className="border-t border-dashed my-1" />
+                  <DetailRow label="Netto gesamt" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
+                  <DetailRow label="USt gesamt" value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
+                </>
+              ) : (
+                <>
+                  <DetailRow label="Netto" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
+                  <DetailRow label={`USt (${detail.vatRate ?? '?'}%)`} value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
+                </>
+              )}
+              <div className="flex justify-between font-semibold pt-1">
+                <dt>Brutto</dt>
+                <dd>{detail.grossAmount ? formatCurrency(detail.grossAmount, detail.currency) : '—'}</dd>
+              </div>
+            </dl>
+          </div>
+
+          {/* Validation */}
+          {detail.validationResult && (
+            <div className="border-t pt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Scale size={16} className="text-gray-500" />
+                <h3 className="font-medium text-gray-900">Prüfprotokoll</h3>
+                <TrafficLight status={detail.validationResult.overallStatus as TrafficLightStatus} />
+              </div>
+              <div className="space-y-1.5">
+                {[...(detail.validationResult.checks as ValidationCheck[])]
+                  .sort((a, b) => {
+                    const order = { RED: 0, YELLOW: 1, GREEN: 2, GRAY: 3 };
+                    return (order[a.status] ?? 2) - (order[b.status] ?? 2);
+                  })
+                  .map((check, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-2 text-xs rounded p-2 ${
+                      check.status === 'GRAY' ? 'bg-gray-50 border border-gray-100 opacity-60' :
+                      check.status === 'GREEN' ? 'bg-green-50 border border-green-100' :
+                      check.status === 'YELLOW' ? 'bg-yellow-50 border border-yellow-200' :
+                      'bg-red-50 border border-red-200'
+                    }`}
+                  >
+                    {check.status === 'GRAY' ? <MinusCircle size={13} className="text-gray-400 shrink-0 mt-0.5" /> :
+                     check.status === 'GREEN' ? <CheckCircle size={13} className="text-green-600 shrink-0 mt-0.5" /> :
+                     check.status === 'YELLOW' ? <AlertTriangle size={13} className="text-yellow-600 shrink-0 mt-0.5" /> :
+                     <XCircle size={13} className="text-red-600 shrink-0 mt-0.5" />}
+                    <div className="flex-1 min-w-0">
+                      <span>{check.message}</span>
+                      {check.legalBasis && <span className="text-gray-400 ml-1">({check.legalBasis})</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Line items */}
+          {detail.lineItems && (detail.lineItems as unknown[]).length > 0 && (
+            <div className="border-t pt-4">
+              <h3 className="font-medium text-gray-900 mb-2">Positionen</h3>
+              <div className="space-y-2">
+                {(detail.lineItems as Array<{
+                  id: string; position: number; description: string | null;
+                  quantity: string | null; unit: string | null; grossAmount: string | null;
+                }>).map((item) => (
+                  <div key={item.id} className="flex justify-between text-xs bg-gray-50 rounded p-2">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-gray-400 mr-1">{item.position}.</span>
+                      <span className="truncate">{item.description || '—'}</span>
+                    </div>
+                    <span className="font-medium ml-2 shrink-0">
+                      {item.grossAmount ? formatCurrency(item.grossAmount, detail.currency) : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Rejection note */}
+          {(detail as unknown as { notes?: string }).notes && (
+            <div className="border-t pt-4">
+              <div className="bg-orange-50 border border-orange-200 rounded p-3 text-xs text-orange-700">
+                <ThumbsDown size={14} className="inline mr-1" />
+                <span className="font-medium">Abgelehnt:</span> {(detail as unknown as { notes?: string }).notes}
+              </div>
+            </div>
+          )}
+
+          {/* Processing error */}
+          {(detail as unknown as { processingError?: string }).processingError && (
+            <div className="border-t pt-4">
+              <div className="bg-red-50 border border-red-200 rounded p-3 text-xs text-red-700">
+                <XCircle size={14} className="inline mr-1" />
+                {(detail as unknown as { processingError?: string }).processingError}
+              </div>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && detail.processingStatus !== 'REJECTED' && (
+            <div className="border-t pt-4 flex gap-2">
+              <ApproveButton
+                invoiceId={selectedId}
+                validationStatus={detail.validationStatus}
+                onSuccess={() => {
+                  queryClient.invalidateQueries({ queryKey: ['invoices'] });
+                  queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+                }}
+              />
+              <button
+                className="btn-secondary flex items-center gap-1.5 text-sm flex-1 justify-center"
+                onClick={() => { setRejectReason(''); setShowRejectDialog(true); }}
+              >
+                <ThumbsDown size={14} />
+                Ablehnen
+              </button>
+            </div>
+          )}
+
+          {/* Ersatzbeleg */}
+          {(detail.processingStatus === 'ERROR' || detail.processingStatus === 'REVIEW_REQUIRED' || detail.processingStatus === 'PROCESSED' || detail.processingStatus === 'REJECTED') &&
+           !detail.replacedByInvoiceId && (
+            <div className="border-t pt-4">
+              <button
+                onClick={() => setShowErsatzbelegDialog(true)}
+                className="btn-secondary flex items-center gap-1.5 text-sm w-full justify-center text-orange-600 hover:text-orange-700 hover:border-orange-300"
+              >
+                <FilePlus2 size={14} />
+                Ersatzbeleg erstellen
+              </button>
+            </div>
+          )}
+
+          {/* E-Mail */}
+          {detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && (
+            <div className="border-t pt-4">
+              <button
+                onClick={() => setShowEmailDialog(true)}
+                className="btn-secondary flex items-center gap-1.5 text-sm w-full justify-center"
+              >
+                <Mail size={14} />
+                E-Mail senden
+              </button>
+            </div>
+          )}
+
+          {/* Delete */}
+          {(detail.processingStatus === 'ERROR' || detail.processingStatus === 'UPLOADED') && (
+            <div className="border-t pt-4">
+              <DeleteButton
+                invoiceId={selectedId}
+                onSuccess={() => {
+                  setSelectedId(null);
+                  queryClient.invalidateQueries({ queryKey: ['invoices'] });
+                }}
+              />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 
 function EditForm({

@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { listAuditLogsApi } from '../api/auditLogs';
 import { ScrollText, Loader2, ChevronLeft, ChevronRight, FileText, CheckCircle, Upload, XCircle, User, Shield } from 'lucide-react';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export function AuditLogPage() {
+  const isMobile = useIsMobile();
   const [page, setPage] = useState(1);
 
   const { data, isLoading } = useQuery({
@@ -33,61 +35,107 @@ export function AuditLogPage() {
         </div>
       ) : (
         <>
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Zeitpunkt</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Benutzer</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Aktion</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Entität</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Details</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {logs.map((log) => {
-                  const user = log.user as Record<string, string> | null;
-                  const metadata = log.metadata as Record<string, unknown> | null;
+          {isMobile ? (
+            /* Mobile: Card List */
+            <div className="space-y-2">
+              {logs.map((log) => {
+                const user = log.user as Record<string, string> | null;
+                const metadata = log.metadata as Record<string, unknown> | null;
+                return (
+                  <div key={log.id as string} className="card p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <ActionBadge action={log.action as string} />
+                      <span className="text-xs text-gray-400">{formatDateTime(log.createdAt as string)}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      {user ? (
+                        <>
+                          <div className="w-5 h-5 rounded-full bg-primary-100 flex items-center justify-center">
+                            <User size={10} className="text-primary-600" />
+                          </div>
+                          <span className="text-gray-900">{user.firstName} {user.lastName}</span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center">
+                            <Shield size={10} className="text-gray-500" />
+                          </div>
+                          <span className="text-gray-500">System</span>
+                        </>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      <span className="text-gray-400">{log.entityType as string}</span>
+                      <span className="text-gray-300 mx-1">/</span>
+                      <span className="font-mono">{(log.entityId as string).substring(0, 8)}</span>
+                    </div>
+                    {metadata && Object.keys(metadata).length > 0 && (
+                      <p className="text-xs text-gray-400 mt-1 truncate">
+                        {Object.entries(metadata).map(([k, v]) => `${k}: ${v}`).join(', ')}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* Desktop: Table */
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Zeitpunkt</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Benutzer</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Aktion</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Entität</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {logs.map((log) => {
+                    const user = log.user as Record<string, string> | null;
+                    const metadata = log.metadata as Record<string, unknown> | null;
 
-                  return (
-                    <tr key={log.id as string} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                        {formatDateTime(log.createdAt as string)}
-                      </td>
-                      <td className="px-4 py-3">
-                        {user ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center">
-                              <User size={12} className="text-primary-600" />
+                    return (
+                      <tr key={log.id as string} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                          {formatDateTime(log.createdAt as string)}
+                        </td>
+                        <td className="px-4 py-3">
+                          {user ? (
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center">
+                                <User size={12} className="text-primary-600" />
+                              </div>
+                              <span className="text-gray-900">{user.firstName} {user.lastName}</span>
                             </div>
-                            <span className="text-gray-900">{user.firstName} {user.lastName}</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center">
-                              <Shield size={12} className="text-gray-500" />
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center">
+                                <Shield size={12} className="text-gray-500" />
+                              </div>
+                              <span className="text-gray-500">System</span>
                             </div>
-                            <span className="text-gray-500">System</span>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <ActionBadge action={log.action as string} />
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">
-                        <span className="text-gray-400">{log.entityType as string}</span>
-                        <span className="text-gray-300 mx-1">/</span>
-                        <span className="font-mono text-xs">{(log.entityId as string).substring(0, 8)}</span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[250px] truncate">
-                        {metadata ? Object.entries(metadata).map(([k, v]) => `${k}: ${v}`).join(', ') : '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <ActionBadge action={log.action as string} />
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">
+                          <span className="text-gray-400">{log.entityType as string}</span>
+                          <span className="text-gray-300 mx-1">/</span>
+                          <span className="font-mono text-xs">{(log.entityId as string).substring(0, 8)}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs max-w-[250px] truncate">
+                          {metadata ? Object.entries(metadata).map(([k, v]) => `${k}: ${v}`).join(', ') : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {pagination && pagination.totalPages > 1 && (
             <div className="flex items-center justify-between mt-4 text-sm">

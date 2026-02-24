@@ -11,7 +11,7 @@
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
     padding-top: var(--safe-area-top);
-    padding-bottom: var(--safe-area-bottom);
+    /* Bottom padding handled by BottomTabBar on mobile */
   }
 }
 
@@ -30,5 +30,13 @@
 
   .card {
     @apply bg-white rounded-xl border border-gray-200 shadow-sm;
+  }
+
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px] flex items-center justify-center;
+  }
+
+  .mobile-card {
+    @apply card p-4 active:bg-gray-50 transition-colors cursor-pointer;
   }
 }

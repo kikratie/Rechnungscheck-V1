@@ -292,7 +292,7 @@ export function SettingsPage() {
                   onChange={(e) => updateField('street', e.target.value)}
                   disabled={!isAdmin}
                 />
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <input
                     type="text"
                     className="input-field"
@@ -303,7 +303,7 @@ export function SettingsPage() {
                   />
                   <input
                     type="text"
-                    className="input-field col-span-2"
+                    className="input-field sm:col-span-2"
                     placeholder="Stadt"
                     value={form.city}
                     onChange={(e) => updateField('city', e.target.value)}

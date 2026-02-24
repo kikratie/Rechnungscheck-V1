@@ -7,10 +7,12 @@ import {
   X, CheckCircle, AlertTriangle, Trash2, FileUp, ArrowRight,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export function BankStatementsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
 
@@ -46,14 +48,14 @@ export function BankStatementsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4 lg:mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Kontoauszüge</h1>
-          <p className="text-gray-500 mt-1">Bank-Kontoauszüge und Transaktionen</p>
+          <h1 className={isMobile ? 'text-lg font-bold text-gray-900' : 'text-2xl font-bold text-gray-900'}>Kontoauszüge</h1>
+          {!isMobile && <p className="text-gray-500 mt-1">Bank-Kontoauszüge und Transaktionen</p>}
         </div>
-        <button onClick={() => setShowUploadDialog(true)} className="btn-primary flex items-center gap-2">
-          <Upload size={18} />
-          Importieren
+        <button onClick={() => setShowUploadDialog(true)} className="btn-primary flex items-center gap-2 text-sm">
+          <Upload size={16} />
+          {isMobile ? 'Import' : 'Importieren'}
         </button>
       </div>
 
@@ -80,40 +82,65 @@ export function BankStatementsPage() {
                 {/* Statement header */}
                 <div className="flex items-center justify-between">
                   <button
-                    className="flex-1 flex items-center justify-between p-5 hover:bg-gray-50 transition-colors text-left"
+                    className={`flex-1 ${isMobile ? 'p-4' : 'p-5'} hover:bg-gray-50 transition-colors text-left`}
                     onClick={() => setExpandedId(isExpanded ? null : (stmt.id as string))}
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="p-2 bg-blue-100 rounded-lg">
-                        <Building2 className="text-blue-600" size={20} />
-                      </div>
+                    {isMobile ? (
+                      /* Mobile: stacked layout */
                       <div>
-                        <h3 className="font-medium text-gray-900">{(stmt.bankName as string) || (stmt.originalFileName as string) || 'Bank'}</h3>
-                        <p className="text-sm text-gray-500">{(stmt.iban as string) || ''}</p>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <div className="p-1.5 bg-blue-100 rounded-lg shrink-0">
+                              <Building2 className="text-blue-600" size={16} />
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="font-medium text-gray-900 text-sm truncate">{(stmt.bankName as string) || (stmt.originalFileName as string) || 'Bank'}</h3>
+                              {(stmt.iban as string) && <p className="text-xs text-gray-500 font-mono truncate">{stmt.iban as string}</p>}
+                            </div>
+                          </div>
+                          {isExpanded ? <ChevronUp size={18} className="text-gray-400 shrink-0" /> : <ChevronDown size={18} className="text-gray-400 shrink-0" />}
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span>{stmt.periodFrom ? formatDate(stmt.periodFrom as string) : '?'} — {stmt.periodTo ? formatDate(stmt.periodTo as string) : '?'}</span>
+                          <span>{stmt.transactionCount as number} TX</span>
+                          <span className="font-medium text-gray-700">{stmt.closingBalance ? formatCurrency(String(stmt.closingBalance)) : '—'}</span>
+                        </div>
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-6 text-sm">
-                      <div className="text-right">
-                        <p className="text-gray-500">Zeitraum</p>
-                        <p className="font-medium">
-                          {stmt.periodFrom ? formatDate(stmt.periodFrom as string) : '?'} — {stmt.periodTo ? formatDate(stmt.periodTo as string) : '?'}
-                        </p>
+                    ) : (
+                      /* Desktop: horizontal layout */
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className="p-2 bg-blue-100 rounded-lg">
+                            <Building2 className="text-blue-600" size={20} />
+                          </div>
+                          <div>
+                            <h3 className="font-medium text-gray-900">{(stmt.bankName as string) || (stmt.originalFileName as string) || 'Bank'}</h3>
+                            <p className="text-sm text-gray-500">{(stmt.iban as string) || ''}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-6 text-sm">
+                          <div className="text-right">
+                            <p className="text-gray-500">Zeitraum</p>
+                            <p className="font-medium">
+                              {stmt.periodFrom ? formatDate(stmt.periodFrom as string) : '?'} — {stmt.periodTo ? formatDate(stmt.periodTo as string) : '?'}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-gray-500">Transaktionen</p>
+                            <p className="font-medium">{stmt.transactionCount as number}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-gray-500">Saldo</p>
+                            <p className="font-medium">{stmt.closingBalance ? formatCurrency(String(stmt.closingBalance)) : '—'}</p>
+                          </div>
+                          {isExpanded ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-gray-500">Transaktionen</p>
-                        <p className="font-medium">{stmt.transactionCount as number}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-gray-500">Saldo</p>
-                        <p className="font-medium">{stmt.closingBalance ? formatCurrency(String(stmt.closingBalance)) : '—'}</p>
-                      </div>
-                      {isExpanded ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
-                    </div>
+                    )}
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDelete(stmt.id as string, (stmt.originalFileName as string) || 'Kontoauszug'); }}
-                    className="p-2 mr-3 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50"
+                    className="p-2 mr-3 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 touch-target"
                     title="Löschen"
                   >
                     <Trash2 size={16} />
@@ -128,51 +155,90 @@ export function BankStatementsPage() {
                         <Loader2 className="animate-spin text-primary-600" size={24} />
                       </div>
                     ) : transactions.length > 0 ? (
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-gray-50 border-b">
-                            <th className="text-left px-5 py-2.5 font-medium text-gray-500">Datum</th>
-                            <th className="text-left px-5 py-2.5 font-medium text-gray-500">Empfänger / Absender</th>
-                            <th className="text-left px-5 py-2.5 font-medium text-gray-500">Referenz</th>
-                            <th className="text-left px-5 py-2.5 font-medium text-gray-500">Buchungstext</th>
-                            <th className="text-right px-5 py-2.5 font-medium text-gray-500">Betrag</th>
-                            <th className="text-center px-5 py-2.5 font-medium text-gray-500">Match</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
+                      isMobile ? (
+                        /* Mobile: Transaction Cards */
+                        <div className="p-3 space-y-2">
                           {transactions.map((tx) => {
                             const amount = parseFloat(tx.amount as string);
                             const isIncome = amount > 0;
                             return (
-                              <tr key={tx.id as string} className="hover:bg-gray-50">
-                                <td className="px-5 py-2.5 text-gray-600">{formatDate(tx.transactionDate as string)}</td>
-                                <td className="px-5 py-2.5">
-                                  <div className="flex items-center gap-2">
-                                    {isIncome ? (
-                                      <ArrowDownLeft size={14} className="text-green-500 shrink-0" />
-                                    ) : (
-                                      <ArrowUpRight size={14} className="text-red-500 shrink-0" />
-                                    )}
-                                    <span className="font-medium text-gray-900 truncate max-w-[200px]">{(tx.counterpartName as string) || '—'}</span>
-                                  </div>
-                                </td>
-                                <td className="px-5 py-2.5 text-gray-500 truncate max-w-[200px]">{(tx.reference as string) || '—'}</td>
-                                <td className="px-5 py-2.5 text-gray-500">{(tx.bookingText as string) || '—'}</td>
-                                <td className={`px-5 py-2.5 text-right font-medium ${isIncome ? 'text-green-600' : 'text-gray-900'}`}>
-                                  {formatCurrency(tx.amount as string)}
-                                </td>
-                                <td className="px-5 py-2.5 text-center">
-                                  {tx.isMatched ? (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Ja</span>
+                              <div key={tx.id as string} className="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
+                                <div className="shrink-0">
+                                  {isIncome ? (
+                                    <ArrowDownLeft size={16} className="text-green-500" />
                                   ) : (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Nein</span>
+                                    <ArrowUpRight size={16} className="text-red-500" />
                                   )}
-                                </td>
-                              </tr>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-medium text-gray-900 text-sm truncate">{(tx.counterpartName as string) || '—'}</span>
+                                    <span className="text-xs text-gray-400 shrink-0 ml-2">{formatDate(tx.transactionDate as string)}</span>
+                                  </div>
+                                  <p className="text-xs text-gray-500 truncate">{(tx.bookingText as string) || (tx.reference as string) || '—'}</p>
+                                  <div className="flex items-center justify-between mt-1">
+                                    {tx.isMatched ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-600"><CheckCircle size={10} /> Matched</span>
+                                    ) : (
+                                      <span className="text-[10px] text-gray-400">Offen</span>
+                                    )}
+                                    <span className={`text-sm font-semibold ${isIncome ? 'text-green-600' : 'text-gray-900'}`}>
+                                      {formatCurrency(tx.amount as string)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
                             );
                           })}
-                        </tbody>
-                      </table>
+                        </div>
+                      ) : (
+                        /* Desktop: Table */
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-gray-50 border-b">
+                              <th className="text-left px-5 py-2.5 font-medium text-gray-500">Datum</th>
+                              <th className="text-left px-5 py-2.5 font-medium text-gray-500">Empfänger / Absender</th>
+                              <th className="text-left px-5 py-2.5 font-medium text-gray-500">Referenz</th>
+                              <th className="text-left px-5 py-2.5 font-medium text-gray-500">Buchungstext</th>
+                              <th className="text-right px-5 py-2.5 font-medium text-gray-500">Betrag</th>
+                              <th className="text-center px-5 py-2.5 font-medium text-gray-500">Match</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {transactions.map((tx) => {
+                              const amount = parseFloat(tx.amount as string);
+                              const isIncome = amount > 0;
+                              return (
+                                <tr key={tx.id as string} className="hover:bg-gray-50">
+                                  <td className="px-5 py-2.5 text-gray-600">{formatDate(tx.transactionDate as string)}</td>
+                                  <td className="px-5 py-2.5">
+                                    <div className="flex items-center gap-2">
+                                      {isIncome ? (
+                                        <ArrowDownLeft size={14} className="text-green-500 shrink-0" />
+                                      ) : (
+                                        <ArrowUpRight size={14} className="text-red-500 shrink-0" />
+                                      )}
+                                      <span className="font-medium text-gray-900 truncate max-w-[200px]">{(tx.counterpartName as string) || '—'}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-5 py-2.5 text-gray-500 truncate max-w-[200px]">{(tx.reference as string) || '—'}</td>
+                                  <td className="px-5 py-2.5 text-gray-500">{(tx.bookingText as string) || '—'}</td>
+                                  <td className={`px-5 py-2.5 text-right font-medium ${isIncome ? 'text-green-600' : 'text-gray-900'}`}>
+                                    {formatCurrency(tx.amount as string)}
+                                  </td>
+                                  <td className="px-5 py-2.5 text-center">
+                                    {tx.isMatched ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Ja</span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Nein</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )
                     ) : (
                       <p className="text-center text-gray-400 py-6 text-sm">Keine Transaktionen</p>
                     )}

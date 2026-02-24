@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { listInvoicesApi } from '../api/invoices';
 import type { InvoiceListItem } from '@buchungsai/shared';
 import { Download, FileText, CheckCircle } from 'lucide-react';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export function ExportPage() {
   const { data } = useQuery({
@@ -9,6 +10,7 @@ export function ExportPage() {
     queryFn: () => listInvoicesApi({ processingStatus: 'ARCHIVED', limit: 100 }),
   });
 
+  const isMobile = useIsMobile();
   const exportable = (data?.data ?? []) as InvoiceListItem[];
   const exportedQuery = useQuery({
     queryKey: ['invoices-exported'],
@@ -83,37 +85,60 @@ export function ExportPage() {
       {exportable.length > 0 && (
         <>
           <h2 className="text-lg font-semibold mb-4">Exportbereite Rechnungen</h2>
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b">
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Lieferant</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Rechnungsnr.</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Datum</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">Betrag</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {exportable.map((inv) => (
-                  <tr key={inv.id as string} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <FileText size={14} className="text-gray-400" />
-                        <span className="font-medium">{(inv.vendorName as string) || (inv.originalFileName as string)}</span>
+          {isMobile ? (
+            /* Mobile: Card List */
+            <div className="space-y-2">
+              {exportable.map((inv) => (
+                <div key={inv.id as string} className="card p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <FileText size={14} className="text-gray-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate">{(inv.vendorName as string) || (inv.originalFileName as string)}</p>
+                        <p className="text-xs text-gray-500">{(inv.invoiceNumber as string) || '—'} · {inv.invoiceDate ? new Date(inv.invoiceDate as string).toLocaleDateString('de-AT') : '—'}</p>
                       </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{(inv.invoiceNumber as string) || '—'}</td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {inv.invoiceDate ? new Date(inv.invoiceDate as string).toLocaleDateString('de-AT') : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium">
+                    </div>
+                    <span className="font-semibold text-sm shrink-0 ml-2">
                       {inv.grossAmount ? parseFloat(inv.grossAmount as string).toLocaleString('de-AT', { style: 'currency', currency: 'EUR' }) : '—'}
-                    </td>
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Desktop: Table */
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b">
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Lieferant</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Rechnungsnr.</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Datum</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-600">Betrag</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {exportable.map((inv) => (
+                    <tr key={inv.id as string} className="hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <FileText size={14} className="text-gray-400" />
+                          <span className="font-medium">{(inv.vendorName as string) || (inv.originalFileName as string)}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">{(inv.invoiceNumber as string) || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {inv.invoiceDate ? new Date(inv.invoiceDate as string).toLocaleDateString('de-AT') : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium">
+                        {inv.grossAmount ? parseFloat(inv.grossAmount as string).toLocaleString('de-AT', { style: 'currency', currency: 'EUR' }) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
     </div>

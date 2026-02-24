@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { InvoiceUploadDialog } from '../components/InvoiceUploadDialog';
 import { BelegFormDialog } from '../components/BelegFormDialog';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 // ============================================================
 // Main Page
@@ -24,6 +25,7 @@ import { BelegFormDialog } from '../components/BelegFormDialog';
 
 export function MatchingPage() {
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
   const [activeMonth, setActiveMonth] = useState<string | undefined>(undefined);
   const [activeTab, setActiveTab] = useState<'matched' | 'unmatched_tx' | 'unmatched_inv'>('unmatched_tx');
   const [showManualDialog, setShowManualDialog] = useState(false);
@@ -102,26 +104,28 @@ export function MatchingPage() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4 lg:mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Monatsabstimmung</h1>
-          <p className="text-gray-500 mt-1">Bankabgleich, offene Belege und Vorsteuer im Blick</p>
+          <h1 className={isMobile ? 'text-lg font-bold text-gray-900' : 'text-2xl font-bold text-gray-900'}>Monatsabstimmung</h1>
+          {!isMobile && <p className="text-gray-500 mt-1">Bankabgleich, offene Belege und Vorsteuer im Blick</p>}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => { setManualMatchContext(undefined); setShowManualDialog(true); }}
-            className="btn-secondary flex items-center gap-1.5 text-sm"
-          >
-            <Plus size={14} />
-            Manuell zuordnen
-          </button>
+          {!isMobile && (
+            <button
+              onClick={() => { setManualMatchContext(undefined); setShowManualDialog(true); }}
+              className="btn-secondary flex items-center gap-1.5 text-sm"
+            >
+              <Plus size={14} />
+              Manuell zuordnen
+            </button>
+          )}
           <button
             onClick={() => runMutation.mutate()}
             disabled={runMutation.isPending}
             className="btn-secondary flex items-center gap-1.5 text-sm"
           >
             {runMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Matching starten
+            {isMobile ? 'Match' : 'Matching starten'}
           </button>
         </div>
       </div>
@@ -254,7 +258,7 @@ export function MatchingPage() {
 
           {/* Tabs */}
           <div className="border-b mb-4">
-            <div className="flex gap-0">
+            <div className="flex gap-0 overflow-x-auto">
               <TabButton
                 active={activeTab === 'matched'}
                 onClick={() => setActiveTab('matched')}
@@ -449,6 +453,8 @@ function MatchedTab({ items, onConfirm, onReject, onDelete }: {
   onReject: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const isMobile = useIsMobile();
+
   if (items.length === 0) {
     return (
       <div className="text-center py-8 text-gray-400">
@@ -467,75 +473,77 @@ function MatchedTab({ items, onConfirm, onReject, onDelete }: {
 
         return (
           <div key={m.matchingId} className="card overflow-hidden">
-            <div className="flex items-center gap-1 p-1">
+            <div className={isMobile ? 'flex flex-col gap-1 p-1' : 'flex items-center gap-1 p-1'}>
               {/* Invoice side */}
-              <div className="flex-1 p-4 bg-blue-50 rounded-lg">
-                <div className="flex items-center gap-2 mb-2">
-                  <FileText size={16} className="text-blue-600" />
+              <div className={`flex-1 ${isMobile ? 'p-3' : 'p-4'} bg-blue-50 rounded-lg`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <FileText size={14} className="text-blue-600" />
                   <span className="text-xs font-medium text-blue-600 uppercase">Rechnung</span>
                   <ValidationDot status={invoice.validationStatus} />
                 </div>
-                <p className="font-medium text-gray-900 truncate">{invoice.vendorName || invoice.customerName || invoice.invoiceNumber || '—'}</p>
-                <p className="text-sm text-gray-500">{invoice.invoiceNumber || '—'}</p>
-                <p className="text-lg font-bold mt-1">
-                  {invoice.grossAmount ? formatCurrency(invoice.grossAmount) : '—'}
-                </p>
-                {invoice.invoiceDate && <p className="text-xs text-gray-400 mt-1">{formatDate(invoice.invoiceDate)}</p>}
+                <p className="font-medium text-gray-900 truncate text-sm">{invoice.vendorName || invoice.customerName || invoice.invoiceNumber || '—'}</p>
+                <div className="flex items-center justify-between mt-1">
+                  <p className="text-xs text-gray-500">{invoice.invoiceNumber || '—'}</p>
+                  <p className="font-bold">
+                    {invoice.grossAmount ? formatCurrency(invoice.grossAmount) : '—'}
+                  </p>
+                </div>
               </div>
 
               {/* Match indicator */}
-              <div className="flex flex-col items-center px-4 py-2 shrink-0">
+              <div className={`flex items-center ${isMobile ? 'justify-center gap-3 py-1' : 'flex-col px-4 py-2'} shrink-0`}>
                 <MatchStatusIcon status={m.matchStatus} />
-                <ArrowLeftRight size={20} className="text-gray-300 my-1" />
+                <ArrowLeftRight size={isMobile ? 16 : 20} className={`text-gray-300 ${isMobile ? '' : 'my-1'}`} />
                 <MatchTypeBadge type={m.matchType} />
                 {confidence && (
-                  <span className={`text-xs mt-1 font-medium ${confidenceNum >= 80 ? 'text-green-600' : confidenceNum >= 60 ? 'text-yellow-600' : 'text-red-500'}`}>
+                  <span className={`text-xs font-medium ${confidenceNum >= 80 ? 'text-green-600' : confidenceNum >= 60 ? 'text-yellow-600' : 'text-red-500'}`}>
                     {confidence}%
                   </span>
                 )}
               </div>
 
               {/* Transaction side */}
-              <div className="flex-1 p-4 bg-green-50 rounded-lg">
-                <div className="flex items-center gap-2 mb-2">
-                  <Building2 size={16} className="text-green-600" />
+              <div className={`flex-1 ${isMobile ? 'p-3' : 'p-4'} bg-green-50 rounded-lg`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <Building2 size={14} className="text-green-600" />
                   <span className="text-xs font-medium text-green-600 uppercase">Transaktion</span>
                 </div>
-                <p className="font-medium text-gray-900 truncate">{transaction.counterpartName || '—'}</p>
-                <p className="text-sm text-gray-500 truncate">{transaction.reference || '—'}</p>
-                <p className="text-lg font-bold mt-1">{formatCurrency(transaction.amount)}</p>
-                <p className="text-xs text-gray-400 mt-1">{formatDate(transaction.transactionDate)}</p>
+                <p className="font-medium text-gray-900 truncate text-sm">{transaction.counterpartName || '—'}</p>
+                <div className="flex items-center justify-between mt-1">
+                  <p className="text-xs text-gray-400">{formatDate(transaction.transactionDate)}</p>
+                  <p className="font-bold">{formatCurrency(transaction.amount)}</p>
+                </div>
               </div>
             </div>
 
             {/* Bottom bar */}
-            <div className="px-5 py-2.5 bg-gray-50 border-t flex items-center justify-between gap-4">
-              <span className="text-xs text-gray-500 truncate flex-1">{m.matchReason || ''}</span>
-              <div className="flex items-center gap-1.5 shrink-0">
+            <div className={`${isMobile ? 'px-3 py-2' : 'px-5 py-2.5'} bg-gray-50 border-t flex items-center justify-between gap-2`}>
+              {!isMobile && <span className="text-xs text-gray-500 truncate flex-1">{m.matchReason || ''}</span>}
+              <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                 {m.matchStatus === 'SUGGESTED' && (
                   <>
                     <button
                       onClick={() => onConfirm(m.matchingId)}
-                      className="p-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                      className="p-2 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors touch-target"
                       title="Bestätigen"
                     >
-                      <Check size={14} />
+                      <Check size={16} />
                     </button>
                     <button
                       onClick={() => onReject(m.matchingId)}
-                      className="p-1.5 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+                      className="p-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors touch-target"
                       title="Ablehnen"
                     >
-                      <X size={14} />
+                      <X size={16} />
                     </button>
                   </>
                 )}
                 <button
                   onClick={() => onDelete(m.matchingId)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-200 hover:text-red-500 transition-colors"
+                  className="p-2 rounded-lg text-gray-400 hover:bg-gray-200 hover:text-red-500 transition-colors touch-target"
                   title="Löschen"
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={16} />
                 </button>
               </div>
             </div>
@@ -618,32 +626,32 @@ function UnmatchedTxTab({ items, onConfirmSuggested, onManualMatch, onUpload, on
               {tx.hasSuggestedMatching && tx.suggestedMatchingId && (
                 <button
                   onClick={() => onConfirmSuggested(tx.suggestedMatchingId!)}
-                  className="p-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                  className="p-2 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors touch-target"
                   title="Vorschlag bestätigen"
                 >
-                  <Check size={14} />
+                  <Check size={16} />
                 </button>
               )}
               <button
                 onClick={onUpload}
-                className="p-1.5 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+                className="p-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors touch-target"
                 title="Beleg hochladen"
               >
-                <Upload size={14} />
+                <Upload size={16} />
               </button>
               <button
                 onClick={() => onEigenbeleg(tx)}
-                className="p-1.5 rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 transition-colors"
+                className="p-2 rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 transition-colors touch-target"
                 title="Eigenbeleg erstellen"
               >
-                <FilePlus2 size={14} />
+                <FilePlus2 size={16} />
               </button>
               <button
                 onClick={() => onManualMatch(tx)}
-                className="p-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+                className="p-2 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors touch-target"
                 title="Manuell zuordnen"
               >
-                <Plus size={14} />
+                <Plus size={16} />
               </button>
             </div>
           </div>
@@ -714,18 +722,18 @@ function UnmatchedInvTab({ items, onConfirmSuggested, onManualMatch }: {
             {inv.hasSuggestedMatching && inv.suggestedMatchingId && (
               <button
                 onClick={() => onConfirmSuggested(inv.suggestedMatchingId!)}
-                className="p-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                className="p-2 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors touch-target"
                 title="Vorschlag bestätigen"
               >
-                <Check size={14} />
+                <Check size={16} />
               </button>
             )}
             <button
               onClick={() => onManualMatch(inv)}
-              className="p-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+              className="p-2 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors touch-target"
               title="Manuell zuordnen"
             >
-              <Plus size={14} />
+              <Plus size={16} />
             </button>
           </div>
         </div>
