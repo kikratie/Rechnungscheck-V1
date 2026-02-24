@@ -285,6 +285,10 @@ export async function rejectInvoice(tenantId: string, userId: string, invoiceId:
   });
   if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
 
+  if (invoice.isLocked) {
+    throw new ConflictError('Gesperrte Rechnung kann nicht abgelehnt werden. Bitte zuerst entsperren.');
+  }
+
   const updated = await prisma.invoice.update({
     where: { id: invoiceId },
     data: {

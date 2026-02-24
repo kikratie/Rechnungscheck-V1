@@ -263,9 +263,20 @@ export async function rejectMatching(tenantId: string, userId: string, matchingI
   });
   if (!matching) throw new NotFoundError('Matching', matchingId);
 
-  const updated = await prisma.matching.update({
-    where: { id: matchingId },
-    data: { status: 'REJECTED' },
+  // Delete the matching record (not just status change) so the unique constraint
+  // doesn't block future re-matching. Reset isMatched on the transaction.
+  await prisma.$transaction(async (tx) => {
+    await tx.matching.delete({ where: { id: matchingId } });
+    // Check if transaction still has other confirmed matchings
+    const otherConfirmed = await tx.matching.count({
+      where: { transactionId: matching.transactionId, status: 'CONFIRMED', id: { not: matchingId } },
+    });
+    if (otherConfirmed === 0) {
+      await tx.bankTransaction.update({
+        where: { id: matching.transactionId },
+        data: { isMatched: false },
+      });
+    }
   });
 
   writeAuditLog({
@@ -277,7 +288,8 @@ export async function rejectMatching(tenantId: string, userId: string, matchingI
     newData: { invoiceId: matching.invoiceId, transactionId: matching.transactionId },
   });
 
-  return updated;
+  // Return the old matching data with REJECTED status for the API response
+  return { ...matching, status: 'REJECTED' as const };
 }
 
 export async function createManualMatching(
