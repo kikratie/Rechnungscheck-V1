@@ -13,6 +13,8 @@ import { AuditLogPage } from './pages/AuditLogPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { VendorsPage } from './pages/VendorsPage';
 import { CustomersPage } from './pages/CustomersPage';
+import { ScanPage } from './pages/ScanPage';
+import { ShareTargetPage } from './pages/ShareTargetPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useAuthStore();
@@ -70,6 +72,9 @@ export default function App() {
         }
       />
 
+      {/* Share Target — standalone page (no AppLayout, handles auth internally) */}
+      <Route path="/share-target" element={<ShareTargetPage />} />
+
       {/* Protected Routes */}
       <Route
         element={
@@ -79,6 +84,7 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="scan" element={<ScanPage />} />
         <Route path="invoices" element={<InvoicesPage />} />
         <Route path="vendors" element={<VendorsPage />} />
         <Route path="customers" element={<CustomersPage />} />

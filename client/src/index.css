@@ -3,8 +3,15 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
+    padding-top: var(--safe-area-top);
+    padding-bottom: var(--safe-area-bottom);
   }
 }
 

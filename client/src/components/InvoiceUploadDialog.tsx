@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { Upload, X, Loader2, CheckCircle, XCircle, Clock, Download } from 'lucide-react';
+import { Upload, X, Loader2, CheckCircle, XCircle, Clock, Download, Camera } from 'lucide-react';
 import { uploadInvoiceApi } from '../api/invoices';
 
 interface FileUploadState {
@@ -27,6 +27,7 @@ export function InvoiceUploadDialog({
   const [fileStates, setFileStates] = useState<FileUploadState[]>([]);
   const [direction, setDirection] = useState<'INCOMING' | 'OUTGOING'>(defaultDirection);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const hasStarted = fileStates.length > 0;
   const allDone = hasStarted && fileStates.every((f) => f.status === 'done' || f.status === 'error');
   const successCount = fileStates.filter((f) => f.status === 'done').length;
@@ -108,31 +109,62 @@ export function InvoiceUploadDialog({
           </div>
         )}
 
-        {/* Drop zone — hide when uploads are in progress */}
+        {/* Hidden inputs */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.webp"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+
+        {/* Upload area — hide when uploads are in progress */}
         {!hasStarted && (
-          <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
-              dragOver ? 'border-primary-400 bg-primary-50' : 'border-gray-300 hover:border-gray-400'
-            }`}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.webp"
-              multiple
-              className="hidden"
-              onChange={(e) => handleFiles(e.target.files)}
-            />
-            <Upload className="mx-auto text-gray-400 mb-3" size={36} />
-            <p className="text-sm font-medium text-gray-700 mb-1">
-              Dateien hierher ziehen oder klicken
-            </p>
-            <p className="text-xs text-gray-400">PDF, JPEG, PNG, TIFF, WebP — max. 20 MB pro Datei — mehrere gleichzeitig möglich</p>
-          </div>
+          <>
+            {/* Mobile: Camera + File buttons */}
+            <div className="flex gap-2 mb-3 sm:hidden">
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                className="flex-1 flex items-center justify-center gap-2 py-3 bg-primary-600 text-white rounded-lg font-medium text-sm active:bg-primary-700"
+              >
+                <Camera size={18} />
+                Foto aufnehmen
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium text-sm border border-gray-200 active:bg-gray-200"
+              >
+                <Upload size={18} />
+                Datei wählen
+              </button>
+            </div>
+
+            {/* Desktop: Drag & drop zone */}
+            <div
+              className={`hidden sm:block border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
+                dragOver ? 'border-primary-400 bg-primary-50' : 'border-gray-300 hover:border-gray-400'
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="mx-auto text-gray-400 mb-3" size={36} />
+              <p className="text-sm font-medium text-gray-700 mb-1">
+                Dateien hierher ziehen oder klicken
+              </p>
+              <p className="text-xs text-gray-400">PDF, JPEG, PNG, TIFF, WebP — max. 20 MB pro Datei — mehrere gleichzeitig möglich</p>
+            </div>
+          </>
         )}
 
         {/* File list with status */}
