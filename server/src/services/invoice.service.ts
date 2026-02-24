@@ -292,7 +292,7 @@ export async function rejectInvoice(tenantId: string, userId: string, invoiceId:
   const updated = await prisma.invoice.update({
     where: { id: invoiceId },
     data: {
-      processingStatus: 'REVIEW_REQUIRED',
+      processingStatus: 'REJECTED',
       notes: reason,
     },
   });

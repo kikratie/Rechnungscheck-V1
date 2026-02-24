@@ -310,6 +310,7 @@ Mit freundlichen Grüßen`;
               <option value="PROCESSING">In Verarbeitung</option>
               <option value="PROCESSED">Verarbeitet</option>
               <option value="REVIEW_REQUIRED">Review nötig</option>
+              <option value="REJECTED">Abgelehnt</option>
               <option value="ARCHIVED">Archiviert</option>
               <option value="RECONCILED">Abgeglichen</option>
               <option value="EXPORTED">Exportiert</option>
@@ -905,7 +906,7 @@ Mit freundlichen Grüßen`;
                     )}
 
                     {/* Action buttons */}
-                    {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && (
+                    {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && detail.processingStatus !== 'REJECTED' && (
                       <div className="border-t pt-4 flex gap-2">
                         <ApproveButton
                           invoiceId={selectedId}
@@ -926,7 +927,7 @@ Mit freundlichen Grüßen`;
                     )}
 
                     {/* Ersatzbeleg erstellen button — for ERROR, REVIEW_REQUIRED and similar problematic invoices */}
-                    {(detail.processingStatus === 'ERROR' || detail.processingStatus === 'REVIEW_REQUIRED' || detail.processingStatus === 'PROCESSED') &&
+                    {(detail.processingStatus === 'ERROR' || detail.processingStatus === 'REVIEW_REQUIRED' || detail.processingStatus === 'PROCESSED' || detail.processingStatus === 'REJECTED') &&
                      !detail.replacedByInvoiceId && (
                       <div className="border-t pt-4">
                         <button
@@ -1524,6 +1525,7 @@ function ProcessingBadge({ status }: { status: string }) {
     PROCESSING: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Verarbeitung...', animate: true },
     PROCESSED: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Verarbeitet' },
     REVIEW_REQUIRED: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Review nötig' },
+    REJECTED: { bg: 'bg-red-100', text: 'text-red-700', label: 'Abgelehnt' },
     ARCHIVED: { bg: 'bg-green-100', text: 'text-green-700', label: 'Archiviert' },
     RECONCILED: { bg: 'bg-teal-100', text: 'text-teal-700', label: 'Abgeglichen' },
     EXPORTED: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Exportiert' },

@@ -111,6 +111,7 @@ export type ProcessingStatusType =
   | 'PROCESSING'
   | 'PROCESSED'
   | 'REVIEW_REQUIRED'
+  | 'REJECTED'
   | 'ARCHIVED'
   | 'RECONCILED'
   | 'EXPORTED'
