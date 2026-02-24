@@ -4,6 +4,7 @@ import {
   getMonthlyReconciliationApi, runMatchingApi, confirmMatchingApi, rejectMatchingApi,
   deleteMatchingApi, createManualMatchingApi, listMatchingsApi,
 } from '../api/matchings';
+import { createEigenbelegApi } from '../api/invoices';
 import { listBankStatementsApi, getBankStatementApi } from '../api/bankStatements';
 import { apiClient } from '../api/client';
 import type {
@@ -13,7 +14,7 @@ import type {
 import {
   ArrowLeftRight, Loader2, CheckCircle, Clock, FileText, Building2,
   Check, X, RefreshCw, Plus, Trash2, ChevronLeft, ChevronRight,
-  TrendingUp, TrendingDown, AlertTriangle, Receipt, ChevronDown, Upload,
+  TrendingUp, TrendingDown, AlertTriangle, Receipt, ChevronDown, Upload, FilePlus2,
 } from 'lucide-react';
 import { InvoiceUploadDialog } from '../components/InvoiceUploadDialog';
 
@@ -26,8 +27,18 @@ export function MatchingPage() {
   const [activeMonth, setActiveMonth] = useState<string | undefined>(undefined);
   const [activeTab, setActiveTab] = useState<'matched' | 'unmatched_tx' | 'unmatched_inv'>('unmatched_tx');
   const [showManualDialog, setShowManualDialog] = useState(false);
+  const [manualMatchContext, setManualMatchContext] = useState<{
+    transactionId?: string;
+    transactionName?: string;
+    transactionAmount?: string;
+    invoiceId?: string;
+    invoiceName?: string;
+    invoiceAmount?: string;
+  } | undefined>(undefined);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showUploadHint, setShowUploadHint] = useState(false);
+  const [showEigenbelegDialog, setShowEigenbelegDialog] = useState(false);
+  const [eigenbelegTx, setEigenbelegTx] = useState<ReconciliationUnmatchedTransaction | null>(null);
   const [showVorsteuer, setShowVorsteuer] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -98,7 +109,7 @@ export function MatchingPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowManualDialog(true)}
+            onClick={() => { setManualMatchContext(undefined); setShowManualDialog(true); }}
             className="btn-secondary flex items-center gap-1.5 text-sm"
           >
             <Plus size={14} />
@@ -293,15 +304,30 @@ export function MatchingPage() {
             <UnmatchedTxTab
               items={reconciliation?.unmatchedTransactions ?? []}
               onConfirmSuggested={(id) => confirmMutation.mutate(id)}
-              onManualMatch={() => setShowManualDialog(true)}
+              onManualMatch={(tx) => {
+                setManualMatchContext({
+                  transactionId: tx.id,
+                  transactionName: tx.counterpartName ?? undefined,
+                  transactionAmount: tx.amount,
+                });
+                setShowManualDialog(true);
+              }}
               onUpload={() => setShowUploadDialog(true)}
+              onEigenbeleg={(tx) => { setEigenbelegTx(tx); setShowEigenbelegDialog(true); }}
             />
           )}
           {activeTab === 'unmatched_inv' && (
             <UnmatchedInvTab
               items={reconciliation?.unmatchedInvoices ?? []}
               onConfirmSuggested={(id) => confirmMutation.mutate(id)}
-              onManualMatch={() => setShowManualDialog(true)}
+              onManualMatch={(inv) => {
+                setManualMatchContext({
+                  invoiceId: inv.id,
+                  invoiceName: inv.vendorName || inv.customerName || undefined,
+                  invoiceAmount: inv.grossAmount ?? undefined,
+                });
+                setShowManualDialog(true);
+              }}
             />
           )}
         </>
@@ -309,6 +335,7 @@ export function MatchingPage() {
 
       {showManualDialog && (
         <ManualMatchDialog
+          context={manualMatchContext}
           onClose={() => setShowManualDialog(false)}
           onSuccess={() => {
             setShowManualDialog(false);
@@ -328,6 +355,19 @@ export function MatchingPage() {
           defaultDirection="INCOMING"
           showDirectionPicker={false}
           title="Beleg hochladen"
+        />
+      )}
+
+      {showEigenbelegDialog && eigenbelegTx && (
+        <EigenbelegDialog
+          transaction={eigenbelegTx}
+          onClose={() => { setShowEigenbelegDialog(false); setEigenbelegTx(null); }}
+          onSuccess={() => {
+            setShowEigenbelegDialog(false);
+            setEigenbelegTx(null);
+            invalidate();
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
+          }}
         />
       )}
     </div>
@@ -504,11 +544,12 @@ function MatchedTab({ items, onConfirm, onReject, onDelete }: {
 // Unmatched Transactions Tab
 // ============================================================
 
-function UnmatchedTxTab({ items, onConfirmSuggested, onManualMatch, onUpload }: {
+function UnmatchedTxTab({ items, onConfirmSuggested, onManualMatch, onUpload, onEigenbeleg }: {
   items: ReconciliationUnmatchedTransaction[];
   onConfirmSuggested: (id: string) => void;
-  onManualMatch: () => void;
+  onManualMatch: (tx: ReconciliationUnmatchedTransaction) => void;
   onUpload: () => void;
+  onEigenbeleg: (tx: ReconciliationUnmatchedTransaction) => void;
 }) {
   if (items.length === 0) {
     return (
@@ -585,7 +626,14 @@ function UnmatchedTxTab({ items, onConfirmSuggested, onManualMatch, onUpload }: 
                 <Upload size={14} />
               </button>
               <button
-                onClick={onManualMatch}
+                onClick={() => onEigenbeleg(tx)}
+                className="p-1.5 rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 transition-colors"
+                title="Eigenbeleg erstellen"
+              >
+                <FilePlus2 size={14} />
+              </button>
+              <button
+                onClick={() => onManualMatch(tx)}
                 className="p-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
                 title="Manuell zuordnen"
               >
@@ -606,7 +654,7 @@ function UnmatchedTxTab({ items, onConfirmSuggested, onManualMatch, onUpload }: 
 function UnmatchedInvTab({ items, onConfirmSuggested, onManualMatch }: {
   items: ReconciliationUnmatchedInvoice[];
   onConfirmSuggested: (id: string) => void;
-  onManualMatch: () => void;
+  onManualMatch: (inv: ReconciliationUnmatchedInvoice) => void;
 }) {
   if (items.length === 0) {
     return (
@@ -667,7 +715,7 @@ function UnmatchedInvTab({ items, onConfirmSuggested, onManualMatch }: {
               </button>
             )}
             <button
-              onClick={onManualMatch}
+              onClick={() => onManualMatch(inv)}
               className="p-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
               title="Manuell zuordnen"
             >
@@ -684,10 +732,24 @@ function UnmatchedInvTab({ items, onConfirmSuggested, onManualMatch }: {
 // Manual Match Dialog
 // ============================================================
 
-function ManualMatchDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
-  const [selectedTxId, setSelectedTxId] = useState('');
+function ManualMatchDialog({ context, onClose, onSuccess }: {
+  context?: {
+    transactionId?: string;
+    transactionName?: string;
+    transactionAmount?: string;
+    invoiceId?: string;
+    invoiceName?: string;
+    invoiceAmount?: string;
+  };
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState(context?.invoiceId ?? '');
+  const [selectedTxId, setSelectedTxId] = useState(context?.transactionId ?? '');
   const [selectedStatementId, setSelectedStatementId] = useState('');
+
+  const hasTxContext = !!context?.transactionId;
+  const hasInvContext = !!context?.invoiceId;
 
   const { data: invoicesData } = useQuery({
     queryKey: ['invoices-for-matching'],
@@ -700,17 +762,32 @@ function ManualMatchDialog({ onClose, onSuccess }: { onClose: () => void; onSucc
   const { data: statementsData } = useQuery({
     queryKey: ['bank-statements'],
     queryFn: () => listBankStatementsApi({ limit: 50 }),
+    enabled: !hasTxContext,
   });
 
   const { data: statementDetail } = useQuery({
     queryKey: ['bank-statement', selectedStatementId],
     queryFn: () => getBankStatementApi(selectedStatementId),
-    enabled: !!selectedStatementId,
+    enabled: !!selectedStatementId && !hasTxContext,
   });
 
-  const invoices = ((invoicesData as Record<string, unknown>)?.data ?? []) as Array<Record<string, unknown>>;
+  const rawInvoices = ((invoicesData as Record<string, unknown>)?.data ?? []) as Array<Record<string, unknown>>;
   const statements = (statementsData?.data ?? []) as Array<Record<string, unknown>>;
   const transactions = ((statementDetail?.data as Record<string, unknown>)?.transactions ?? []) as Array<Record<string, unknown>>;
+
+  // Sort invoices by relevance when context is provided
+  const invoices = (() => {
+    if (!context?.transactionName && !context?.transactionAmount) return rawInvoices;
+
+    const txName = (context.transactionName || '').toLowerCase();
+    const txAmount = context.transactionAmount ? Math.abs(parseFloat(context.transactionAmount)) : null;
+
+    return [...rawInvoices].sort((a, b) => {
+      const scoreA = invoiceRelevanceScore(a, txName, txAmount);
+      const scoreB = invoiceRelevanceScore(b, txName, txAmount);
+      return scoreB - scoreA;
+    });
+  })();
 
   const createMutation = useMutation({
     mutationFn: () => createManualMatchingApi(selectedInvoiceId, selectedTxId),
@@ -728,44 +805,74 @@ function ManualMatchDialog({ onClose, onSuccess }: { onClose: () => void; onSucc
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
 
+        {/* Context info banner */}
+        {(hasTxContext || hasInvContext) && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-700">
+            {hasTxContext && (
+              <p>Transaktion: <strong>{context.transactionName || 'Unbekannt'}</strong> — {context.transactionAmount ? formatCurrency(context.transactionAmount) : '?'}</p>
+            )}
+            {hasInvContext && (
+              <p>Rechnung: <strong>{context.invoiceName || 'Unbekannt'}</strong> — {context.invoiceAmount ? formatCurrency(context.invoiceAmount) : '?'}</p>
+            )}
+          </div>
+        )}
+
         <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Rechnung *</label>
-            <select value={selectedInvoiceId} onChange={(e) => setSelectedInvoiceId(e.target.value)} className="input-field text-sm">
-              <option value="">— Rechnung wählen —</option>
-              {invoices.map((inv) => (
-                <option key={String(inv.id)} value={String(inv.id)}>
-                  {String(inv.vendorName || inv.customerName || inv.originalFileName || '')} — {String(inv.invoiceNumber || `#${inv.belegNr}`)} — {inv.grossAmount ? formatCurrency(String(inv.grossAmount)) : '?'}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Kontoauszug *</label>
-            <select value={selectedStatementId} onChange={(e) => { setSelectedStatementId(e.target.value); setSelectedTxId(''); }} className="input-field text-sm">
-              <option value="">— Kontoauszug wählen —</option>
-              {statements.map((s) => (
-                <option key={String(s.id)} value={String(s.id)}>
-                  {String(s.bankName || s.originalFileName || '')} ({s.periodFrom ? formatDate(String(s.periodFrom)) : '?'} — {s.periodTo ? formatDate(String(s.periodTo)) : '?'})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedStatementId && (
+          {/* Invoice selector — show unless invoice is pre-selected from context */}
+          {!hasInvContext && (
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Transaktion *</label>
-              <select value={selectedTxId} onChange={(e) => setSelectedTxId(e.target.value)} className="input-field text-sm">
-                <option value="">— Transaktion wählen —</option>
-                {transactions.map((tx) => (
-                  <option key={tx.id as string} value={tx.id as string}>
-                    {formatDate(tx.transactionDate as string)} — {(tx.counterpartName as string) || '?'} — {formatCurrency(tx.amount as string)}
-                    {tx.isMatched ? ' (bereits gematcht)' : ''}
-                  </option>
-                ))}
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Rechnung * {hasTxContext && <span className="text-blue-500 ml-1">(sortiert nach Relevanz)</span>}
+              </label>
+              <select value={selectedInvoiceId} onChange={(e) => setSelectedInvoiceId(e.target.value)} className="input-field text-sm">
+                <option value="">— Rechnung wählen —</option>
+                {invoices.map((inv) => {
+                  const name = String(inv.vendorName || inv.customerName || inv.originalFileName || '');
+                  const nr = String(inv.invoiceNumber || `#${inv.belegNr}`);
+                  const amount = inv.grossAmount ? formatCurrency(String(inv.grossAmount)) : '?';
+                  // Highlight matching entries
+                  const isRelevant = hasTxContext && context.transactionName &&
+                    nameOverlap(name.toLowerCase(), (context.transactionName || '').toLowerCase()) > 0;
+                  return (
+                    <option key={String(inv.id)} value={String(inv.id)}>
+                      {isRelevant ? '\u2605 ' : ''}{name} — {nr} — {amount}
+                    </option>
+                  );
+                })}
               </select>
             </div>
+          )}
+
+          {/* Transaction selector — show unless transaction is pre-selected from context */}
+          {!hasTxContext && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Kontoauszug *</label>
+                <select value={selectedStatementId} onChange={(e) => { setSelectedStatementId(e.target.value); setSelectedTxId(''); }} className="input-field text-sm">
+                  <option value="">— Kontoauszug wählen —</option>
+                  {statements.map((s) => (
+                    <option key={String(s.id)} value={String(s.id)}>
+                      {String(s.bankName || s.originalFileName || '')} ({s.periodFrom ? formatDate(String(s.periodFrom)) : '?'} — {s.periodTo ? formatDate(String(s.periodTo)) : '?'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedStatementId && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Transaktion *</label>
+                  <select value={selectedTxId} onChange={(e) => setSelectedTxId(e.target.value)} className="input-field text-sm">
+                    <option value="">— Transaktion wählen —</option>
+                    {transactions.map((tx) => (
+                      <option key={tx.id as string} value={tx.id as string}>
+                        {formatDate(tx.transactionDate as string)} — {(tx.counterpartName as string) || '?'} — {formatCurrency(tx.amount as string)}
+                        {tx.isMatched ? ' (bereits gematcht)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </>
           )}
 
           {createMutation.isError && (
@@ -793,6 +900,253 @@ function ManualMatchDialog({ onClose, onSuccess }: { onClose: () => void; onSucc
       </div>
     </div>
   );
+}
+
+// ============================================================
+// Eigenbeleg Dialog (§132 BAO)
+// ============================================================
+
+const EIGENBELEG_REASONS = [
+  'Automat / Parkautomat',
+  'Beleg verloren',
+  'Barauslage ohne Beleg',
+  'Trinkgeld',
+  'Online-Abo ohne Rechnung',
+  'Sonstiges',
+] as const;
+
+function EigenbelegDialog({ transaction, onClose, onSuccess }: {
+  transaction: ReconciliationUnmatchedTransaction;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const txAmount = Math.abs(parseFloat(transaction.amount));
+  const txDate = transaction.transactionDate.split('T')[0]; // YYYY-MM-DD
+
+  const [issuerName, setIssuerName] = useState(transaction.counterpartName || '');
+  const [description, setDescription] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(txDate);
+  const [grossAmount, setGrossAmount] = useState(txAmount.toFixed(2));
+  const [vatRate, setVatRate] = useState('20');
+  const [reason, setReason] = useState('');
+  const [customReason, setCustomReason] = useState('');
+
+  const effectiveReason = reason === 'Sonstiges' ? customReason : reason;
+
+  const netAmount = (() => {
+    const gross = parseFloat(grossAmount);
+    const rate = parseFloat(vatRate);
+    if (isNaN(gross) || isNaN(rate)) return 0;
+    return Math.round((gross / (1 + rate / 100)) * 100) / 100;
+  })();
+
+  const vatAmount = (() => {
+    const gross = parseFloat(grossAmount);
+    return Math.round((gross - netAmount) * 100) / 100;
+  })();
+
+  const isValid = issuerName.trim() && description.trim() && invoiceDate && parseFloat(grossAmount) > 0 && effectiveReason.trim();
+
+  const createMutation = useMutation({
+    mutationFn: () => createEigenbelegApi({
+      issuerName: issuerName.trim(),
+      description: description.trim(),
+      invoiceDate,
+      grossAmount: parseFloat(grossAmount),
+      vatRate: parseFloat(vatRate),
+      reason: effectiveReason.trim(),
+      direction: 'INCOMING',
+      transactionId: transaction.id,
+    }),
+    onSuccess,
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <FilePlus2 size={18} className="text-orange-600" />
+            Eigenbeleg erstellen
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        {/* Context info */}
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4 text-sm text-orange-700">
+          <p className="font-medium">§132 BAO — Eigenbeleg für fehlende Rechnung</p>
+          <p className="text-xs mt-1">
+            Transaktion: {transaction.counterpartName || 'Unbekannt'} — {formatCurrency(transaction.amount)} — {formatDate(transaction.transactionDate)}
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Geschäftspartner *</label>
+            <input
+              value={issuerName}
+              onChange={(e) => setIssuerName(e.target.value)}
+              className="input-field text-sm"
+              placeholder="z.B. Parkgarage Innsbruck"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Leistungsbeschreibung *</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="input-field text-sm"
+              rows={2}
+              placeholder="z.B. Parkgebühr für Kundentermin"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Datum *</label>
+              <input
+                type="date"
+                value={invoiceDate}
+                onChange={(e) => setInvoiceDate(e.target.value)}
+                className="input-field text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Betrag brutto (EUR) *</label>
+              <input
+                type="number"
+                step="0.01"
+                value={grossAmount}
+                onChange={(e) => setGrossAmount(e.target.value)}
+                className="input-field text-sm"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">USt-Satz</label>
+            <div className="flex gap-2">
+              {['20', '13', '10', '0'].map((rate) => (
+                <button
+                  key={rate}
+                  onClick={() => setVatRate(rate)}
+                  className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    vatRate === rate
+                      ? 'border-primary-500 bg-primary-50 text-primary-700'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  {rate}%
+                </button>
+              ))}
+            </div>
+            {parseFloat(grossAmount) > 0 && (
+              <p className="text-xs text-gray-400 mt-1">
+                Netto: {formatCurrency(String(netAmount))} / USt: {formatCurrency(String(vatAmount))}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Grund für fehlenden Beleg *</label>
+            <select
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="input-field text-sm"
+            >
+              <option value="">— Grund wählen —</option>
+              {EIGENBELEG_REASONS.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            {reason === 'Sonstiges' && (
+              <input
+                value={customReason}
+                onChange={(e) => setCustomReason(e.target.value)}
+                className="input-field text-sm mt-2"
+                placeholder="Grund beschreiben..."
+              />
+            )}
+          </div>
+
+          {createMutation.isError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+              {(createMutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
+                || (createMutation.error as Error).message
+                || 'Fehler beim Erstellen'}
+            </div>
+          )}
+
+          {createMutation.isSuccess && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700 flex items-center gap-2">
+              <CheckCircle size={16} />
+              Eigenbeleg erstellt und automatisch zugeordnet!
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            {!createMutation.isSuccess ? (
+              <>
+                <button
+                  onClick={() => createMutation.mutate()}
+                  disabled={!isValid || createMutation.isPending}
+                  className="btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center disabled:opacity-50"
+                >
+                  {createMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <FilePlus2 size={14} />}
+                  Eigenbeleg erstellen
+                </button>
+                <button onClick={onClose} className="btn-secondary text-sm flex-1">
+                  Abbrechen
+                </button>
+              </>
+            ) : (
+              <button onClick={onClose} className="btn-primary w-full text-sm">
+                Schließen
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Relevance Scoring for Smart Matching
+// ============================================================
+
+/** Count overlapping words between two lowercased strings */
+function nameOverlap(a: string, b: string): number {
+  if (!a || !b) return 0;
+  const wordsA = a.split(/[\s,.\-/]+/).filter((w) => w.length > 2);
+  const wordsB = new Set(b.split(/[\s,.\-/]+/).filter((w) => w.length > 2));
+  return wordsA.filter((w) => wordsB.has(w)).length;
+}
+
+/** Score an invoice's relevance to a transaction (higher = more relevant) */
+function invoiceRelevanceScore(
+  inv: Record<string, unknown>,
+  txNameLower: string,
+  txAmount: number | null,
+): number {
+  let score = 0;
+
+  // Name match: vendor/customer name overlaps with transaction counterpart
+  const invName = String(inv.vendorName || inv.customerName || '').toLowerCase();
+  const overlap = nameOverlap(invName, txNameLower);
+  if (overlap > 0) score += 50 + overlap * 20;
+
+  // Amount match: similar gross amount
+  if (txAmount && inv.grossAmount) {
+    const invAmount = Math.abs(parseFloat(String(inv.grossAmount)));
+    const diff = Math.abs(invAmount - txAmount);
+    if (diff < 0.01) score += 40;        // exact match
+    else if (diff < 1) score += 30;       // very close
+    else if (diff / txAmount < 0.05) score += 20; // within 5%
+  }
+
+  return score;
 }
 
 // ============================================================

@@ -24,6 +24,23 @@ interface UpdateExtractedDataParams {
   editReason?: string;
 }
 
+interface CreateEigenbelegParams {
+  tenantId: string;
+  userId: string;
+  data: {
+    issuerName: string;
+    description: string;
+    invoiceDate: string;
+    grossAmount: number;
+    vatRate?: number | null;
+    reason: string;        // Grund für fehlenden Beleg
+    direction?: 'INCOMING' | 'OUTGOING';
+    accountNumber?: string | null;
+    category?: string | null;
+  };
+  transactionId?: string;  // Optional: auto-match nach Erstellung
+}
+
 interface CreateErsatzbelegParams {
   tenantId: string;
   userId: string;
@@ -444,6 +461,148 @@ export async function createErsatzbeleg(params: CreateErsatzbelegParams) {
       originalBelegNr: original.belegNr,
       reason,
     },
+  });
+
+  return result;
+}
+
+export async function createEigenbeleg(params: CreateEigenbelegParams) {
+  const { tenantId, userId, data, transactionId } = params;
+
+  const vatRate = data.vatRate ?? 20;
+  const netAmount = Math.round((data.grossAmount / (1 + vatRate / 100)) * 100) / 100;
+  const vatAmount = Math.round((data.grossAmount - netAmount) * 100) / 100;
+  const invoiceDate = new Date(data.invoiceDate);
+  const direction = data.direction || 'INCOMING';
+
+  const result = await prisma.$transaction(async (tx) => {
+    const lastInvoice = await tx.invoice.findFirst({
+      where: { tenantId },
+      orderBy: { belegNr: 'desc' },
+      select: { belegNr: true },
+    });
+    const nextBelegNr = (lastInvoice?.belegNr ?? 0) + 1;
+
+    const eigenbeleg = await tx.invoice.create({
+      data: {
+        tenantId,
+        belegNr: nextBelegNr,
+        direction,
+        documentType: 'EIGENBELEG',
+        ingestionChannel: 'UPLOAD',
+        originalFileName: `Eigenbeleg_BEL-${String(nextBelegNr).padStart(3, '0')}.pdf`,
+        storagePath: '',
+        storageHash: `eigenbeleg-${Date.now()}-${nextBelegNr}`,
+        mimeType: 'application/pdf',
+        fileSizeBytes: 0,
+        vendorName: data.issuerName,
+        invoiceDate,
+        deliveryDate: invoiceDate,
+        netAmount,
+        vatAmount,
+        grossAmount: data.grossAmount,
+        vatRate,
+        accountNumber: data.accountNumber || null,
+        category: data.category || null,
+        currency: 'EUR',
+        processingStatus: 'PROCESSED',
+        validationStatus: 'WARNING',
+        ersatzReason: data.reason,
+        uploadedByUserId: userId,
+      },
+    });
+
+    await tx.extractedData.create({
+      data: {
+        invoiceId: eigenbeleg.id,
+        version: 1,
+        source: 'MANUAL',
+        editedByUserId: userId,
+        editReason: `Eigenbeleg (§132 BAO): ${data.reason}`,
+        issuerName: data.issuerName,
+        invoiceDate,
+        deliveryDate: invoiceDate,
+        description: data.description,
+        netAmount,
+        vatAmount,
+        grossAmount: data.grossAmount,
+        vatRate,
+        currency: 'EUR',
+        accountNumber: data.accountNumber || null,
+        category: data.category || null,
+        confidenceScores: {},
+      },
+    });
+
+    // Auto-match to transaction if provided
+    if (transactionId) {
+      const transaction = await tx.bankTransaction.findFirst({
+        where: { id: transactionId, bankStatement: { tenantId } },
+      });
+      if (transaction) {
+        // Delete any existing SUGGESTED matchings for this transaction
+        await tx.matching.deleteMany({
+          where: { transactionId, status: 'SUGGESTED' },
+        });
+        await tx.matching.create({
+          data: {
+            tenantId,
+            invoiceId: eigenbeleg.id,
+            transactionId,
+            matchType: 'MANUAL',
+            confidence: 1.0,
+            matchReason: `Eigenbeleg manuell erstellt für Transaktion`,
+            status: 'CONFIRMED',
+            confirmedByUserId: userId,
+            confirmedAt: new Date(),
+          },
+        });
+      }
+    }
+
+    return eigenbeleg;
+  });
+
+  // Run validation
+  await runValidationAndSync({
+    invoiceId: result.id,
+    tenantId,
+    direction,
+    extracted: {
+      issuerName: data.issuerName,
+      issuerUid: null,
+      issuerAddress: null,
+      issuerEmail: null,
+      issuerIban: null,
+      recipientName: null,
+      recipientUid: null,
+      invoiceNumber: null,
+      sequentialNumber: null,
+      invoiceDate,
+      deliveryDate: invoiceDate,
+      dueDate: null,
+      description: data.description,
+      netAmount,
+      vatAmount,
+      grossAmount: data.grossAmount,
+      vatRate,
+      vatBreakdown: null,
+      isReverseCharge: false,
+      accountNumber: data.accountNumber || null,
+      costCenter: null,
+      category: data.category || null,
+      currency: 'EUR',
+    },
+    extractedDataVersion: 1,
+  });
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Invoice',
+    entityId: result.id,
+    action: 'CREATE_EIGENBELEG',
+    newData: { reason: data.reason, transactionId: transactionId || null },
   });
 
   return result;

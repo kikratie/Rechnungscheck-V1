@@ -57,6 +57,22 @@ export async function createErsatzbelegApi(originalInvoiceId: string, data: Reco
   return response.data;
 }
 
+export async function createEigenbelegApi(data: {
+  issuerName: string;
+  description: string;
+  invoiceDate: string;
+  grossAmount: number;
+  vatRate?: number | null;
+  reason: string;
+  direction?: 'INCOMING' | 'OUTGOING';
+  accountNumber?: string | null;
+  category?: string | null;
+  transactionId?: string | null;
+}) {
+  const response = await apiClient.post<ApiResponse<InvoiceListItem>>('/invoices/eigenbeleg', data);
+  return response.data;
+}
+
 export async function batchApproveInvoicesApi(invoiceIds: string[], comment?: string | null) {
   const response = await apiClient.post<ApiResponse<{ archived: number; skipped: string[]; results: Array<{ invoiceId: string; archivalNumber: string }> }>>('/invoices/batch-approve', { invoiceIds, comment: comment || undefined });
   return response.data;

@@ -251,6 +251,23 @@ export const createErsatzbelegSchema = z.object({
 });
 
 // ============================================================
+// Eigenbeleg Schema (§132 BAO — self-created receipt)
+// ============================================================
+
+export const createEigenbelegSchema = z.object({
+  issuerName: z.string().min(1, 'Geschäftspartner ist erforderlich').max(200),
+  description: z.string().min(1, 'Leistungsbeschreibung ist erforderlich').max(2000),
+  invoiceDate: z.string().min(1, 'Datum ist erforderlich'),
+  grossAmount: z.number().min(0.01, 'Betrag ist erforderlich'),
+  vatRate: z.number().min(0).max(100).optional().nullable(),
+  reason: z.string().min(1, 'Grund für fehlenden Beleg ist erforderlich').max(2000),
+  direction: z.enum(['INCOMING', 'OUTGOING']).optional(),
+  accountNumber: z.string().max(20).optional().nullable(),
+  category: z.string().max(100).optional().nullable(),
+  transactionId: z.string().uuid().optional().nullable(),
+});
+
+// ============================================================
 // Approve / Archive
 // ============================================================
 

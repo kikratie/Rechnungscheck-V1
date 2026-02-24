@@ -5,7 +5,7 @@ import { validateBody } from '../middleware/validate.js';
 import { invoiceUpload } from '../middleware/upload.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
-import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, batchApproveSchema, cancelNumberSchema } from '@buchungsai/shared';
+import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, createEigenbelegSchema, batchApproveSchema, cancelNumberSchema } from '@buchungsai/shared';
 import * as invoiceService from '../services/invoice.service.js';
 import { cancelArchivalNumber } from '../services/archival.service.js';
 import * as storageService from '../services/storage.service.js';
@@ -159,6 +159,22 @@ router.get('/:id', async (req, res, next) => {
           : null,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/eigenbeleg — Create self-receipt (§132 BAO)
+router.post('/eigenbeleg', validateBody(createEigenbelegSchema), async (req, res, next) => {
+  try {
+    const { transactionId, ...data } = req.body;
+    const eigenbeleg = await invoiceService.createEigenbeleg({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      data,
+      transactionId: transactionId || undefined,
+    });
+    res.status(201).json({ success: true, data: eigenbeleg });
   } catch (err) {
     next(err);
   }
