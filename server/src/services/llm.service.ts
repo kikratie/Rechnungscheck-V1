@@ -27,6 +27,33 @@ function getClient(): OpenAI {
   return openaiClient;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callWithRateLimitRetry(
+  client: OpenAI,
+  params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+  maxRetries = 3,
+): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await client.chat.completions.create(params);
+    } catch (err: unknown) {
+      const status = (err as { status?: number })?.status;
+      if (status === 429 && attempt < maxRetries) {
+        const retryAfter = (err as { headers?: { 'retry-after'?: string } })?.headers?.['retry-after'];
+        const waitMs = retryAfter ? Math.ceil(parseFloat(retryAfter) * 1000) + 500 : (2 ** attempt) * 3000;
+        console.warn(`[LLM] Rate limit (429), warte ${waitMs}ms vor Retry ${attempt + 1}/${maxRetries}...`);
+        await sleep(waitMs);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Rate limit retries exhausted');
+}
+
 export async function callLlm(request: LlmRequest): Promise<LlmResponse> {
   const client = getClient();
   const model = env.OPENAI_MODEL;
@@ -39,7 +66,7 @@ export async function callLlm(request: LlmRequest): Promise<LlmResponse> {
     },
   ];
 
-  const response = await client.chat.completions.create({
+  const response = await callWithRateLimitRetry(client, {
     model,
     messages,
     temperature: request.temperature ?? 0.1,
@@ -55,7 +82,7 @@ export async function callLlm(request: LlmRequest): Promise<LlmResponse> {
   // Check for truncated response (token limit reached)
   if (choice.finish_reason === 'length') {
     console.warn('[LLM] Antwort wurde abgeschnitten (max_tokens erreicht). Versuche erneut mit höherem Limit...');
-    const retryResponse = await client.chat.completions.create({
+    const retryResponse = await callWithRateLimitRetry(client, {
       model,
       messages,
       temperature: 0,

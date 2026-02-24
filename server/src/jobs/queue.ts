@@ -28,7 +28,7 @@ export function createInvoiceWorker(
 ): Worker {
   const worker = new Worker('invoice-processing', processor, {
     connection,
-    concurrency: 3,
+    concurrency: 1, // Sequentiell, da OpenAI TPM-Limit (30k) bei paralleler Verarbeitung überschritten wird
     lockDuration: 120_000, // 2 min — OpenAI Vision can take 30-60s
   });
 
