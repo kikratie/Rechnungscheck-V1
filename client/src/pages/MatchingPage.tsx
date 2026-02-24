@@ -4,7 +4,6 @@ import {
   getMonthlyReconciliationApi, runMatchingApi, confirmMatchingApi, rejectMatchingApi,
   deleteMatchingApi, createManualMatchingApi, listMatchingsApi,
 } from '../api/matchings';
-import { createEigenbelegApi } from '../api/invoices';
 import { listBankStatementsApi, getBankStatementApi } from '../api/bankStatements';
 import { apiClient } from '../api/client';
 import type {
@@ -17,6 +16,7 @@ import {
   TrendingUp, TrendingDown, AlertTriangle, Receipt, ChevronDown, Upload, FilePlus2,
 } from 'lucide-react';
 import { InvoiceUploadDialog } from '../components/InvoiceUploadDialog';
+import { BelegFormDialog } from '../components/BelegFormDialog';
 
 // ============================================================
 // Main Page
@@ -359,8 +359,14 @@ export function MatchingPage() {
       )}
 
       {showEigenbelegDialog && eigenbelegTx && (
-        <EigenbelegDialog
-          transaction={eigenbelegTx}
+        <BelegFormDialog
+          context={{
+            mode: 'eigenbeleg',
+            transactionId: eigenbelegTx.id,
+            transactionName: eigenbelegTx.counterpartName,
+            transactionAmount: eigenbelegTx.amount,
+            transactionDate: eigenbelegTx.transactionDate,
+          }}
           onClose={() => { setShowEigenbelegDialog(false); setEigenbelegTx(null); }}
           onSuccess={() => {
             setShowEigenbelegDialog(false);
@@ -895,216 +901,6 @@ function ManualMatchDialog({ context, onClose, onSuccess }: {
             <button onClick={onClose} className="btn-secondary text-sm flex-1">
               Abbrechen
             </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// Eigenbeleg Dialog (§132 BAO)
-// ============================================================
-
-const EIGENBELEG_REASONS = [
-  'Automat / Parkautomat',
-  'Beleg verloren',
-  'Barauslage ohne Beleg',
-  'Trinkgeld',
-  'Online-Abo ohne Rechnung',
-  'Sonstiges',
-] as const;
-
-function EigenbelegDialog({ transaction, onClose, onSuccess }: {
-  transaction: ReconciliationUnmatchedTransaction;
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const txAmount = Math.abs(parseFloat(transaction.amount));
-  const txDate = transaction.transactionDate.split('T')[0]; // YYYY-MM-DD
-
-  const [issuerName, setIssuerName] = useState(transaction.counterpartName || '');
-  const [description, setDescription] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(txDate);
-  const [grossAmount, setGrossAmount] = useState(txAmount.toFixed(2));
-  const [vatRate, setVatRate] = useState('20');
-  const [reason, setReason] = useState('');
-  const [customReason, setCustomReason] = useState('');
-
-  const effectiveReason = reason === 'Sonstiges' ? customReason : reason;
-
-  const netAmount = (() => {
-    const gross = parseFloat(grossAmount);
-    const rate = parseFloat(vatRate);
-    if (isNaN(gross) || isNaN(rate)) return 0;
-    return Math.round((gross / (1 + rate / 100)) * 100) / 100;
-  })();
-
-  const vatAmount = (() => {
-    const gross = parseFloat(grossAmount);
-    return Math.round((gross - netAmount) * 100) / 100;
-  })();
-
-  const isValid = issuerName.trim() && description.trim() && invoiceDate && parseFloat(grossAmount) > 0 && effectiveReason.trim();
-
-  const createMutation = useMutation({
-    mutationFn: () => createEigenbelegApi({
-      issuerName: issuerName.trim(),
-      description: description.trim(),
-      invoiceDate,
-      grossAmount: parseFloat(grossAmount),
-      vatRate: parseFloat(vatRate),
-      reason: effectiveReason.trim(),
-      direction: 'INCOMING',
-      transactionId: transaction.id,
-    }),
-    onSuccess,
-  });
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <FilePlus2 size={18} className="text-orange-600" />
-            Eigenbeleg erstellen
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
-        </div>
-
-        {/* Context info */}
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4 text-sm text-orange-700">
-          <p className="font-medium">§132 BAO — Eigenbeleg für fehlende Rechnung</p>
-          <p className="text-xs mt-1">
-            Transaktion: {transaction.counterpartName || 'Unbekannt'} — {formatCurrency(transaction.amount)} — {formatDate(transaction.transactionDate)}
-          </p>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Geschäftspartner *</label>
-            <input
-              value={issuerName}
-              onChange={(e) => setIssuerName(e.target.value)}
-              className="input-field text-sm"
-              placeholder="z.B. Parkgarage Innsbruck"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Leistungsbeschreibung *</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="input-field text-sm"
-              rows={2}
-              placeholder="z.B. Parkgebühr für Kundentermin"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Datum *</label>
-              <input
-                type="date"
-                value={invoiceDate}
-                onChange={(e) => setInvoiceDate(e.target.value)}
-                className="input-field text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Betrag brutto (EUR) *</label>
-              <input
-                type="number"
-                step="0.01"
-                value={grossAmount}
-                onChange={(e) => setGrossAmount(e.target.value)}
-                className="input-field text-sm"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">USt-Satz</label>
-            <div className="flex gap-2">
-              {['20', '13', '10', '0'].map((rate) => (
-                <button
-                  key={rate}
-                  onClick={() => setVatRate(rate)}
-                  className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                    vatRate === rate
-                      ? 'border-primary-500 bg-primary-50 text-primary-700'
-                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                  }`}
-                >
-                  {rate}%
-                </button>
-              ))}
-            </div>
-            {parseFloat(grossAmount) > 0 && (
-              <p className="text-xs text-gray-400 mt-1">
-                Netto: {formatCurrency(String(netAmount))} / USt: {formatCurrency(String(vatAmount))}
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Grund für fehlenden Beleg *</label>
-            <select
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              className="input-field text-sm"
-            >
-              <option value="">— Grund wählen —</option>
-              {EIGENBELEG_REASONS.map((r) => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
-            {reason === 'Sonstiges' && (
-              <input
-                value={customReason}
-                onChange={(e) => setCustomReason(e.target.value)}
-                className="input-field text-sm mt-2"
-                placeholder="Grund beschreiben..."
-              />
-            )}
-          </div>
-
-          {createMutation.isError && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
-              {(createMutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
-                || (createMutation.error as Error).message
-                || 'Fehler beim Erstellen'}
-            </div>
-          )}
-
-          {createMutation.isSuccess && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700 flex items-center gap-2">
-              <CheckCircle size={16} />
-              Eigenbeleg erstellt und automatisch zugeordnet!
-            </div>
-          )}
-
-          <div className="flex gap-2 pt-1">
-            {!createMutation.isSuccess ? (
-              <>
-                <button
-                  onClick={() => createMutation.mutate()}
-                  disabled={!isValid || createMutation.isPending}
-                  className="btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center disabled:opacity-50"
-                >
-                  {createMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <FilePlus2 size={14} />}
-                  Eigenbeleg erstellen
-                </button>
-                <button onClick={onClose} className="btn-secondary text-sm flex-1">
-                  Abbrechen
-                </button>
-              </>
-            ) : (
-              <button onClick={onClose} className="btn-primary w-full text-sm">
-                Schließen
-              </button>
-            )}
           </div>
         </div>
       </div>

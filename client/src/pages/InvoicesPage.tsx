@@ -9,7 +9,7 @@ import {
   approveInvoiceApi,
   rejectInvoiceApi,
   deleteInvoiceApi,
-  createErsatzbelegApi,
+
   getInvoiceDownloadUrl,
   batchApproveInvoicesApi,
 } from '../api/invoices';
@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { SendEmailDialog } from '../components/SendEmailDialog';
 import { InvoiceUploadDialog } from '../components/InvoiceUploadDialog';
+import { BelegFormDialog } from '../components/BelegFormDialog';
 
 export function InvoicesPage() {
   const navigate = useNavigate();
@@ -161,16 +162,19 @@ export function InvoicesPage() {
 
       {/* Ersatzbeleg dialog */}
       {showErsatzbelegDialog && selectedId && detail && (
-        <ErsatzbelegDialog
-          originalInvoiceId={selectedId}
-          originalBelegNr={detail.belegNr}
-          originalVendorName={detail.vendorName}
+        <BelegFormDialog
+          context={{
+            mode: 'ersatzbeleg',
+            originalInvoiceId: selectedId,
+            originalBelegNr: detail.belegNr,
+            originalVendorName: detail.vendorName,
+          }}
           onClose={() => setShowErsatzbelegDialog(false)}
-          onSuccess={(newInvoiceId: string) => {
+          onSuccess={(newInvoiceId) => {
             setShowErsatzbelegDialog(false);
             queryClient.invalidateQueries({ queryKey: ['invoices'] });
             queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
-            setSelectedId(newInvoiceId);
+            if (newInvoiceId) setSelectedId(newInvoiceId);
           }}
         />
       )}
@@ -1321,179 +1325,6 @@ function DeleteButton({ invoiceId, onSuccess }: { invoiceId: string; onSuccess: 
   );
 }
 
-function ErsatzbelegDialog({
-  originalInvoiceId, originalBelegNr, originalVendorName, onClose, onSuccess,
-}: {
-  originalInvoiceId: string;
-  originalBelegNr: number;
-  originalVendorName: string | null;
-  onClose: () => void;
-  onSuccess: (newInvoiceId: string) => void;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fields, setFields] = useState({
-    reason: '',
-    issuerName: originalVendorName || '',
-    description: '',
-    invoiceDate: new Date().toISOString().slice(0, 10),
-    grossAmount: '',
-    netAmount: '',
-    vatAmount: '',
-    vatRate: '20',
-    invoiceNumber: '',
-    issuerUid: '',
-    accountNumber: '',
-    category: '',
-  });
-
-  function updateField(key: string, value: string) {
-    const updated = { ...fields, [key]: value };
-
-    // Auto-calculate: when grossAmount + vatRate → netAmount + vatAmount
-    if ((key === 'grossAmount' || key === 'vatRate') && updated.grossAmount) {
-      const gross = parseFloat(updated.grossAmount);
-      const rate = parseFloat(updated.vatRate) || 20;
-      if (!isNaN(gross) && gross > 0) {
-        const net = Math.round((gross / (1 + rate / 100)) * 100) / 100;
-        const vat = Math.round((gross - net) * 100) / 100;
-        updated.netAmount = net.toFixed(2);
-        updated.vatAmount = vat.toFixed(2);
-      }
-    }
-
-    setFields(updated);
-  }
-
-  async function handleCreate() {
-    setSaving(true);
-    setError(null);
-    try {
-      const payload = {
-        reason: fields.reason,
-        issuerName: fields.issuerName,
-        description: fields.description,
-        invoiceDate: new Date(fields.invoiceDate).toISOString(),
-        grossAmount: parseFloat(fields.grossAmount),
-        netAmount: fields.netAmount ? parseFloat(fields.netAmount) : null,
-        vatAmount: fields.vatAmount ? parseFloat(fields.vatAmount) : null,
-        vatRate: fields.vatRate ? parseFloat(fields.vatRate) : 20,
-        invoiceNumber: fields.invoiceNumber || null,
-        issuerUid: fields.issuerUid || null,
-        accountNumber: fields.accountNumber || null,
-        category: fields.category || null,
-      };
-      const resp = await createErsatzbelegApi(originalInvoiceId, payload);
-      onSuccess((resp.data as unknown as { id: string }).id);
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message || 'Ersatzbeleg konnte nicht erstellt werden';
-      setError(msg);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const belegLabel = `BEL-${String(originalBelegNr).padStart(3, '0')}`;
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <FilePlus2 size={20} className="text-orange-600" />
-            <h2 className="text-lg font-semibold">Ersatzbeleg erstellen</h2>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
-        </div>
-
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4 text-sm text-orange-700">
-          <p className="font-medium">Ersatzbeleg für {belegLabel}</p>
-          <p className="text-xs mt-1">
-            Der Originalbeleg wird als "Ersetzt" markiert. Sie können die Daten manuell eingeben —
-            z.B. aus dem Kontoauszug (Lieferant, Betrag, Datum).
-          </p>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Grund *</label>
-            <textarea
-              value={fields.reason}
-              onChange={(e) => updateField('reason', e.target.value)}
-              placeholder="z.B. Original-Rechnung unleserlich / Beleg nicht auffindbar"
-              className="input-field min-h-[60px] text-sm"
-            />
-          </div>
-
-          <div className="border-t pt-3">
-            <p className="text-xs font-medium text-gray-500 mb-2">Rechnungsdaten (soweit bekannt)</p>
-          </div>
-
-          <div>
-            <label className="block text-xs text-gray-500 mb-0.5">Lieferant *</label>
-            <input type="text" value={fields.issuerName} onChange={(e) => updateField('issuerName', e.target.value)} className="input-field !py-1.5 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-0.5">Beschreibung / Leistung *</label>
-            <input type="text" value={fields.description} onChange={(e) => updateField('description', e.target.value)} placeholder="z.B. Telekommunikation, Büromaterial" className="input-field !py-1.5 text-sm" />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs text-gray-500 mb-0.5">Datum *</label>
-              <input type="date" value={fields.invoiceDate} onChange={(e) => updateField('invoiceDate', e.target.value)} className="input-field !py-1.5 text-sm" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-0.5">Rechnungsnr.</label>
-              <input type="text" value={fields.invoiceNumber} onChange={(e) => updateField('invoiceNumber', e.target.value)} className="input-field !py-1.5 text-sm" />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="block text-xs text-gray-500 mb-0.5">Brutto * (€)</label>
-              <input type="number" step="0.01" value={fields.grossAmount} onChange={(e) => updateField('grossAmount', e.target.value)} className="input-field !py-1.5 text-sm" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-0.5">USt-Satz %</label>
-              <input type="number" value={fields.vatRate} onChange={(e) => updateField('vatRate', e.target.value)} className="input-field !py-1.5 text-sm" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-0.5">Netto (€)</label>
-              <input type="number" step="0.01" value={fields.netAmount} readOnly className="input-field !py-1.5 text-sm bg-gray-50" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs text-gray-500 mb-0.5">UID-Nummer</label>
-              <input type="text" value={fields.issuerUid} onChange={(e) => updateField('issuerUid', e.target.value)} placeholder="ATU..." className="input-field !py-1.5 text-sm" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-0.5">Konto</label>
-              <input type="text" value={fields.accountNumber} onChange={(e) => updateField('accountNumber', e.target.value)} className="input-field !py-1.5 text-sm" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-0.5">Kategorie</label>
-            <input type="text" value={fields.category} onChange={(e) => updateField('category', e.target.value)} placeholder="z.B. Telekommunikation" className="input-field !py-1.5 text-sm" />
-          </div>
-
-          {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
-
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={handleCreate}
-              disabled={saving || !fields.reason.trim() || !fields.issuerName.trim() || !fields.description.trim() || !fields.grossAmount}
-              className="btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center bg-orange-600 hover:bg-orange-700"
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <FilePlus2 size={14} />}
-              Ersatzbeleg erstellen
-            </button>
-            <button onClick={onClose} className="btn-secondary text-sm px-4">Abbrechen</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function ProcessingProgress({ status, error }: { status: string; error?: string }) {
   const steps = [
