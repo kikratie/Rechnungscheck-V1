@@ -98,6 +98,8 @@ export async function listCustomers(
       phone: c.phone,
       iban: c.iban,
       website: c.website,
+      viesName: c.viesName,
+      viesCheckedAt: c.viesCheckedAt?.toISOString() || null,
       isActive: c.isActive,
       invoiceCount: c._count.invoices,
       createdAt: c.createdAt.toISOString(),

@@ -1,10 +1,18 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { listBankStatementsApi, getBankStatementApi } from '../api/bankStatements';
-import { Building2, Upload, Loader2, ChevronDown, ChevronUp, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { listBankStatementsApi, getBankStatementApi, uploadBankStatementApi, deleteBankStatementApi } from '../api/bankStatements';
+import { getTenantApi } from '../api/tenant';
+import {
+  Building2, Upload, Loader2, ChevronDown, ChevronUp, ArrowDownLeft, ArrowUpRight,
+  X, CheckCircle, AlertTriangle, Trash2, FileUp, ArrowRight,
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export function BankStatementsPage() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['bank-statements'],
@@ -17,9 +25,24 @@ export function BankStatementsPage() {
     enabled: !!expandedId,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: deleteBankStatementApi,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bank-statements'] });
+      queryClient.invalidateQueries({ queryKey: ['matchings'] });
+      setExpandedId(null);
+    },
+  });
+
   const statements = (data?.data ?? []) as Array<Record<string, unknown>>;
   const detail = detailData?.data as Record<string, unknown> | undefined;
   const transactions = (detail?.transactions ?? []) as Array<Record<string, unknown>>;
+
+  const handleDelete = (id: string, name: string) => {
+    if (confirm(`Kontoauszug "${name}" wirklich löschen? Alle zugehörigen Transaktionen und Matchings werden ebenfalls gelöscht.`)) {
+      deleteMutation.mutate(id);
+    }
+  };
 
   return (
     <div>
@@ -28,7 +51,7 @@ export function BankStatementsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Kontoauszüge</h1>
           <p className="text-gray-500 mt-1">Bank-Kontoauszüge und Transaktionen</p>
         </div>
-        <button className="btn-primary flex items-center gap-2">
+        <button onClick={() => setShowUploadDialog(true)} className="btn-primary flex items-center gap-2">
           <Upload size={18} />
           Importieren
         </button>
@@ -43,6 +66,10 @@ export function BankStatementsPage() {
           <Building2 className="mx-auto text-gray-300 mb-4" size={48} />
           <h3 className="text-lg font-medium text-gray-900 mb-2">Keine Kontoauszüge vorhanden</h3>
           <p className="text-gray-500">Importiere einen CSV-Kontoauszug für den automatischen Bankabgleich.</p>
+          <button onClick={() => setShowUploadDialog(true)} className="btn-primary mt-4">
+            <Upload size={16} className="inline mr-1" />
+            CSV importieren
+          </button>
         </div>
       ) : (
         <div className="space-y-4">
@@ -51,38 +78,47 @@ export function BankStatementsPage() {
             return (
               <div key={stmt.id as string} className="card overflow-hidden">
                 {/* Statement header */}
-                <button
-                  className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors text-left"
-                  onClick={() => setExpandedId(isExpanded ? null : (stmt.id as string))}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <Building2 className="text-blue-600" size={20} />
+                <div className="flex items-center justify-between">
+                  <button
+                    className="flex-1 flex items-center justify-between p-5 hover:bg-gray-50 transition-colors text-left"
+                    onClick={() => setExpandedId(isExpanded ? null : (stmt.id as string))}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="p-2 bg-blue-100 rounded-lg">
+                        <Building2 className="text-blue-600" size={20} />
+                      </div>
+                      <div>
+                        <h3 className="font-medium text-gray-900">{(stmt.bankName as string) || (stmt.originalFileName as string) || 'Bank'}</h3>
+                        <p className="text-sm text-gray-500">{(stmt.iban as string) || ''}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-medium text-gray-900">{(stmt.bankName as string) || 'Bank'}</h3>
-                      <p className="text-sm text-gray-500">{stmt.iban as string}</p>
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-6 text-sm">
-                    <div className="text-right">
-                      <p className="text-gray-500">Zeitraum</p>
-                      <p className="font-medium">
-                        {stmt.periodFrom ? formatDate(stmt.periodFrom as string) : '?'} — {stmt.periodTo ? formatDate(stmt.periodTo as string) : '?'}
-                      </p>
+                    <div className="flex items-center gap-6 text-sm">
+                      <div className="text-right">
+                        <p className="text-gray-500">Zeitraum</p>
+                        <p className="font-medium">
+                          {stmt.periodFrom ? formatDate(stmt.periodFrom as string) : '?'} — {stmt.periodTo ? formatDate(stmt.periodTo as string) : '?'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500">Transaktionen</p>
+                        <p className="font-medium">{stmt.transactionCount as number}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500">Saldo</p>
+                        <p className="font-medium">{stmt.closingBalance ? formatCurrency(String(stmt.closingBalance)) : '—'}</p>
+                      </div>
+                      {isExpanded ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
                     </div>
-                    <div className="text-right">
-                      <p className="text-gray-500">Transaktionen</p>
-                      <p className="font-medium">{stmt.transactionCount as number}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-gray-500">Saldo</p>
-                      <p className="font-medium">{stmt.closingBalance ? formatCurrency(String(stmt.closingBalance)) : '—'}</p>
-                    </div>
-                    {isExpanded ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
-                  </div>
-                </button>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDelete(stmt.id as string, (stmt.originalFileName as string) || 'Kontoauszug'); }}
+                    className="p-2 mr-3 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50"
+                    title="Löschen"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
 
                 {/* Transactions */}
                 {isExpanded && (
@@ -147,6 +183,204 @@ export function BankStatementsPage() {
           })}
         </div>
       )}
+
+      {showUploadDialog && (
+        <UploadDialog
+          onClose={() => setShowUploadDialog(false)}
+          onSuccess={() => {
+            setShowUploadDialog(false);
+            queryClient.invalidateQueries({ queryKey: ['bank-statements'] });
+            queryClient.invalidateQueries({ queryKey: ['matchings'] });
+          }}
+          onGoToMatching={() => {
+            setShowUploadDialog(false);
+            navigate('/matching');
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Upload Dialog
+// ============================================================
+
+function UploadDialog({ onClose, onSuccess, onGoToMatching }: {
+  onClose: () => void;
+  onSuccess: () => void;
+  onGoToMatching: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [bankAccountId, setBankAccountId] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const [result, setResult] = useState<{ transactionsImported: number; matchingSuggestions: number } | null>(null);
+
+  const { data: tenant } = useQuery({
+    queryKey: ['tenant'],
+    queryFn: getTenantApi,
+  });
+
+  const bankAccounts = tenant?.bankAccounts ?? [];
+
+  const uploadMutation = useMutation({
+    mutationFn: () => uploadBankStatementApi(selectedFile!, bankAccountId || undefined),
+    onSuccess: (data) => {
+      setResult({
+        transactionsImported: data.data?.transactionsImported ?? 0,
+        matchingSuggestions: data.data?.matchingSuggestions ?? 0,
+      });
+    },
+  });
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) setSelectedFile(file);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setSelectedFile(file);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <FileUp size={18} className="text-primary-600" />
+            Kontoauszug importieren
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X size={18} />
+          </button>
+        </div>
+
+        {result ? (
+          /* Success state */
+          <div className="py-4">
+            <div className="flex flex-col items-center text-center mb-6">
+              <CheckCircle size={48} className="text-green-500 mb-3" />
+              <p className="font-semibold text-lg text-gray-900">Import erfolgreich!</p>
+              <p className="text-sm text-gray-500 mt-1">
+                {result.transactionsImported} Transaktionen importiert
+              </p>
+              {result.matchingSuggestions > 0 && (
+                <p className="text-sm text-primary-600 font-medium mt-2">
+                  {result.matchingSuggestions} neue Match-Vorschläge gefunden
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {result.matchingSuggestions > 0 && (
+                <button onClick={onGoToMatching} className="btn-primary flex-1 flex items-center justify-center gap-1.5 text-sm">
+                  <ArrowRight size={14} />
+                  Zum Abgleich
+                </button>
+              )}
+              <button onClick={onSuccess} className="btn-secondary flex-1 text-sm">
+                Schließen
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Upload form */
+          <div className="space-y-4">
+            {/* Bank account selector */}
+            {bankAccounts.length > 0 && (
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Bankkonto (optional)</label>
+                <select
+                  value={bankAccountId}
+                  onChange={(e) => setBankAccountId(e.target.value)}
+                  className="input-field text-sm"
+                >
+                  <option value="">— Kein Konto zuordnen —</option>
+                  {bankAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.label} {a.iban ? `(${a.iban})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Drop zone */}
+            <div
+              className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
+                ${dragOver ? 'border-primary-400 bg-primary-50' : 'border-gray-300 hover:border-gray-400'}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.txt"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+              {selectedFile ? (
+                <div className="flex items-center justify-center gap-3">
+                  <FileUp size={24} className="text-primary-600" />
+                  <div className="text-left">
+                    <p className="font-medium text-gray-900">{selectedFile.name}</p>
+                    <p className="text-xs text-gray-500">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}
+                    className="p-1 hover:bg-gray-100 rounded"
+                  >
+                    <X size={16} className="text-gray-400" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <Upload size={32} className="mx-auto text-gray-400 mb-2" />
+                  <p className="text-sm text-gray-600">CSV-Datei hierher ziehen oder klicken</p>
+                  <p className="text-xs text-gray-400 mt-1">Unterstützt: CSV (Semikolon/Komma-getrennt)</p>
+                </>
+              )}
+            </div>
+
+            {/* Error */}
+            {uploadMutation.isError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-center gap-2">
+                <AlertTriangle size={16} />
+                {(uploadMutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
+                  || (uploadMutation.error as Error).message
+                  || 'Import fehlgeschlagen'}
+              </div>
+            )}
+
+            {/* Buttons */}
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => uploadMutation.mutate()}
+                disabled={!selectedFile || uploadMutation.isPending}
+                className="btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center disabled:opacity-50"
+              >
+                {uploadMutation.isPending ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Upload size={14} />
+                )}
+                {uploadMutation.isPending ? 'Wird importiert...' : 'Importieren'}
+              </button>
+              <button
+                onClick={onClose}
+                disabled={uploadMutation.isPending}
+                className="btn-secondary text-sm flex-1"
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

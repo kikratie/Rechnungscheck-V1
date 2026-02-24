@@ -1,10 +1,10 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listInvoicesApi,
   getInvoiceApi,
-  uploadInvoiceApi,
+
   updateInvoiceApi,
   approveInvoiceApi,
   rejectInvoiceApi,
@@ -19,8 +19,10 @@ import {
   FileText, Upload, Search, X, ChevronLeft, ChevronRight, Loader2,
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
   ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight, MinusCircle,
-  ArrowUp, ArrowDown, ArrowUpDown, Lock, Archive,
+  ArrowUp, ArrowDown, ArrowUpDown, Lock, Archive, Mail,
 } from 'lucide-react';
+import { SendEmailDialog } from '../components/SendEmailDialog';
+import { InvoiceUploadDialog } from '../components/InvoiceUploadDialog';
 
 export function InvoicesPage() {
   const navigate = useNavigate();
@@ -36,6 +38,7 @@ export function InvoicesPage() {
   const [showErsatzbelegDialog, setShowErsatzbelegDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchApproveDialog, setShowBatchApproveDialog] = useState(false);
+  const [showEmailDialog, setShowEmailDialog] = useState(false);
 
   const batchApproveMutation = useMutation({
     mutationFn: ({ ids, comment }: { ids: string[]; comment?: string | null }) => batchApproveInvoicesApi(ids, comment),
@@ -144,7 +147,7 @@ export function InvoicesPage() {
     <div className="flex gap-6">
       {/* Upload dialog */}
       {showUpload && (
-        <UploadDialog
+        <InvoiceUploadDialog
           onClose={() => {
             setShowUpload(false);
             queryClient.invalidateQueries({ queryKey: ['invoices'] });
@@ -186,6 +189,49 @@ export function InvoicesPage() {
           setReason={setRejectReason}
         />
       )}
+
+      {/* Email dialog */}
+      {showEmailDialog && selectedId && detail && (() => {
+        const isOutgoing = detail.direction === 'OUTGOING';
+        const recipientEmail = isOutgoing
+          ? (detail as unknown as { customer?: { email?: string } }).customer?.email || ''
+          : (detail as unknown as { vendor?: { email?: string } }).vendor?.email || '';
+        const tenantName = ''; // Will be in the template placeholder
+        const invNr = detail.invoiceNumber || `BEL-${String(detail.belegNr).padStart(3, '0')}`;
+        const invDate = detail.invoiceDate ? new Date(detail.invoiceDate).toLocaleDateString('de-AT') : '';
+        const amount = detail.grossAmount ? `${parseFloat(detail.grossAmount).toLocaleString('de-AT', { style: 'currency', currency: detail.currency || 'EUR' })}` : '';
+        const dueDate = detail.dueDate ? new Date(detail.dueDate).toLocaleDateString('de-AT') : '';
+
+        const defaultSubject = isOutgoing
+          ? `Zahlungserinnerung — Rechnung ${invNr}`
+          : `Rückfrage zu Rechnung ${invNr}`;
+
+        const defaultBody = isOutgoing
+          ? `Sehr geehrte Damen und Herren,
+
+wir erlauben uns, Sie an die offene Rechnung ${invNr} vom ${invDate} über ${amount} hinzuweisen.${dueDate ? `\n\nZahlungsziel war der ${dueDate}. Wir bitten um umgehende Überweisung.` : ''}
+
+Mit freundlichen Grüßen`
+          : `Sehr geehrte Damen und Herren,
+
+bezüglich Ihrer Rechnung ${invNr} vom ${invDate} über ${amount} möchten wir folgende Punkte klären:
+
+[Hier Ihre Anmerkungen einfügen]
+
+Mit freundlichen Grüßen`;
+
+        return (
+          <SendEmailDialog
+            onClose={() => setShowEmailDialog(false)}
+            onSuccess={() => setShowEmailDialog(false)}
+            defaultTo={recipientEmail}
+            defaultSubject={defaultSubject}
+            defaultBody={defaultBody}
+            entityType="Invoice"
+            entityId={selectedId}
+          />
+        );
+      })()}
 
       {/* Main list */}
       <div className={selectedId ? 'flex-1 min-w-0' : 'w-full'}>
@@ -350,10 +396,17 @@ export function InvoicesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {invoices.map((inv) => (
+                  {invoices.map((inv) => {
+                    const shadowColor =
+                      inv.validationStatus === 'VALID' ? '#22c55e' :
+                      inv.validationStatus === 'WARNING' ? '#f59e0b' :
+                      inv.validationStatus === 'INVALID' ? '#ef4444' :
+                      '#d1d5db';
+                    return (
                     <tr
                       key={inv.id}
                       className={`hover:bg-gray-50 cursor-pointer transition-colors ${selectedId === inv.id ? 'bg-primary-50' : ''} ${selectedIds.has(inv.id) ? 'bg-green-50' : ''}`}
+                      style={{ boxShadow: `inset 4px 0 0 ${shadowColor}` }}
                       onClick={() => { setSelectedId(inv.id); setEditMode(false); }}
                     >
                       <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
@@ -440,7 +493,8 @@ export function InvoicesPage() {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -881,6 +935,19 @@ export function InvoicesPage() {
                       </div>
                     )}
 
+                    {/* E-Mail senden — for processed invoices */}
+                    {detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && (
+                      <div className="border-t pt-4">
+                        <button
+                          onClick={() => setShowEmailDialog(true)}
+                          className="btn-secondary flex items-center gap-1.5 text-sm w-full justify-center"
+                        >
+                          <Mail size={14} />
+                          E-Mail senden
+                        </button>
+                      </div>
+                    )}
+
                     {/* Delete button for ERROR/UPLOADED */}
                     {(detail.processingStatus === 'ERROR' || detail.processingStatus === 'UPLOADED') && (
                       <div className="border-t pt-4">
@@ -908,184 +975,6 @@ export function InvoicesPage() {
 // Sub-components
 // ============================================================
 
-interface FileUploadState {
-  file: File;
-  status: 'pending' | 'uploading' | 'done' | 'error';
-  error?: string;
-}
-
-function UploadDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const [dragOver, setDragOver] = useState(false);
-  const [fileStates, setFileStates] = useState<FileUploadState[]>([]);
-  const [direction, setDirection] = useState<'INCOMING' | 'OUTGOING'>('INCOMING');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const hasStarted = fileStates.length > 0;
-  const allDone = hasStarted && fileStates.every((f) => f.status === 'done' || f.status === 'error');
-  const successCount = fileStates.filter((f) => f.status === 'done').length;
-  const errorCount = fileStates.filter((f) => f.status === 'error').length;
-
-  const handleFiles = useCallback(async (files: FileList | null) => {
-    if (!files?.length) return;
-    const fileArray = Array.from(files);
-
-    // Initialize all files as pending
-    const initialStates: FileUploadState[] = fileArray.map((file) => ({
-      file,
-      status: 'pending' as const,
-    }));
-    setFileStates(initialStates);
-
-    // Upload in batches of 5 to avoid rate limiting
-    const CONCURRENCY = 5;
-    for (let start = 0; start < fileArray.length; start += CONCURRENCY) {
-      const batch = fileArray.slice(start, start + CONCURRENCY);
-      const uploads = batch.map(async (file, batchIdx) => {
-        const index = start + batchIdx;
-        setFileStates((prev) =>
-          prev.map((f, i) => (i === index ? { ...f, status: 'uploading' as const } : f)),
-        );
-
-        try {
-          await uploadInvoiceApi(file, direction);
-          setFileStates((prev) =>
-            prev.map((f, i) => (i === index ? { ...f, status: 'done' as const } : f)),
-          );
-        } catch (err: unknown) {
-          const msg =
-            (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data
-              ?.error?.message || 'Upload fehlgeschlagen';
-          setFileStates((prev) =>
-            prev.map((f, i) => (i === index ? { ...f, status: 'error' as const, error: msg } : f)),
-          );
-        }
-      });
-      await Promise.all(uploads);
-    }
-
-    onSuccess();
-  }, [onSuccess, direction]);
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Rechnungen hochladen</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
-        </div>
-
-        {/* Direction selector — hide when uploads are in progress */}
-        {!hasStarted && (
-          <div className="flex gap-2 mb-4">
-            <button
-              onClick={() => setDirection('INCOMING')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg border-2 text-sm font-medium transition-colors ${
-                direction === 'INCOMING'
-                  ? 'border-primary-500 bg-primary-50 text-primary-700'
-                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
-              }`}
-            >
-              <Download size={16} />
-              Eingangsrechnung
-            </button>
-            <button
-              onClick={() => setDirection('OUTGOING')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg border-2 text-sm font-medium transition-colors ${
-                direction === 'OUTGOING'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
-              }`}
-            >
-              <Upload size={16} />
-              Ausgangsrechnung
-            </button>
-          </div>
-        )}
-
-        {/* Drop zone — hide when uploads are in progress */}
-        {!hasStarted && (
-          <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
-              dragOver ? 'border-primary-400 bg-primary-50' : 'border-gray-300 hover:border-gray-400'
-            }`}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.webp"
-              multiple
-              className="hidden"
-              onChange={(e) => handleFiles(e.target.files)}
-            />
-            <Upload className="mx-auto text-gray-400 mb-3" size={36} />
-            <p className="text-sm font-medium text-gray-700 mb-1">
-              Dateien hierher ziehen oder klicken
-            </p>
-            <p className="text-xs text-gray-400">PDF, JPEG, PNG, TIFF, WebP — max. 20 MB pro Datei — mehrere gleichzeitig möglich</p>
-          </div>
-        )}
-
-        {/* File list with status */}
-        {hasStarted && (
-          <div className="space-y-2">
-            {/* Summary */}
-            {allDone && (
-              <div className={`rounded-lg p-3 text-sm font-medium ${
-                errorCount === 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'
-              }`}>
-                {errorCount === 0
-                  ? `${successCount} ${successCount === 1 ? 'Rechnung' : 'Rechnungen'} erfolgreich hochgeladen`
-                  : `${successCount} erfolgreich, ${errorCount} fehlgeschlagen`}
-              </div>
-            )}
-
-            {/* Individual files */}
-            <div className="max-h-[300px] overflow-y-auto space-y-1.5">
-              {fileStates.map((fs, i) => (
-                <div
-                  key={i}
-                  className={`flex items-center gap-3 rounded-lg border p-3 text-sm ${
-                    fs.status === 'done' ? 'border-green-200 bg-green-50' :
-                    fs.status === 'error' ? 'border-red-200 bg-red-50' :
-                    fs.status === 'uploading' ? 'border-blue-200 bg-blue-50' :
-                    'border-gray-200 bg-gray-50'
-                  }`}
-                >
-                  {fs.status === 'uploading' && <Loader2 size={14} className="animate-spin text-blue-600 shrink-0" />}
-                  {fs.status === 'done' && <CheckCircle size={14} className="text-green-600 shrink-0" />}
-                  {fs.status === 'error' && <XCircle size={14} className="text-red-600 shrink-0" />}
-                  {fs.status === 'pending' && <Clock size={14} className="text-gray-400 shrink-0" />}
-
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate font-medium text-gray-900">{fs.file.name}</p>
-                    {fs.status === 'uploading' && <p className="text-xs text-blue-600">Wird hochgeladen...</p>}
-                    {fs.status === 'done' && <p className="text-xs text-green-600">Erfolgreich — wird verarbeitet</p>}
-                    {fs.status === 'error' && <p className="text-xs text-red-600">{fs.error}</p>}
-                    {fs.status === 'pending' && <p className="text-xs text-gray-400">Wartet...</p>}
-                  </div>
-
-                  <span className="text-xs text-gray-400 shrink-0">
-                    {(fs.file.size / 1024 / 1024).toFixed(1)} MB
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Close button when done */}
-            {allDone && (
-              <button onClick={onClose} className="btn-primary w-full text-sm mt-2">
-                Schließen
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function EditForm({
   fields, setFields, invoiceId, replacesInvoiceId, onCancel, onSaved,

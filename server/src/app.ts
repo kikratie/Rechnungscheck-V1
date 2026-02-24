@@ -14,6 +14,7 @@ import { auditLogRoutes } from './routes/auditLog.routes.js';
 import { dashboardRoutes } from './routes/dashboard.routes.js';
 import vendorRoutes from './routes/vendor.routes.js';
 import customerRoutes from './routes/customer.routes.js';
+import mailRoutes from './routes/mail.routes.js';
 import { prisma } from './config/database.js';
 import { invoiceQueue } from './jobs/queue.js';
 import type { ApiResponse } from '@buchungsai/shared';
@@ -106,6 +107,7 @@ app.use('/api/v1/audit-logs', auditLogRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/vendors', vendorRoutes);
 app.use('/api/v1/customers', customerRoutes);
+app.use('/api/v1/mail', mailRoutes);
 
 // 404 Handler
 app.use((_req, res) => {

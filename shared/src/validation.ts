@@ -283,6 +283,15 @@ export const uidSchema = z.object({
   uid: z.string().regex(/^[A-Z]{2}[A-Za-z0-9]+$/, 'Ungültiges UID-Format'),
 });
 
+// ============================================================
+// Matching Schemas
+// ============================================================
+
+export const manualMatchingSchema = z.object({
+  invoiceId: z.string().uuid('Ungültige Rechnungs-ID'),
+  transactionId: z.string().uuid('Ungültige Transaktions-ID'),
+});
+
 export const uidBatchSchema = z.object({
   uids: z.array(z.string()).min(1).max(50),
 });

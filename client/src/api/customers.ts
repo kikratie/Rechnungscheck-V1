@@ -10,6 +10,8 @@ export interface CustomerListItem {
   phone: string | null;
   iban: string | null;
   website: string | null;
+  viesName: string | null;
+  viesCheckedAt: string | null;
   isActive: boolean;
   invoiceCount: number;
   createdAt: string;

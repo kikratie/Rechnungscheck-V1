@@ -310,7 +310,14 @@ export interface BankStatementListItem {
   periodTo: string | null;
   transactionCount: number;
   processingStatus: ProcessingStatusType;
+  closingBalance: string | null;
   createdAt: string;
+}
+
+export interface BankStatementUploadResult {
+  statement: BankStatementListItem;
+  transactionsImported: number;
+  matchingSuggestions: number;
 }
 
 export interface BankTransactionItem {
@@ -341,6 +348,95 @@ export interface MatchingItem {
   status: MatchStatusValue;
   invoice: InvoiceListItem;
   transaction: BankTransactionItem;
+}
+
+// ============================================================
+// Monthly Reconciliation Types (Monatsabstimmung)
+// ============================================================
+
+export interface MonthlyReconciliationSummary {
+  month: string;
+  totalIncome: string;
+  totalExpenses: string;
+  totalTransactions: number;
+  matchedTransactions: number;
+  unmatchedTransactions: number;
+  openInvoices: number;
+  matchedPercent: number;
+  vorsteuerTotal: string;
+  vorsteuerByRate: Array<{ rate: number; netAmount: string; vatAmount: string }>;
+}
+
+export interface ReconciliationMatchedItem {
+  matchingId: string;
+  matchType: MatchTypeValue;
+  matchStatus: MatchStatusValue;
+  confidence: string | null;
+  matchReason: string | null;
+  invoice: {
+    id: string;
+    belegNr: number;
+    vendorName: string | null;
+    customerName: string | null;
+    invoiceNumber: string | null;
+    invoiceDate: string | null;
+    grossAmount: string | null;
+    netAmount: string | null;
+    vatAmount: string | null;
+    vatRate: string | null;
+    currency: string;
+    direction: InvoiceDirection;
+    validationStatus: ValidationStatusType;
+    archivalNumber: string | null;
+  };
+  transaction: {
+    id: string;
+    transactionDate: string;
+    amount: string;
+    currency: string;
+    counterpartName: string | null;
+    reference: string | null;
+    bookingText: string | null;
+  };
+}
+
+export interface ReconciliationUnmatchedTransaction {
+  id: string;
+  transactionDate: string;
+  amount: string;
+  currency: string;
+  counterpartName: string | null;
+  reference: string | null;
+  bookingText: string | null;
+  hasSuggestedMatching: boolean;
+  suggestedMatchingId: string | null;
+  suggestedInvoiceName: string | null;
+}
+
+export interface ReconciliationUnmatchedInvoice {
+  id: string;
+  belegNr: number;
+  vendorName: string | null;
+  customerName: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  grossAmount: string | null;
+  currency: string;
+  direction: InvoiceDirection;
+  validationStatus: ValidationStatusType;
+  processingStatus: ProcessingStatusType;
+  hasSuggestedMatching: boolean;
+  suggestedMatchingId: string | null;
+  suggestedTransactionDate: string | null;
+}
+
+export interface MonthlyReconciliationData {
+  summary: MonthlyReconciliationSummary;
+  matched: ReconciliationMatchedItem[];
+  unmatchedTransactions: ReconciliationUnmatchedTransaction[];
+  unmatchedInvoices: ReconciliationUnmatchedInvoice[];
+  availableMonths: string[];
 }
 
 // ============================================================

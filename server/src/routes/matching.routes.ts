@@ -3,10 +3,34 @@ import { authenticate } from '../middleware/auth.js';
 import { requireTenant } from '../middleware/tenantContext.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
+import { manualMatchingSchema } from '@buchungsai/shared';
+import { validateBody } from '../middleware/validate.js';
+import * as matchingService from '../services/matching.service.js';
 
 const router = Router();
 
 router.use(authenticate, requireTenant);
+
+// GET /api/v1/matchings/monthly — Monatsabstimmung
+router.get('/monthly', async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const month = req.query.month as string | undefined;
+
+    if (month && !/^\d{4}-\d{2}$/.test(month)) {
+      res.status(422).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'month muss Format YYYY-MM haben' },
+      });
+      return;
+    }
+
+    const data = await matchingService.getMonthlyReconciliation(tenantId, month);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /api/v1/matchings
 router.get('/', async (req, res, next) => {
@@ -65,6 +89,78 @@ router.get('/', async (req, res, next) => {
       data: matchings,
       pagination: buildPaginationMeta(total, page, limit),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/matchings/run — Trigger matching algorithm
+router.post('/run', async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const userId = req.userId!;
+    const statementId = req.body.statementId as string | undefined;
+
+    const result = await matchingService.runMatching(tenantId, userId, statementId);
+
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/matchings — Create manual matching
+router.post('/', validateBody(manualMatchingSchema), async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const userId = req.userId!;
+    const { invoiceId, transactionId } = req.body;
+
+    const matching = await matchingService.createManualMatching(tenantId, userId, invoiceId, transactionId);
+
+    res.status(201).json({ success: true, data: matching });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/matchings/:id/confirm
+router.post('/:id/confirm', async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const userId = req.userId!;
+
+    const matching = await matchingService.confirmMatching(tenantId, userId, req.params.id);
+
+    res.json({ success: true, data: matching });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/matchings/:id/reject
+router.post('/:id/reject', async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const userId = req.userId!;
+
+    const matching = await matchingService.rejectMatching(tenantId, userId, req.params.id);
+
+    res.json({ success: true, data: matching });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/v1/matchings/:id
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const userId = req.userId!;
+
+    await matchingService.deleteMatching(tenantId, userId, req.params.id);
+
+    res.json({ success: true, data: null });
   } catch (err) {
     next(err);
   }

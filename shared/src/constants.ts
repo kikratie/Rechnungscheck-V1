@@ -74,6 +74,13 @@ export const MAX_FILE_SIZE = 20 * 1024 * 1024;
 // Erlaubte Bank-Statement Formate
 export const ALLOWED_BANK_FORMATS = ['CSV', 'MT940', 'CAMT053'] as const;
 
+// Erlaubte MIME-Types für Bank-Statement Upload
+export const ALLOWED_BANK_STATEMENT_MIME_TYPES = [
+  'text/csv',
+  'application/vnd.ms-excel',
+  'text/plain',
+] as const;
+
 // Pagination Defaults
 export const PAGINATION = {
   DEFAULT_PAGE: 1,

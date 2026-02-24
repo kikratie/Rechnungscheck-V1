@@ -7,9 +7,10 @@ import { VENDOR_TRUST_LEVELS } from '@buchungsai/shared';
 import {
   Users, Search, X, ChevronLeft, ChevronRight, Loader2,
   Mail, Phone, Globe, FileText, MapPin, ShieldCheck, ShieldAlert, ShieldQuestion,
-  CreditCard, Hash,
+  CreditCard, Hash, Edit3, Save, XCircle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { SendEmailDialog } from '../components/SendEmailDialog';
 
 export function VendorsPage() {
   const navigate = useNavigate();
@@ -188,7 +189,7 @@ export function VendorsPage() {
 
       {/* Detail Panel */}
       {selectedId && (
-        <div className="w-1/2 card overflow-auto">
+        <div className="w-1/2 card p-6 overflow-auto">
           {detailLoading ? (
             <div className="flex items-center justify-center h-48">
               <Loader2 className="animate-spin text-primary-600" size={32} />
@@ -251,6 +252,41 @@ function ViesBadge({ viesName, viesCheckedAt, uid }: { viesName: string | null; 
   );
 }
 
+interface EditFields {
+  name: string;
+  uid: string;
+  street: string;
+  zip: string;
+  city: string;
+  country: string;
+  email: string;
+  phone: string;
+  website: string;
+  iban: string;
+  bic: string;
+  notes: string;
+  trustLevel: string;
+}
+
+function vendorToEditFields(vendor: { name: string; uid: string | null; address: unknown; email: string | null; phone: string | null; website: string | null; iban: string | null; bic: string | null; notes: string | null; trustLevel: string }): EditFields {
+  const addr = (vendor.address as Record<string, string>) || {};
+  return {
+    name: vendor.name || '',
+    uid: vendor.uid || '',
+    street: addr.street || '',
+    zip: addr.zip || '',
+    city: addr.city || '',
+    country: addr.country || '',
+    email: vendor.email || '',
+    phone: vendor.phone || '',
+    website: vendor.website || '',
+    iban: vendor.iban || '',
+    bic: vendor.bic || '',
+    notes: vendor.notes || '',
+    trustLevel: vendor.trustLevel || 'NEW',
+  };
+}
+
 function VendorDetailPanel({
   vendor,
   onClose,
@@ -261,180 +297,370 @@ function VendorDetailPanel({
   onNavigateToInvoice: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const trustMutation = useMutation({
-    mutationFn: (level: VendorTrustLevel) => updateVendorApi(vendor.id, { trustLevel: level }),
+  const [editMode, setEditMode] = useState(false);
+  const [showEmailDialog, setShowEmailDialog] = useState(false);
+  const [fields, setFields] = useState<EditFields>(vendorToEditFields(vendor));
+
+  const updateMutation = useMutation({
+    mutationFn: (data: Record<string, unknown>) => updateVendorApi(vendor.id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vendor', vendor.id] });
       queryClient.invalidateQueries({ queryKey: ['vendors'] });
+      setEditMode(false);
     },
   });
 
+  function startEdit() {
+    setFields(vendorToEditFields(vendor));
+    setEditMode(true);
+  }
+
+  function handleSave() {
+    const address = (fields.street || fields.zip || fields.city || fields.country)
+      ? { street: fields.street, zip: fields.zip, city: fields.city, country: fields.country }
+      : null;
+    updateMutation.mutate({
+      name: fields.name,
+      uid: fields.uid || null,
+      address,
+      email: fields.email || null,
+      phone: fields.phone || null,
+      website: fields.website || null,
+      iban: fields.iban || null,
+      bic: fields.bic || null,
+      notes: fields.notes || null,
+      trustLevel: fields.trustLevel,
+    });
+  }
+
+  function updateField(key: keyof EditFields, value: string) {
+    setFields((prev) => ({ ...prev, [key]: value }));
+  }
+
   return (
     <div>
+      {/* Email Dialog */}
+      {showEmailDialog && (
+        <SendEmailDialog
+          onClose={() => setShowEmailDialog(false)}
+          onSuccess={() => setShowEmailDialog(false)}
+          defaultTo={vendor.email || ''}
+          defaultSubject={`Rückfrage — ${vendor.name}`}
+          defaultBody={`Sehr geehrte Damen und Herren,\n\nbezüglich unserer Geschäftsbeziehung möchten wir folgende Punkte klären:\n\n[Hier Ihre Anmerkungen einfügen]\n\nMit freundlichen Grüßen`}
+          entityType="Vendor"
+          entityId={vendor.id}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-xl font-bold">{vendor.name}</h2>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-xl font-bold truncate">{vendor.name}</h2>
           {vendor.uid && (
             <span className="font-mono text-sm bg-gray-100 px-2 py-0.5 rounded mt-1 inline-block">
               {vendor.uid}
             </span>
           )}
         </div>
-        <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
-          <X size={20} />
-        </button>
-      </div>
-
-      {/* Trust Level Selector */}
-      <div className="mb-4">
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Vertrauenslevel</h3>
-        <div className="flex items-center gap-2">
-          <select
-            value={vendor.trustLevel}
-            onChange={(e) => trustMutation.mutate(e.target.value as VendorTrustLevel)}
-            disabled={trustMutation.isPending}
-            className="input-field !py-1.5 text-sm !w-auto"
-          >
-            {(Object.entries(VENDOR_TRUST_LEVELS) as [VendorTrustLevel, { label: string; description: string }][]).map(([key, val]) => (
-              <option key={key} value={key}>{val.label}</option>
-            ))}
-          </select>
-          <TrustBadge level={vendor.trustLevel} />
-          {trustMutation.isPending && <Loader2 size={14} className="animate-spin text-primary-600" />}
-        </div>
-        <p className="text-xs text-gray-400 mt-1">
-          {VENDOR_TRUST_LEVELS[vendor.trustLevel as keyof typeof VENDOR_TRUST_LEVELS]?.description}
-        </p>
-      </div>
-
-      {/* VIES Status */}
-      {vendor.uid && (
-        <div className={`p-3 rounded-lg mb-4 ${
-          vendor.viesName ? 'bg-green-50 border border-green-200' :
-          vendor.viesCheckedAt ? 'bg-red-50 border border-red-200' :
-          'bg-gray-50 border border-gray-200'
-        }`}>
-          <div className="flex items-center gap-2 text-sm font-medium">
-            {vendor.viesName ? (
-              <><ShieldCheck size={16} className="text-green-600" /> UID bei VIES gültig</>
-            ) : vendor.viesCheckedAt ? (
-              <><ShieldAlert size={16} className="text-red-500" /> UID bei VIES ungültig</>
-            ) : (
-              <><ShieldQuestion size={16} className="text-gray-400" /> VIES noch nicht geprüft</>
-            )}
-          </div>
-          {vendor.viesName && (
-            <p className="text-xs text-gray-600 mt-1">Registriert als: {vendor.viesName}</p>
+        <div className="flex items-center gap-1 shrink-0">
+          {!editMode && (
+            <>
+              <button onClick={() => setShowEmailDialog(true)} className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-primary-600" title="E-Mail senden">
+                <Mail size={18} />
+              </button>
+              <button onClick={startEdit} className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-primary-600" title="Bearbeiten">
+                <Edit3 size={18} />
+              </button>
+            </>
           )}
-          {vendor.viesAddress && (
-            <p className="text-xs text-gray-500">{vendor.viesAddress}</p>
-          )}
-          {vendor.viesCheckedAt && (
-            <p className="text-xs text-gray-400 mt-1">
-              Zuletzt geprüft: {new Date(vendor.viesCheckedAt).toLocaleDateString('de-AT')}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Contact Info */}
-      <div className="space-y-2 mb-6">
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Kontaktdaten</h3>
-        <div className="grid grid-cols-1 gap-2 text-sm">
-          {vendor.address && (
-            <div className="flex items-start gap-2">
-              <MapPin size={14} className="text-gray-400 mt-0.5 shrink-0" />
-              <span>
-                {(vendor.address as Record<string, string>).street && <>{(vendor.address as Record<string, string>).street}<br /></>}
-                {(vendor.address as Record<string, string>).zip} {(vendor.address as Record<string, string>).city}
-                {(vendor.address as Record<string, string>).country && <>, {(vendor.address as Record<string, string>).country}</>}
-              </span>
-            </div>
-          )}
-          {vendor.email && (
-            <div className="flex items-center gap-2">
-              <Mail size={14} className="text-gray-400 shrink-0" />
-              <a href={`mailto:${vendor.email}`} className="text-primary-600 hover:underline">{vendor.email}</a>
-            </div>
-          )}
-          {vendor.phone && (
-            <div className="flex items-center gap-2">
-              <Phone size={14} className="text-gray-400 shrink-0" />
-              <span>{vendor.phone}</span>
-            </div>
-          )}
-          {vendor.website && (
-            <div className="flex items-center gap-2">
-              <Globe size={14} className="text-gray-400 shrink-0" />
-              <a href={vendor.website} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">{vendor.website}</a>
-            </div>
-          )}
-          {vendor.iban && (
-            <div className="flex items-center gap-2">
-              <CreditCard size={14} className="text-gray-400 shrink-0" />
-              <span className="font-mono text-xs">{vendor.iban}</span>
-            </div>
-          )}
-          {!vendor.address && !vendor.email && !vendor.phone && !vendor.website && !vendor.iban && (
-            <p className="text-gray-400 text-xs">Keine Kontaktdaten vorhanden</p>
-          )}
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+            <X size={20} />
+          </button>
         </div>
       </div>
 
-      {/* Notes */}
-      {vendor.notes && (
-        <div className="mb-6">
-          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Notizen</h3>
-          <p className="text-sm text-gray-700 bg-yellow-50 p-3 rounded-lg">{vendor.notes}</p>
-        </div>
-      )}
+      {editMode ? (
+        /* ==================== EDIT MODE ==================== */
+        <div className="space-y-5">
+          {/* Stammdaten */}
+          <fieldset>
+            <legend className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Stammdaten</legend>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Name *</label>
+                <input type="text" value={fields.name} onChange={(e) => updateField('name', e.target.value)} className="input-field text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">UID-Nummer</label>
+                <input type="text" value={fields.uid} onChange={(e) => updateField('uid', e.target.value)} className="input-field text-sm font-mono" placeholder="z.B. ATU12345678" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Vertrauenslevel</label>
+                <select value={fields.trustLevel} onChange={(e) => updateField('trustLevel', e.target.value)} className="input-field text-sm">
+                  {(Object.entries(VENDOR_TRUST_LEVELS) as [VendorTrustLevel, { label: string; description: string }][]).map(([key, val]) => (
+                    <option key={key} value={key}>{val.label} — {val.description}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </fieldset>
 
-      {/* Invoices */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">
-          Rechnungen ({vendor.invoices.length})
-        </h3>
-        {vendor.invoices.length === 0 ? (
-          <p className="text-gray-400 text-xs">Keine Rechnungen verknüpft</p>
-        ) : (
-          <div className="space-y-2">
-            {vendor.invoices.map((inv) => (
-              <div
-                key={inv.id}
-                onClick={() => onNavigateToInvoice(inv.id)}
-                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-mono bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
-                    BEL-{String(inv.belegNr).padStart(3, '0')}
-                  </span>
-                  <div>
-                    <div className="text-sm font-medium">
-                      {inv.invoiceNumber || inv.originalFileName}
-                    </div>
-                    <div className="text-xs text-gray-400">
-                      {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('de-AT') : '—'}
-                    </div>
-                  </div>
+          {/* Adresse */}
+          <fieldset>
+            <legend className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Adresse</legend>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Straße</label>
+                <input type="text" value={fields.street} onChange={(e) => updateField('street', e.target.value)} className="input-field text-sm" />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">PLZ</label>
+                  <input type="text" value={fields.zip} onChange={(e) => updateField('zip', e.target.value)} className="input-field text-sm" />
                 </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold">
-                    {inv.grossAmount ? `${parseFloat(inv.grossAmount).toLocaleString('de-AT', { style: 'currency', currency: inv.currency })}` : '—'}
-                  </div>
-                  <ProcessingBadge status={inv.processingStatus} />
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Ort</label>
+                  <input type="text" value={fields.city} onChange={(e) => updateField('city', e.target.value)} className="input-field text-sm" />
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Land</label>
+                <input type="text" value={fields.country} onChange={(e) => updateField('country', e.target.value)} className="input-field text-sm" placeholder="z.B. Österreich" />
+              </div>
+            </div>
+          </fieldset>
 
-      {/* Meta */}
-      <div className="mt-6 pt-4 border-t text-xs text-gray-400">
-        <p>Erstellt: {new Date(vendor.createdAt).toLocaleString('de-AT')}</p>
-        <p>Aktualisiert: {new Date(vendor.updatedAt).toLocaleString('de-AT')}</p>
-      </div>
+          {/* Kontakt */}
+          <fieldset>
+            <legend className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Kontakt</legend>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">E-Mail</label>
+                <input type="email" value={fields.email} onChange={(e) => updateField('email', e.target.value)} className="input-field text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Telefon</label>
+                <input type="tel" value={fields.phone} onChange={(e) => updateField('phone', e.target.value)} className="input-field text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Website</label>
+                <input type="url" value={fields.website} onChange={(e) => updateField('website', e.target.value)} className="input-field text-sm" placeholder="https://" />
+              </div>
+            </div>
+          </fieldset>
+
+          {/* Bankdaten */}
+          <fieldset>
+            <legend className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Bankdaten</legend>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">IBAN</label>
+                <input type="text" value={fields.iban} onChange={(e) => updateField('iban', e.target.value)} className="input-field text-sm font-mono" placeholder="z.B. AT12 3456 7890 1234 5678" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">BIC</label>
+                <input type="text" value={fields.bic} onChange={(e) => updateField('bic', e.target.value)} className="input-field text-sm font-mono" placeholder="z.B. BKAUATWW" />
+              </div>
+            </div>
+          </fieldset>
+
+          {/* Notizen */}
+          <fieldset>
+            <legend className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Notizen</legend>
+            <textarea
+              value={fields.notes}
+              onChange={(e) => updateField('notes', e.target.value)}
+              className="input-field text-sm"
+              rows={3}
+              placeholder="Interne Notizen zum Lieferanten..."
+            />
+          </fieldset>
+
+          {/* Error */}
+          {updateMutation.isError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-center gap-2">
+              <XCircle size={16} />
+              Speichern fehlgeschlagen: {(updateMutation.error as Error).message}
+            </div>
+          )}
+
+          {/* Buttons */}
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={handleSave}
+              disabled={updateMutation.isPending || !fields.name.trim()}
+              className="btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center disabled:opacity-50"
+            >
+              {updateMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Speichern
+            </button>
+            <button
+              onClick={() => setEditMode(false)}
+              disabled={updateMutation.isPending}
+              className="btn-secondary text-sm flex-1"
+            >
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* ==================== VIEW MODE ==================== */
+        <div className="space-y-4 text-sm">
+          {/* Stammdaten */}
+          <div className="bg-gray-50 rounded-lg p-3 space-y-1.5">
+            <DetailRow label="UID" value={vendor.uid} mono />
+            <DetailRow label="Vertrauen" value={null}>
+              <TrustBadge level={vendor.trustLevel} />
+            </DetailRow>
+          </div>
+
+          {/* VIES Status */}
+          {vendor.uid && (
+            <div className={`p-3 rounded-lg ${
+              vendor.viesName ? 'bg-green-50 border border-green-200' :
+              vendor.viesCheckedAt ? 'bg-red-50 border border-red-200' :
+              'bg-gray-50 border border-gray-200'
+            }`}>
+              <div className="flex items-center gap-2 text-sm font-medium">
+                {vendor.viesName ? (
+                  <><ShieldCheck size={14} className="text-green-600" /> UID bei VIES gültig</>
+                ) : vendor.viesCheckedAt ? (
+                  <><ShieldAlert size={14} className="text-red-500" /> UID bei VIES ungültig</>
+                ) : (
+                  <><ShieldQuestion size={14} className="text-gray-400" /> VIES noch nicht geprüft</>
+                )}
+              </div>
+              {vendor.viesName && (
+                <p className="text-xs text-gray-600 mt-1">Registriert als: {vendor.viesName}</p>
+              )}
+              {vendor.viesAddress && (
+                <p className="text-xs text-gray-500">{vendor.viesAddress}</p>
+              )}
+              {vendor.viesCheckedAt && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Geprüft: {new Date(vendor.viesCheckedAt).toLocaleDateString('de-AT')}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Adresse */}
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Adresse</h3>
+            {vendor.address ? (
+              <div className="text-sm text-gray-700">
+                {(vendor.address as Record<string, string>).street && <div>{(vendor.address as Record<string, string>).street}</div>}
+                <div>
+                  {(vendor.address as Record<string, string>).zip} {(vendor.address as Record<string, string>).city}
+                </div>
+                {(vendor.address as Record<string, string>).country && <div>{(vendor.address as Record<string, string>).country}</div>}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-300">—</p>
+            )}
+          </div>
+
+          {/* Kontakt */}
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Kontakt</h3>
+            <div className="space-y-1">
+              <DetailRow label="E-Mail" value={vendor.email} link={vendor.email ? `mailto:${vendor.email}` : undefined} />
+              <DetailRow label="Telefon" value={vendor.phone} />
+              <DetailRow label="Website" value={vendor.website} link={vendor.website || undefined} external />
+            </div>
+          </div>
+
+          {/* Bankdaten */}
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Bankdaten</h3>
+            <div className="space-y-1">
+              <DetailRow label="IBAN" value={vendor.iban} mono />
+              <DetailRow label="BIC" value={vendor.bic} mono />
+            </div>
+          </div>
+
+          {/* Notizen */}
+          {vendor.notes && (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Notizen</h3>
+              <p className="text-sm text-gray-700 bg-yellow-50 p-2.5 rounded-lg whitespace-pre-wrap">{vendor.notes}</p>
+            </div>
+          )}
+
+          {/* Invoices */}
+          <div className="border-t pt-4">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+              Rechnungen ({vendor.invoices.length})
+            </h3>
+            {vendor.invoices.length === 0 ? (
+              <p className="text-gray-300 text-xs">Keine Rechnungen verknüpft</p>
+            ) : (
+              <div className="space-y-1.5">
+                {vendor.invoices.map((inv) => (
+                  <div
+                    key={inv.id}
+                    onClick={() => onNavigateToInvoice(inv.id)}
+                    className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                        BEL-{String(inv.belegNr).padStart(3, '0')}
+                      </span>
+                      <div>
+                        <div className="text-xs font-medium truncate max-w-[180px]">
+                          {inv.invoiceNumber || inv.originalFileName}
+                        </div>
+                        <div className="text-[10px] text-gray-400">
+                          {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('de-AT') : '—'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs font-semibold">
+                        {inv.grossAmount ? `${parseFloat(inv.grossAmount).toLocaleString('de-AT', { style: 'currency', currency: inv.currency })}` : '—'}
+                      </div>
+                      <ProcessingBadge status={inv.processingStatus} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Meta */}
+          <div className="pt-3 border-t text-[10px] text-gray-300">
+            Erstellt: {new Date(vendor.createdAt).toLocaleString('de-AT')} · Aktualisiert: {new Date(vendor.updatedAt).toLocaleString('de-AT')}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailRow({ label, value, mono, link, external, children }: {
+  label: string;
+  value?: string | null;
+  mono?: boolean;
+  link?: string;
+  external?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex justify-between items-center text-sm">
+      <span className="text-gray-500">{label}</span>
+      {children || (
+        value ? (
+          link ? (
+            <a href={link} target={external ? '_blank' : undefined} rel={external ? 'noopener noreferrer' : undefined} className={`text-primary-600 hover:underline text-right truncate max-w-[200px] ${mono ? 'font-mono text-xs' : ''}`}>
+              {value}
+            </a>
+          ) : (
+            <span className={`text-gray-900 text-right truncate max-w-[200px] ${mono ? 'font-mono text-xs' : ''}`}>{value}</span>
+          )
+        ) : (
+          <span className="text-gray-300">—</span>
+        )
+      )}
     </div>
   );
 }

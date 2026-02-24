@@ -8,7 +8,9 @@ import {
   updateBankAccountApi,
   deleteBankAccountApi,
 } from '../api/tenant';
+import { getMailStatusApi } from '../api/mail';
 import type { TenantProfile, BankAccountItem, BankAccountType } from '@buchungsai/shared';
+import { Mail, CheckCircle, AlertTriangle } from 'lucide-react';
 
 const ACCOUNT_TYPE_LABELS: Record<BankAccountType, string> = {
   CHECKING: 'Girokonto',
@@ -47,6 +49,14 @@ export function SettingsPage() {
     queryKey: ['tenant'],
     queryFn: getTenantApi,
   });
+
+  const { data: mailStatus } = useQuery({
+    queryKey: ['mail-status'],
+    queryFn: getMailStatusApi,
+    staleTime: 60_000,
+  });
+
+  const smtpConfigured = mailStatus?.data?.configured ?? false;
 
   const [form, setForm] = useState({
     name: '',
@@ -468,6 +478,48 @@ export function SettingsPage() {
             />
           </div>
         )}
+      </div>
+
+      {/* E-Mail-Versand (SMTP) */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">E-Mail-Versand</h2>
+        <div className="card p-6">
+          <div className="flex items-start gap-3">
+            <Mail size={20} className={smtpConfigured ? 'text-green-600 mt-0.5' : 'text-yellow-600 mt-0.5'} />
+            <div>
+              {smtpConfigured ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-900">SMTP konfiguriert</span>
+                    <CheckCircle size={16} className="text-green-600" />
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">
+                    E-Mail-Versand ist aktiv. Sie können Mahnungen und Reklamationen direkt aus dem System versenden.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-900">SMTP nicht konfiguriert</span>
+                    <AlertTriangle size={16} className="text-yellow-600" />
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Um E-Mails direkt aus dem System zu versenden, hinterlegen Sie SMTP-Zugangsdaten in der Server-Konfiguration.
+                  </p>
+                  <div className="mt-3 bg-gray-50 rounded-lg p-3 text-xs text-gray-600 font-mono space-y-1">
+                    <p>SMTP_HOST=smtp.gmail.com</p>
+                    <p>SMTP_PORT=587</p>
+                    <p>SMTP_USER=ihre@email.at</p>
+                    <p>SMTP_PASS=app-passwort</p>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Unterstützt: Gmail, Outlook, eigener SMTP-Server u.a.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

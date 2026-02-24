@@ -40,9 +40,9 @@
 | `/modules/llm` | LLM-Abstraktionsschicht | ✅ Implementiert (OpenAI, env-konfiguriert) |
 | `/modules/validation` | Regel-Engine (§11 UStG) | ✅ 18 Prüfregeln + Ampel-Logik |
 | `/modules/workflow` | Ampel, Nummerierung, Archivierung | ✅ Ampel + Archivierung + Nummerierung (Phase 5) |
-| `/modules/reconciliation` | Bankabgleich-Algorithmen | Nur DB-Matchings, keine Algorithmen |
+| `/modules/reconciliation` | Bankabgleich-Algorithmen | ✅ CSV-Import + 3-Stufen-Matching (Phase 5) |
 | `/modules/export` | CSV/BMD-Export-Generierung | Stub-Route |
-| `/modules/communication` | Mail-Versand | Nicht implementiert |
+| `/modules/communication` | Mail-Versand | ✅ Nodemailer SMTP + SendEmailDialog (Phase 5) |
 | `/modules/admin` | Admin-Backend | Nicht implementiert |
 
 ---
