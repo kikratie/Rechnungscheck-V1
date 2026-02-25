@@ -507,7 +507,24 @@ export interface MonthlyReconciliationData {
 // Dashboard Types
 // ============================================================
 
+export type DashboardPeriod = 'last30' | 'last60' | 'last90' | 'currentMonth' | 'currentYear';
+
+export interface CashflowForecastPoint {
+  date: string;              // "YYYY-MM-DD"
+  projectedBalance: string;  // Decimal as string
+}
+
+export interface OpenInvoiceItem {
+  id: string;
+  partnerName: string;
+  grossAmount: string;
+  dueDate: string | null;
+  daysOverdue: number;
+  invoiceNumber: string | null;
+}
+
 export interface DashboardStats {
+  // V1 fields
   totalInvoices: number;
   pendingReview: number;
   matchedInvoices: number;
@@ -522,6 +539,24 @@ export interface DashboardStats {
   totalAmount: string;
   foreignCurrencyCount: number;
   recentActivity: ActivityItem[];
+
+  // V2 KPIs
+  revenue?: string;
+  costs?: string;
+  profit?: string;
+  currentBalance?: string | null;
+
+  // V2 Cashflow Forecast
+  cashflowForecast?: CashflowForecastPoint[];
+
+  // V2 Top 5 Open Items
+  topReceivables?: OpenInvoiceItem[];
+  topPayables?: OpenInvoiceItem[];
+
+  // Period metadata
+  period?: DashboardPeriod;
+  periodFrom?: string;
+  periodTo?: string;
 }
 
 export interface ActivityItem {
