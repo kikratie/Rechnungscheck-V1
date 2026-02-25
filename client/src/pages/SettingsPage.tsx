@@ -16,7 +16,16 @@ import {
 import { downloadBlob } from '../api/exports';
 import { getMailStatusApi } from '../api/mail';
 import type { TenantProfile, BankAccountItem, BankAccountType } from '@buchungsai/shared';
-import { Mail, CheckCircle, AlertTriangle, Shield, Trash2, Download, UserPlus, X, Loader2 } from 'lucide-react';
+import { Mail, CheckCircle, AlertTriangle, Shield, Trash2, Download, UserPlus, X, Loader2, RefreshCw, Play, Pause, Plug, Plus } from 'lucide-react';
+import {
+  listEmailConnectorsApi,
+  createEmailConnectorApi,
+  updateEmailConnectorApi,
+  deleteEmailConnectorApi,
+  testEmailConnectorApi,
+  triggerSyncApi,
+} from '../api/emailConnectors';
+import type { EmailConnectorItem, CreateEmailConnectorRequest } from '@buchungsai/shared';
 
 const ACCOUNT_TYPE_LABELS: Record<BankAccountType, string> = {
   CHECKING: 'Girokonto',
@@ -541,6 +550,20 @@ export function SettingsPage() {
           </div>
         )}
 
+        {/* E-Mail-Abruf (only Admin) */}
+        {user?.role === 'ADMIN' && (
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Mail size={20} className="text-primary-600" />
+              E-Mail-Abruf
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Rechnungen automatisch aus einem E-Mail-Postfach abrufen. Unterstützt Gmail (App-Passwort), Outlook und jeden IMAP-Server.
+            </p>
+            <EmailConnectorsSection />
+          </div>
+        )}
+
         {/* DSGVO / Datenschutz */}
         <div className="card p-6">
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -550,6 +573,347 @@ export function SettingsPage() {
           <GdprSection isAdmin={user?.role === 'ADMIN'} />
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Email Connectors Section
+// ============================================================
+
+interface ConnectorFormData {
+  label: string;
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  password: string;
+  folder: string;
+  pollIntervalMinutes: number;
+}
+
+const emptyConnectorForm: ConnectorFormData = {
+  label: '',
+  host: '',
+  port: 993,
+  secure: true,
+  username: '',
+  password: '',
+  folder: 'INBOX',
+  pollIntervalMinutes: 5,
+};
+
+function EmailConnectorsSection() {
+  const queryClient = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<ConnectorFormData>(emptyConnectorForm);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const { data: connectors = [], isLoading } = useQuery({
+    queryKey: ['email-connectors'],
+    queryFn: listEmailConnectorsApi,
+    refetchInterval: 30_000, // Auto-refresh alle 30s für Sync-Status
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: CreateEmailConnectorRequest) => createEmailConnectorApi(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['email-connectors'] });
+      resetForm();
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      updateEmailConnectorApi(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['email-connectors'] });
+      resetForm();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteEmailConnectorApi,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['email-connectors'] }),
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: triggerSyncApi,
+    onSuccess: () => {
+      // Nach kurzem Delay erneut laden
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['email-connectors'] }), 2000);
+    },
+  });
+
+  const resetForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setForm(emptyConnectorForm);
+    setTestResult(null);
+  };
+
+  const startEdit = (c: EmailConnectorItem) => {
+    setEditingId(c.id);
+    setShowForm(true);
+    setForm({
+      label: c.label,
+      host: c.host,
+      port: c.port,
+      secure: c.secure,
+      username: c.username,
+      password: '', // Passwort nicht vorausfüllen
+      folder: c.folder,
+      pollIntervalMinutes: c.pollIntervalMinutes,
+    });
+    setTestResult(null);
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await testEmailConnectorApi({
+        host: form.host,
+        port: form.port,
+        secure: form.secure,
+        username: form.username,
+        password: form.password,
+      });
+      setTestResult(
+        result.success
+          ? { success: true, message: `Verbunden! ${result.messageCount ?? 0} Nachrichten im Postfach.` }
+          : { success: false, message: result.error ?? 'Verbindung fehlgeschlagen' },
+      );
+    } catch (err) {
+      setTestResult({ success: false, message: (err as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleSave = () => {
+    if (editingId) {
+      const data: Record<string, unknown> = {
+        label: form.label,
+        host: form.host,
+        port: form.port,
+        secure: form.secure,
+        username: form.username,
+        folder: form.folder,
+        pollIntervalMinutes: form.pollIntervalMinutes,
+      };
+      if (form.password) data.password = form.password;
+      updateMutation.mutate({ id: editingId, data });
+    } else {
+      createMutation.mutate(form);
+    }
+  };
+
+  const handleToggleActive = (c: EmailConnectorItem) => {
+    updateMutation.mutate({ id: c.id, data: { isActive: !c.isActive } });
+  };
+
+  const handleDelete = (c: EmailConnectorItem) => {
+    if (confirm(`E-Mail-Verbindung "${c.label}" wirklich löschen?`)) {
+      deleteMutation.mutate(c.id);
+    }
+  };
+
+  const formatRelativeTime = (isoDate: string | null) => {
+    if (!isoDate) return 'Noch nie';
+    const diff = Date.now() - new Date(isoDate).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Gerade eben';
+    if (mins < 60) return `vor ${mins} Min`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `vor ${hours} Std`;
+    return `vor ${Math.floor(hours / 24)} Tagen`;
+  };
+
+  const SyncStatusBadge = ({ connector }: { connector: EmailConnectorItem }) => {
+    if (!connector.lastSyncStatus) return <span className="text-xs text-gray-400">Ausstehend</span>;
+    switch (connector.lastSyncStatus) {
+      case 'SUCCESS':
+        return <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle size={12} /> {formatRelativeTime(connector.lastSyncAt)}</span>;
+      case 'RUNNING':
+        return <span className="text-xs text-blue-600 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Läuft...</span>;
+      case 'ERROR':
+        return (
+          <span className="text-xs text-red-600 flex items-center gap-1" title={connector.lastSyncError ?? ''}>
+            <AlertTriangle size={12} /> Fehler
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
+  if (isLoading) return <div className="text-sm text-gray-400">Laden...</div>;
+
+  return (
+    <div className="space-y-4">
+      {/* Connector-Liste */}
+      {connectors.length > 0 ? (
+        <div className="space-y-3">
+          {connectors.map((c) => (
+            <div key={c.id} className={`border rounded-lg p-4 ${!c.isActive ? 'opacity-60 bg-gray-50' : 'bg-white'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <Mail size={16} className={c.isActive ? 'text-primary-600' : 'text-gray-400'} />
+                    <span className="font-medium text-sm">{c.label}</span>
+                    {!c.isActive && <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">Deaktiviert</span>}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {c.username} @ {c.host}:{c.port} / {c.folder}
+                  </div>
+                  <div className="mt-1"><SyncStatusBadge connector={c} /></div>
+                  {c.consecutiveFailures >= 3 && (
+                    <div className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                      <AlertTriangle size={12} /> Nach {c.consecutiveFailures} Fehlern automatisch deaktiviert
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {c.isActive && (
+                    <button
+                      className="p-1.5 text-gray-400 hover:text-primary-600 rounded"
+                      title="Jetzt synchronisieren"
+                      onClick={() => syncMutation.mutate(c.id)}
+                      disabled={syncMutation.isPending}
+                    >
+                      <RefreshCw size={16} className={syncMutation.isPending ? 'animate-spin' : ''} />
+                    </button>
+                  )}
+                  <button
+                    className="p-1.5 text-gray-400 hover:text-gray-600 rounded"
+                    title={c.isActive ? 'Deaktivieren' : 'Aktivieren'}
+                    onClick={() => handleToggleActive(c)}
+                  >
+                    {c.isActive ? <Pause size={16} /> : <Play size={16} />}
+                  </button>
+                  <button
+                    className="p-1.5 text-gray-400 hover:text-primary-600 rounded"
+                    title="Bearbeiten"
+                    onClick={() => startEdit(c)}
+                  >
+                    <Plug size={16} />
+                  </button>
+                  <button
+                    className="p-1.5 text-gray-400 hover:text-red-600 rounded"
+                    title="Löschen"
+                    onClick={() => handleDelete(c)}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-gray-500">
+          Noch keine E-Mail-Verbindung eingerichtet. Verbinden Sie ein E-Mail-Konto, um Rechnungen automatisch abzurufen.
+        </p>
+      )}
+
+      {/* Add / Edit Form */}
+      {showForm ? (
+        <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
+          <h3 className="text-sm font-semibold">{editingId ? 'Verbindung bearbeiten' : 'Neue E-Mail-Verbindung'}</h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Bezeichnung</label>
+              <input className="input-field text-sm" placeholder="z.B. Rechnungen Gmail" value={form.label} onChange={(e) => setForm(f => ({ ...f, label: e.target.value }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">IMAP-Host</label>
+              <input className="input-field text-sm" placeholder="imap.gmail.com" value={form.host} onChange={(e) => setForm(f => ({ ...f, host: e.target.value }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Port</label>
+              <input type="number" className="input-field text-sm" value={form.port} onChange={(e) => setForm(f => ({ ...f, port: parseInt(e.target.value) || 993 }))} />
+            </div>
+            <div className="flex items-end gap-3">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={form.secure} onChange={(e) => setForm(f => ({ ...f, secure: e.target.checked }))} className="rounded" />
+                SSL/TLS
+              </label>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Benutzername / E-Mail</label>
+              <input className="input-field text-sm" placeholder="rechnung@firma.at" value={form.username} onChange={(e) => setForm(f => ({ ...f, username: e.target.value }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Passwort / App-Passwort
+                {editingId && <span className="text-gray-400 font-normal"> (leer lassen = unverändert)</span>}
+              </label>
+              <input type="password" className="input-field text-sm" placeholder="••••••••" value={form.password} onChange={(e) => setForm(f => ({ ...f, password: e.target.value }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">IMAP-Ordner</label>
+              <input className="input-field text-sm" placeholder="INBOX" value={form.folder} onChange={(e) => setForm(f => ({ ...f, folder: e.target.value }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Abruf-Intervall</label>
+              <select className="input-field text-sm" value={form.pollIntervalMinutes} onChange={(e) => setForm(f => ({ ...f, pollIntervalMinutes: parseInt(e.target.value) }))}>
+                <option value={1}>Jede Minute</option>
+                <option value={5}>Alle 5 Minuten</option>
+                <option value={15}>Alle 15 Minuten</option>
+                <option value={30}>Alle 30 Minuten</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Test Result */}
+          {testResult && (
+            <div className={`text-sm p-2 rounded ${testResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+              {testResult.success ? <CheckCircle size={14} className="inline mr-1" /> : <AlertTriangle size={14} className="inline mr-1" />}
+              {testResult.message}
+            </div>
+          )}
+
+          {/* Error */}
+          {(createMutation.error || updateMutation.error) && (
+            <div className="text-sm text-red-600">
+              {((createMutation.error || updateMutation.error) as Error).message}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-secondary text-sm flex items-center gap-1"
+              onClick={handleTest}
+              disabled={testing || !form.host || !form.username || !form.password}
+            >
+              {testing ? <Loader2 size={14} className="animate-spin" /> : <Plug size={14} />}
+              Verbindung testen
+            </button>
+            <button
+              className="btn-primary text-sm"
+              onClick={handleSave}
+              disabled={createMutation.isPending || updateMutation.isPending || !form.label || !form.host || !form.username || (!editingId && !form.password)}
+            >
+              {(createMutation.isPending || updateMutation.isPending) ? <Loader2 size={14} className="animate-spin inline mr-1" /> : null}
+              {editingId ? 'Speichern' : 'Erstellen'}
+            </button>
+            <button className="text-sm text-gray-500 hover:text-gray-700" onClick={resetForm}>
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          className="btn-secondary text-sm flex items-center gap-1"
+          onClick={() => { setShowForm(true); setEditingId(null); setForm(emptyConnectorForm); }}
+        >
+          <Plus size={14} /> E-Mail-Konto verbinden
+        </button>
+      )}
     </div>
   );
 }

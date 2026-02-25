@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listInvoicesApi, uploadInvoiceApi, deleteInvoiceApi } from '../api/invoices';
 import type { InvoiceListItem } from '@buchungsai/shared';
-import { Inbox, Upload, Download, Trash2, Loader2, FileText, AlertCircle, ArrowUpRight } from 'lucide-react';
+import { Inbox, Upload, Download, Trash2, Loader2, FileText, AlertCircle, ArrowUpRight, Mail } from 'lucide-react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import toast from 'react-hot-toast';
 
@@ -173,6 +173,11 @@ export function InboxPage() {
                     <span className="text-xs text-gray-400">
                       BEL-{inv.belegNr}
                     </span>
+                    {inv.ingestionChannel === 'EMAIL' && (
+                      <span className="text-xs text-purple-600 flex items-center gap-0.5" title={inv.emailSender ?? ''}>
+                        <Mail size={10} /> E-Mail
+                      </span>
+                    )}
                     {inv.grossAmount && (
                       <span className="text-xs text-gray-500">
                         {parseFloat(inv.grossAmount).toLocaleString('de-AT', { style: 'currency', currency: inv.currency || 'EUR' })}

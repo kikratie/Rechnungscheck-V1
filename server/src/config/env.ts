@@ -37,6 +37,9 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000),
   RATE_LIMIT_MAX: z.coerce.number().default(100),
 
+  // Encryption (required for email connector passwords)
+  ENCRYPTION_KEY: z.string().length(64).optional(), // 32 bytes as hex
+
   // SMTP (optional — email disabled if not set)
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(587),

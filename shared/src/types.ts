@@ -172,6 +172,8 @@ export interface InvoiceListItem {
   archivalNumber: string | null;
   archivalPrefix: string | null;
   archivedAt: string | null;
+  ingestionChannel: string;
+  emailSender: string | null;
   createdAt: string;
 }
 
@@ -602,4 +604,57 @@ export interface UserCompanyAccessItem {
   updatedAt: string;
   user?: { id: string; email: string; firstName: string; lastName: string };
   tenant?: { id: string; name: string; slug: string };
+}
+
+// ============================================================
+// Email Connector Types
+// ============================================================
+
+export interface EmailConnectorItem {
+  id: string;
+  tenantId: string;
+  label: string;
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  folder: string;
+  lastSyncAt: string | null;
+  lastSyncStatus: string | null;
+  lastSyncError: string | null;
+  consecutiveFailures: number;
+  pollIntervalMinutes: number;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateEmailConnectorRequest {
+  label: string;
+  host: string;
+  port?: number;
+  secure?: boolean;
+  username: string;
+  password: string;
+  folder?: string;
+  pollIntervalMinutes?: number;
+}
+
+export interface UpdateEmailConnectorRequest {
+  label?: string;
+  host?: string;
+  port?: number;
+  secure?: boolean;
+  username?: string;
+  password?: string;
+  folder?: string;
+  pollIntervalMinutes?: number;
+  isActive?: boolean;
+}
+
+export interface TestEmailConnectorRequest {
+  host: string;
+  port?: number;
+  secure?: boolean;
+  username: string;
+  password: string;
 }

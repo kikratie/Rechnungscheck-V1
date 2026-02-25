@@ -14,6 +14,7 @@ interface UploadParams {
   userId: string;
   file: Express.Multer.File;
   direction?: 'INCOMING' | 'OUTGOING';
+  ingestionChannel?: string;
 }
 
 interface UpdateExtractedDataParams {
@@ -62,7 +63,7 @@ interface CreateErsatzbelegParams {
 }
 
 export async function uploadInvoice(params: UploadParams) {
-  const { tenantId, userId, file, direction = 'INCOMING' } = params;
+  const { tenantId, userId, file, direction = 'INCOMING', ingestionChannel = 'UPLOAD' } = params;
 
   // Compute file hash
   const hash = crypto.createHash('sha256').update(file.buffer).digest('hex');
@@ -104,6 +105,7 @@ export async function uploadInvoice(params: UploadParams) {
           tenantId,
           belegNr: nextBelegNr,
           direction,
+          ingestionChannel,
           originalFileName: file.originalname,
           storagePath,
           storageHash: hash,

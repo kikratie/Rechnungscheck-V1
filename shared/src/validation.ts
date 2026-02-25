@@ -441,3 +441,38 @@ export const fullExportSchema = z.object({
 export const requestCorrectionSchema = z.object({
   note: z.string().min(1, 'Korrekturhinweis ist erforderlich').max(2000),
 });
+
+// ============================================================
+// Email Connector Schemas
+// ============================================================
+
+export const createEmailConnectorSchema = z.object({
+  label: z.string().min(1, 'Bezeichnung ist erforderlich').max(100),
+  host: z.string().min(1, 'IMAP-Host ist erforderlich').max(255),
+  port: z.coerce.number().min(1).max(65535).default(993),
+  secure: z.boolean().default(true),
+  username: z.string().min(1, 'Benutzername ist erforderlich').max(255),
+  password: z.string().min(1, 'Passwort ist erforderlich').max(500),
+  folder: z.string().max(255).default('INBOX'),
+  pollIntervalMinutes: z.coerce.number().min(1).max(60).default(5),
+});
+
+export const updateEmailConnectorSchema = z.object({
+  label: z.string().min(1).max(100).optional(),
+  host: z.string().min(1).max(255).optional(),
+  port: z.coerce.number().min(1).max(65535).optional(),
+  secure: z.boolean().optional(),
+  username: z.string().min(1).max(255).optional(),
+  password: z.string().min(1).max(500).optional(),
+  folder: z.string().max(255).optional(),
+  pollIntervalMinutes: z.coerce.number().min(1).max(60).optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const testEmailConnectorSchema = z.object({
+  host: z.string().min(1, 'IMAP-Host ist erforderlich').max(255),
+  port: z.coerce.number().min(1).max(65535).default(993),
+  secure: z.boolean().default(true),
+  username: z.string().min(1, 'Benutzername ist erforderlich').max(255),
+  password: z.string().min(1, 'Passwort ist erforderlich').max(500),
+});

@@ -80,6 +80,8 @@ router.get('/', async (req, res, next) => {
           archivalNumber: true,
           archivalPrefix: true,
           archivedAt: true,
+          ingestionChannel: true,
+          emailSender: true,
           createdAt: true,
         },
       }),

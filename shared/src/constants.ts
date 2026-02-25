@@ -244,3 +244,22 @@ export const ACCESS_LEVELS = {
   WRITE: { label: 'Schreibzugriff', description: 'Belege bearbeiten und archivieren' },
   ADMIN: { label: 'Vollzugriff', description: 'Wie Schreibzugriff + Benutzer verwalten' },
 } as const;
+
+// E-Mail-Connector Sync-Status
+export const EMAIL_CONNECTOR_SYNC_STATUS = {
+  SUCCESS: 'SUCCESS',
+  RUNNING: 'RUNNING',
+  ERROR: 'ERROR',
+} as const;
+
+// Maximale aufeinanderfolgende Fehler bevor Connector deaktiviert wird
+export const MAX_CONSECUTIVE_FAILURES = 3;
+
+// Erlaubte MIME-Types für E-Mail-Anhänge (= gleich wie Upload)
+export const ALLOWED_EMAIL_ATTACHMENT_MIMES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/tiff',
+  'image/webp',
+] as const;

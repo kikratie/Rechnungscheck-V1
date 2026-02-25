@@ -43,6 +43,7 @@ model Tenant {
   userCompanyAccess  UserCompanyAccess[]
   accounts           Account[]
   transactionBookings TransactionBooking[]
+  emailConnectors    EmailConnector[]
 
   @@map("tenants")
 }
@@ -217,6 +218,11 @@ model Invoice {
   correctionRequestedAt DateTime?
   correctionNote        String?
 
+  // E-Mail-Eingang (wenn ingestionChannel = EMAIL)
+  emailSender    String?   // Absender-Adresse
+  emailSubject   String?   // Betreff der E-Mail
+  emailMessageId String?   // RFC 2822 Message-ID für Deduplizierung
+
   // Workflow
   isLocked       Boolean   @default(false)
   lockedAt       DateTime?
@@ -259,6 +265,7 @@ model Invoice {
   @@index([storageHash])
   @@index([vendorId])
   @@index([customerId])
+  @@index([tenantId, emailMessageId])
   @@map("invoices")
 }
 
@@ -865,6 +872,45 @@ enum BookingType {
 enum AccountingType {
   EA       // Einnahmen-Ausgaben-Rechner (Einzelunternehmer)
   ACCRUAL  // Bilanzierer (GmbH, doppelte Buchführung)
+}
+
+// ============================================================
+// EMAIL CONNECTORS
+// ============================================================
+
+model EmailConnector {
+  id        String   @id @default(uuid())
+  tenantId  String
+
+  label             String          // z.B. "Rechnungen Gmail"
+  host              String          // IMAP Host: imap.gmail.com
+  port              Int    @default(993)
+  secure            Boolean @default(true)  // TLS
+  username          String          // IMAP-Benutzername (E-Mail)
+  passwordEncrypted String          // AES-256-GCM verschlüsselt
+  folder            String @default("INBOX") // IMAP-Ordner
+
+  // Sync-Status
+  lastSyncedUid       Int?            // Höchste erfolgreich verarbeitete UID
+  lastSyncAt          DateTime?
+  lastSyncStatus      String?         // SUCCESS, RUNNING, ERROR
+  lastSyncError       String?
+  consecutiveFailures Int @default(0)
+
+  // Einstellungen
+  pollIntervalMinutes Int @default(5)
+  isActive            Boolean @default(true)
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, username])
+  @@index([tenantId])
+  @@index([isActive])
+  @@map("email_connectors")
 }
 
 // ============================================================

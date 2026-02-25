@@ -4,7 +4,10 @@ import { env } from './config/env.js';
 import { prisma } from './config/database.js';
 import { ensureBucket } from './services/storage.service.js';
 import { createInvoiceWorker } from './jobs/queue.js';
+import { createEmailSyncWorker } from './jobs/emailSyncQueue.js';
 import { processInvoiceJob } from './jobs/invoiceProcessor.job.js';
+import { syncEmailConnector } from './services/emailSync.service.js';
+import { registerAllActiveConnectors } from './services/emailConnector.service.js';
 import { archiveInvoice } from './services/archival.service.js';
 
 /**
@@ -92,6 +95,22 @@ async function main() {
   });
   console.log('Invoice-Processing Worker gestartet');
 
+  // Email-Sync Worker starten
+  const emailSyncWorker = createEmailSyncWorker(async (job) => {
+    if (job.name === 'sync-connector') {
+      const { connectorId } = job.data;
+      await syncEmailConnector(connectorId);
+    }
+  });
+  console.log('Email-Sync Worker gestartet');
+
+  // Aktive E-Mail-Connectors registrieren
+  try {
+    await registerAllActiveConnectors();
+  } catch (err) {
+    console.warn('[EmailSync] Fehler beim Registrieren der Connectors:', (err as Error).message);
+  }
+
   // Server starten
   app.listen(env.PORT, () => {
     console.log(`\nBuchungsAI Server läuft auf http://localhost:${env.PORT}`);
@@ -103,6 +122,7 @@ async function main() {
   async function shutdown() {
     console.log('\nServer wird heruntergefahren...');
     await worker.close();
+    await emailSyncWorker.close();
     await prisma.$disconnect();
     process.exit(0);
   }
