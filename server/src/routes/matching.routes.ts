@@ -3,9 +3,10 @@ import { authenticate } from '../middleware/auth.js';
 import { requireTenant } from '../middleware/tenantContext.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
-import { manualMatchingSchema, updatePaymentDifferenceSchema } from '@buchungsai/shared';
+import { manualMatchingSchema, updatePaymentDifferenceSchema, createTransactionBookingSchema } from '@buchungsai/shared';
 import { validateBody } from '../middleware/validate.js';
 import * as matchingService from '../services/matching.service.js';
+import * as transactionBookingService from '../services/transactionBooking.service.js';
 
 const router = Router();
 
@@ -176,6 +177,48 @@ router.delete('/:id', async (req, res, next) => {
 
     await matchingService.deleteMatching(tenantId, userId, req.params.id);
 
+    res.json({ success: true, data: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================
+// Transaction Bookings (Privatentnahme / Privateinlage)
+// ============================================================
+
+// POST /api/v1/matchings/bookings — Create private withdrawal/deposit
+router.post('/bookings', validateBody(createTransactionBookingSchema), async (req, res, next) => {
+  try {
+    const booking = await transactionBookingService.createTransactionBooking(
+      req.tenantId!,
+      req.userId!,
+      req.body,
+    );
+    res.status(201).json({ success: true, data: booking });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/matchings/bookings — List all transaction bookings
+router.get('/bookings', async (req, res, next) => {
+  try {
+    const bookings = await transactionBookingService.listTransactionBookings(req.tenantId!);
+    res.json({ success: true, data: bookings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/v1/matchings/bookings/:id — Delete a transaction booking
+router.delete('/bookings/:id', async (req, res, next) => {
+  try {
+    await transactionBookingService.deleteTransactionBooking(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+    );
     res.json({ success: true, data: null });
   } catch (err) {
     next(err);

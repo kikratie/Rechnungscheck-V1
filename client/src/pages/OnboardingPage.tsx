@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { completeOnboardingApi } from '../api/tenant';
+import { ACCOUNTING_TYPES } from '@buchungsai/shared';
+import type { AccountingTypeValue } from '@buchungsai/shared';
 
 export function OnboardingPage() {
   const navigate = useNavigate();
@@ -17,6 +19,7 @@ export function OnboardingPage() {
     zip: '',
     city: '',
     country: 'AT',
+    accountingType: (user?.accountingType || 'EA') as AccountingTypeValue,
     // Bank account fields (will create first BankAccount)
     bankLabel: 'Geschäftskonto',
     iban: '',
@@ -61,6 +64,7 @@ export function OnboardingPage() {
         country: form.country || 'AT',
         phone: form.phone || null,
         email: form.email || null,
+        accountingType: form.accountingType,
         bankAccount,
       });
 
@@ -135,6 +139,37 @@ export function OnboardingPage() {
                   Format: ATU + 8 Ziffern. Wird für die Aussteller-Empfänger-Prüfung verwendet.
                 </p>
               </div>
+            </div>
+          </div>
+
+          {/* Buchhaltungsart */}
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold mb-4">Buchhaltungsart</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Bestimmt, welche Funktionen und Exporte verfügbar sind.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {(Object.entries(ACCOUNTING_TYPES) as [AccountingTypeValue, { label: string; description: string }][]).map(([key, val]) => (
+                <label
+                  key={key}
+                  className={`flex flex-col p-4 rounded-lg border-2 cursor-pointer transition-colors ${
+                    form.accountingType === key
+                      ? 'border-primary-500 bg-primary-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="accountingType"
+                    value={key}
+                    checked={form.accountingType === key}
+                    onChange={() => updateField('accountingType', key)}
+                    className="sr-only"
+                  />
+                  <span className="font-medium">{val.label}</span>
+                  <span className="text-sm text-gray-500 mt-1">{val.description}</span>
+                </label>
+              ))}
             </div>
           </div>
 

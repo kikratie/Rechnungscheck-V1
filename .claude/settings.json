@@ -5,7 +5,8 @@
       "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 3001 2>$null | Select-Object OwningProcess -Unique\")",
       "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | Select-Object OwningProcess -Unique\")",
       "Bash(npx prisma migrate resolve --rolled-back 20260225080000_steuerberater_feedback --schema ../prisma/schema.prisma)",
-      "Bash(timeout 15 bash -c ':*)"
+      "Bash(timeout 15 bash -c ':*)",
+      "Bash(npx prisma migrate diff --from-migrations ../prisma/migrations --to-schema-datamodel ../prisma/schema.prisma --shadow-database-url \"postgresql://postgres:postgres@localhost:5432/buchungsai_shadow\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\josef\\OneDrive - ProAgentur GmbH\\CODE\\Rechnungscheck V1\\prisma\\migrations"

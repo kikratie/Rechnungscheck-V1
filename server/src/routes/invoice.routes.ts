@@ -5,7 +5,7 @@ import { validateBody } from '../middleware/validate.js';
 import { invoiceUpload } from '../middleware/upload.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
-import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, createEigenbelegSchema, batchApproveSchema, cancelNumberSchema, parkInvoiceSchema } from '@buchungsai/shared';
+import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, createEigenbelegSchema, batchApproveSchema, cancelNumberSchema, parkInvoiceSchema, cashPaymentSchema, requestCorrectionSchema } from '@buchungsai/shared';
 import * as invoiceService from '../services/invoice.service.js';
 import { cancelArchivalNumber } from '../services/archival.service.js';
 import * as storageService from '../services/storage.service.js';
@@ -25,7 +25,10 @@ router.get('/', async (req, res, next) => {
     const where: Record<string, unknown> = { tenantId };
 
     if (req.query.direction) where.direction = req.query.direction;
-    if (req.query.processingStatus) where.processingStatus = req.query.processingStatus;
+    if (req.query.processingStatus) {
+      const statuses = (req.query.processingStatus as string).split(',');
+      where.processingStatus = statuses.length === 1 ? statuses[0] : { in: statuses };
+    }
     if (req.query.validationStatus) where.validationStatus = req.query.validationStatus;
     if (req.query.vendorName) where.vendorName = { contains: req.query.vendorName, mode: 'insensitive' };
     if (req.query.search) {
@@ -294,6 +297,21 @@ router.post('/:id/unpark', async (req, res, next) => {
   }
 });
 
+// POST /api/v1/invoices/:id/request-correction — Request corrected invoice from supplier
+router.post('/:id/request-correction', validateBody(requestCorrectionSchema), async (req, res, next) => {
+  try {
+    const invoice = await invoiceService.requestCorrection(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+      req.body.note as string,
+    );
+    res.json({ success: true, data: invoice });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/v1/invoices/:id/ersatzbeleg — Create replacement receipt
 router.post('/:id/ersatzbeleg', validateBody(createErsatzbelegSchema), async (req, res, next) => {
   try {
@@ -391,6 +409,35 @@ router.post('/:id/cancel-number', validateBody(cancelNumberSchema), async (req, 
       req.body.reason as string,
     );
     res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/cash-payment — Mark invoice as cash-paid
+router.post('/:id/cash-payment', validateBody(cashPaymentSchema), async (req, res, next) => {
+  try {
+    const invoice = await invoiceService.markCashPayment(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+      req.body.paymentDate as string,
+    );
+    res.json({ success: true, data: invoice });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/undo-cash-payment — Undo cash payment
+router.post('/:id/undo-cash-payment', async (req, res, next) => {
+  try {
+    const invoice = await invoiceService.undoCashPayment(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+    );
+    res.json({ success: true, data: invoice });
   } catch (err) {
     next(err);
   }

@@ -5,6 +5,7 @@ import { exportBmdCsvApi, exportMonthlyReportApi, exportFullApi, downloadBlob } 
 import type { InvoiceListItem } from '@buchungsai/shared';
 import { Download, FileText, CheckCircle, Loader2, FileArchive, BarChart3 } from 'lucide-react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useAccountingType } from '../hooks/useAccountingType';
 
 export function ExportPage() {
   const { data } = useQuery({
@@ -13,6 +14,7 @@ export function ExportPage() {
   });
 
   const isMobile = useIsMobile();
+  const accountingType = useAccountingType();
   const exportable = (data?.data ?? []) as InvoiceListItem[];
   const exportedQuery = useQuery({
     queryKey: ['invoices-exported'],
@@ -115,9 +117,9 @@ export function ExportPage() {
       </div>
 
       {/* Export Sections */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        {/* BMD CSV Export */}
-        <div className="card p-6">
+      <div className={`grid grid-cols-1 ${accountingType === 'ACCRUAL' ? 'lg:grid-cols-3' : 'lg:grid-cols-2'} gap-6 mb-8`}>
+        {/* BMD CSV Export — only for ACCRUAL */}
+        {accountingType === 'ACCRUAL' && <div className="card p-6">
           <div className="flex items-center gap-2 mb-4">
             <FileText className="text-blue-600" size={20} />
             <h3 className="font-semibold">BMD CSV-Export</h3>
@@ -151,7 +153,7 @@ export function ExportPage() {
               BMD-Export starten
             </button>
           </div>
-        </div>
+        </div>}
 
         {/* Monthly Report PDF */}
         <div className="card p-6">

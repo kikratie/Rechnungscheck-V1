@@ -5,7 +5,7 @@
 import { Decimal } from '@prisma/client/runtime/library';
 import { prisma } from '../config/database.js';
 import { writeAuditLog } from '../middleware/auditLogger.js';
-import { BMD_TAX_CODES } from '@buchungsai/shared';
+import { BMD_TAX_CODES, PAYMENT_METHODS, BOOKING_TYPES } from '@buchungsai/shared';
 import * as storageService from './storage.service.js';
 
 // ============================================================
@@ -46,13 +46,31 @@ export async function generateBmdCsv(options: BmdExportOptions): Promise<Buffer>
         orderBy: { version: 'desc' },
         take: 1,
       },
+      customer: {
+        select: { uid: true },
+      },
     },
+  });
+
+  // Fetch transaction bookings for the same period (Privatentnahme/Privateinlage)
+  const bookingWhere: Record<string, unknown> = { tenantId };
+  if (dateFrom || dateTo) {
+    bookingWhere.transaction = { transactionDate: {} };
+    if (dateFrom) (bookingWhere.transaction as Record<string, Record<string, unknown>>).transactionDate.gte = new Date(dateFrom);
+    if (dateTo) (bookingWhere.transaction as Record<string, Record<string, unknown>>).transactionDate.lte = new Date(dateTo);
+  }
+  const bookings = await prisma.transactionBooking.findMany({
+    where: bookingWhere,
+    include: {
+      transaction: { select: { transactionDate: true, counterpartName: true, reference: true } },
+    },
+    orderBy: { confirmedAt: 'asc' },
   });
 
   // BMD CSV Header
   const headers = [
     'Belegart', 'Belegnummer', 'Datum', 'Konto', 'Gegenkonto',
-    'Betrag', 'Steuercode', 'Text', 'Lieferant', 'UID', 'Leistungsart',
+    'Betrag', 'Steuercode', 'Text', 'Lieferant', 'UID', 'Leistungsart', 'Privatanteil',
   ];
 
   const rows: string[][] = [headers];
@@ -60,24 +78,70 @@ export async function generateBmdCsv(options: BmdExportOptions): Promise<Buffer>
   for (const inv of invoices) {
     const ed = inv.extractedData[0];
     const invoiceDate = inv.invoiceDate ? formatDateBmd(inv.invoiceDate) : '';
-    const grossAmount = inv.grossAmount ? formatDecimalBmd(new Decimal(inv.grossAmount)) : '0,00';
+
+    // Privatanteil: businessFraction = (100 - privatePercent) / 100
+    const privatePercent = inv.privatePercent ?? 0;
+    const businessFraction = privatePercent > 0 ? (100 - privatePercent) / 100 : 1;
+
+    const rawGross = inv.grossAmount ? new Decimal(inv.grossAmount).toNumber() : 0;
+    const exportGross = rawGross * businessFraction;
+    const grossAmount = formatDecimalBmd(new Decimal(exportGross));
+
     const vatRate = inv.vatRate ? new Decimal(inv.vatRate).toNumber() : 20;
     const taxCode = BMD_TAX_CODES[vatRate] || 'V20';
     const direction = inv.direction === 'INCOMING' ? 'ER' : 'AR';
     const serviceType = ed?.serviceType || '';
+
+    // Gegenkonto: CASH → 2700 (Kassa), BANK → 2800 (Bank)
+    const paymentMethod = (inv.paymentMethod || 'BANK') as keyof typeof PAYMENT_METHODS;
+    const gegenkonto = PAYMENT_METHODS[paymentMethod]?.gegenkontoDefault || '2800';
+
+    // For OUTGOING: use customer info; for INCOMING: use vendor info
+    const partnerName = inv.direction === 'OUTGOING'
+      ? (inv.customerName || inv.vendorName || '')
+      : (inv.vendorName || '');
+    const partnerUid = inv.direction === 'OUTGOING'
+      ? (inv.customer?.uid || '')
+      : (inv.vendorUid || '');
 
     rows.push([
       direction,
       inv.archivalNumber || '',
       invoiceDate,
       inv.accountNumber || '',
-      '', // Gegenkonto
+      gegenkonto,
       grossAmount,
       taxCode,
-      inv.vendorName || inv.customerName || '',
-      inv.vendorName || '',
-      inv.vendorUid || '',
+      partnerName,
+      partnerName,
+      partnerUid,
       serviceType,
+      privatePercent > 0 ? `${privatePercent}%` : '',
+    ]);
+  }
+
+  // TransactionBookings (Privatentnahme/Privateinlage) als eigene Zeilen
+  for (const booking of bookings) {
+    const bookingDate = booking.transaction.transactionDate
+      ? formatDateBmd(booking.transaction.transactionDate)
+      : '';
+    const bookingAmount = formatDecimalBmd(new Decimal(booking.amount));
+    const bookingTypeKey = booking.bookingType as keyof typeof BOOKING_TYPES;
+    const label = BOOKING_TYPES[bookingTypeKey]?.label || booking.bookingType;
+
+    rows.push([
+      'SO',  // Sonstige Buchung
+      '',
+      bookingDate,
+      booking.accountNumber,  // 9600 or 9610
+      '2800',                 // Gegenkonto Bank
+      bookingAmount,
+      '',                     // kein Steuercode
+      `${label}${booking.notes ? ': ' + booking.notes : ''}`,
+      booking.transaction.counterpartName || '',
+      '',
+      '',
+      '',
     ]);
   }
 
@@ -101,7 +165,7 @@ export async function generateBmdCsv(options: BmdExportOptions): Promise<Buffer>
     entityType: 'Export',
     entityId: 'bmd-csv',
     action: 'BMD_CSV_EXPORT',
-    newData: { invoiceCount: invoices.length, dateFrom, dateTo },
+    newData: { invoiceCount: invoices.length, bookingCount: bookings.length, dateFrom, dateTo },
   });
 
   // Encode as ISO-8859-1 (Latin-1) for BMD compatibility
@@ -145,6 +209,7 @@ export async function generateFullExport(
       archivedStoragePath: true,
       archivedFileName: true,
       invoiceDate: true,
+      direction: true,
     },
   });
 
@@ -170,8 +235,9 @@ export async function generateFullExport(
     const addFilesAsync = async () => {
       // Generate summary CSV
       const summaryRows = [
-        ['Belegnummer', 'Datum', 'Dateiname'].join(';'),
+        ['Typ', 'Belegnummer', 'Datum', 'Dateiname'].join(';'),
         ...invoices.map(inv => [
+          inv.direction === 'OUTGOING' ? 'AR' : 'ER',
           inv.archivalNumber || '',
           inv.invoiceDate ? formatDateBmd(inv.invoiceDate) : '',
           inv.archivedFileName || '',
@@ -179,15 +245,16 @@ export async function generateFullExport(
       ];
       archive.append(summaryRows.join('\r\n'), { name: 'summary.csv' });
 
-      // Add archived PDFs
+      // Add archived PDFs — organized by direction/month
       for (const inv of invoices) {
         if (!inv.archivedStoragePath) continue;
         try {
           const fileBuffer = await storageService.downloadFile(inv.archivedStoragePath);
+          const dirPrefix = inv.direction === 'OUTGOING' ? 'AR-Ausgang' : 'ER-Eingang';
           const month = inv.invoiceDate
             ? `${inv.invoiceDate.getFullYear()}-${String(inv.invoiceDate.getMonth() + 1).padStart(2, '0')}`
             : 'ohne-datum';
-          archive.append(fileBuffer, { name: `${month}/${inv.archivedFileName || inv.archivalNumber + '.pdf'}` });
+          archive.append(fileBuffer, { name: `${dirPrefix}/${month}/${inv.archivedFileName || inv.archivalNumber + '.pdf'}` });
         } catch (err) {
           console.warn(`[Export] Datei nicht gefunden: ${inv.archivedStoragePath}`, err);
         }
@@ -198,6 +265,102 @@ export async function generateFullExport(
 
     addFilesAsync().catch(reject);
   });
+}
+
+// ============================================================
+// OCR Check CSV Export
+// ============================================================
+
+interface OcrCheckExportOptions {
+  tenantId: string;
+  userId: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+/**
+ * Generates a CSV for OCR quality checking — includes extracted data + confidence scores.
+ */
+export async function generateOcrCheckCsv(options: OcrCheckExportOptions): Promise<Buffer> {
+  const { tenantId, userId, dateFrom, dateTo } = options;
+
+  const where: Record<string, unknown> = {
+    tenantId,
+    processingStatus: { notIn: ['INBOX'] },
+  };
+
+  if (dateFrom || dateTo) {
+    where.createdAt = {};
+    if (dateFrom) (where.createdAt as Record<string, unknown>).gte = new Date(dateFrom);
+    if (dateTo) (where.createdAt as Record<string, unknown>).lte = new Date(dateTo);
+  }
+
+  const invoices = await prisma.invoice.findMany({
+    where,
+    orderBy: { belegNr: 'asc' },
+    include: {
+      extractedData: {
+        orderBy: { version: 'desc' },
+        take: 1,
+      },
+    },
+  });
+
+  const headers = [
+    'InvoiceID', 'BelegNr', 'ArchivalNumber', 'IssuerName', 'InvoiceNumber',
+    'InvoiceDate', 'NetAmount', 'VatAmount', 'GrossAmount', 'VatRate',
+    'Currency', 'Source', 'PipelineStage',
+    'Conf_IssuerName', 'Conf_InvoiceNumber', 'Conf_InvoiceDate',
+    'Conf_NetAmount', 'Conf_VatAmount', 'Conf_GrossAmount',
+    'ProcessingStatus', 'ValidationStatus',
+  ];
+
+  const rows: string[][] = [headers];
+
+  for (const inv of invoices) {
+    const ed = inv.extractedData[0];
+    const conf = (ed?.confidenceScores as Record<string, number> | null) || {};
+
+    rows.push([
+      inv.id,
+      String(inv.belegNr),
+      inv.archivalNumber || '',
+      ed?.issuerName || inv.vendorName || '',
+      ed?.invoiceNumber || inv.invoiceNumber || '',
+      inv.invoiceDate ? formatDateBmd(inv.invoiceDate) : '',
+      ed?.netAmount ? new Decimal(ed.netAmount).toFixed(2) : '',
+      ed?.vatAmount ? new Decimal(ed.vatAmount).toFixed(2) : '',
+      inv.grossAmount ? new Decimal(inv.grossAmount).toFixed(2) : '',
+      inv.vatRate ? new Decimal(inv.vatRate).toFixed(1) : '',
+      inv.currency || 'EUR',
+      ed?.source || '',
+      ed?.pipelineStage || '',
+      conf.issuerName != null ? conf.issuerName.toFixed(4) : '',
+      conf.invoiceNumber != null ? conf.invoiceNumber.toFixed(4) : '',
+      conf.invoiceDate != null ? conf.invoiceDate.toFixed(4) : '',
+      conf.netAmount != null ? conf.netAmount.toFixed(4) : '',
+      conf.vatAmount != null ? conf.vatAmount.toFixed(4) : '',
+      conf.grossAmount != null ? conf.grossAmount.toFixed(4) : '',
+      inv.processingStatus,
+      inv.validationStatus,
+    ]);
+  }
+
+  const csvContent = rows.map(row =>
+    row.map(cell => `"${(cell || '').replace(/"/g, '""')}"`).join(';'),
+  ).join('\r\n');
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Export',
+    entityId: 'ocr-check',
+    action: 'OCR_CHECK_EXPORT',
+    newData: { invoiceCount: invoices.length, dateFrom, dateTo },
+  });
+
+  const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
+  return Buffer.concat([bom, Buffer.from(csvContent)]);
 }
 
 // ============================================================

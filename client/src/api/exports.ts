@@ -21,6 +21,13 @@ export async function exportFullApi(year?: number) {
   return response.data as Blob;
 }
 
+export async function exportOcrCheckApi(dateFrom?: string, dateTo?: string) {
+  const response = await apiClient.post('/exports/ocr-check', { dateFrom, dateTo }, {
+    responseType: 'blob',
+  });
+  return response.data as Blob;
+}
+
 /** Helper: trigger download of a Blob */
 export function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);

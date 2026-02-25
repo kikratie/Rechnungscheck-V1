@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { registerApi } from '../api/auth';
+import { ACCOUNTING_TYPES } from '@buchungsai/shared';
+import type { AccountingTypeValue } from '@buchungsai/shared';
 import toast from 'react-hot-toast';
 
 export function RegisterPage() {
@@ -15,6 +17,7 @@ export function RegisterPage() {
     email: '',
     password: '',
     passwordConfirm: '',
+    accountingType: 'EA' as AccountingTypeValue,
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -34,6 +37,7 @@ export function RegisterPage() {
         password: form.password,
         firstName: form.firstName,
         lastName: form.lastName,
+        accountingType: form.accountingType,
       });
       setAuth(user, tokens.accessToken, tokens.refreshToken);
       toast.success('Konto erfolgreich erstellt!');
@@ -76,6 +80,35 @@ export function RegisterPage() {
                 placeholder="Meine Firma GmbH"
                 required
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Buchhaltungsart
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {(Object.entries(ACCOUNTING_TYPES) as [AccountingTypeValue, { label: string; description: string }][]).map(([key, val]) => (
+                  <label
+                    key={key}
+                    className={`flex flex-col p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                      form.accountingType === key
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="accountingType"
+                      value={key}
+                      checked={form.accountingType === key}
+                      onChange={() => update('accountingType', key)}
+                      className="sr-only"
+                    />
+                    <span className="text-sm font-medium">{val.label}</span>
+                    <span className="text-xs text-gray-500 mt-0.5">{val.description}</span>
+                  </label>
+                ))}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

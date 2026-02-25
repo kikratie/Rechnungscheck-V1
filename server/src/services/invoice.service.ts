@@ -204,6 +204,14 @@ export async function updateExtractedData(params: UpdateExtractedDataParams) {
     },
   });
 
+  // Sync privatePercent to invoice if provided
+  if (data.privatePercent !== undefined) {
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { privatePercent: data.privatePercent as number | null },
+    });
+  }
+
   // Re-validate + sync (zentrale Funktion für alle Pfade)
   await runValidationAndSync({
     invoiceId,
@@ -212,6 +220,14 @@ export async function updateExtractedData(params: UpdateExtractedDataParams) {
     extractedDataVersion: newVersion,
     direction: (invoice.direction as 'INCOMING' | 'OUTGOING') || 'INCOMING',
   });
+
+  // Vendor Default Account: wenn User accountNumber ändert und Vendor bekannt ist → lernen
+  if (data.accountNumber && invoice.vendorId) {
+    await prisma.vendor.update({
+      where: { id: invoice.vendorId },
+      data: { defaultAccountNumber: data.accountNumber as string },
+    });
+  }
 
   // Audit log
   writeAuditLog({
@@ -627,7 +643,7 @@ export async function parkInvoice(tenantId: string, userId: string, invoiceId: s
   }
 
   // Only parkable from certain statuses
-  const parkableStatuses = ['UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'ERROR'];
+  const parkableStatuses = ['INBOX', 'UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'PENDING_CORRECTION', 'ERROR'];
   if (!parkableStatuses.includes(invoice.processingStatus)) {
     throw new ConflictError(
       `Rechnung mit Status "${invoice.processingStatus}" kann nicht geparkt werden.`,
@@ -711,6 +727,94 @@ export async function getInvoiceVersions(tenantId: string, invoiceId: string) {
     where: { invoiceId },
     orderBy: { version: 'desc' },
   });
+}
+
+// ============================================================
+// Barzahlung (Cash Payment)
+// ============================================================
+
+const CASH_PAYABLE_STATUSES = ['PROCESSED', 'REVIEW_REQUIRED', 'ARCHIVED'] as const;
+
+export async function markCashPayment(
+  tenantId: string,
+  userId: string,
+  invoiceId: string,
+  paymentDate: string,
+) {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, tenantId },
+  });
+  if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
+
+  if (!CASH_PAYABLE_STATUSES.includes(invoice.processingStatus as typeof CASH_PAYABLE_STATUSES[number])) {
+    throw new ConflictError(
+      `Rechnung mit Status "${invoice.processingStatus}" kann nicht als bar bezahlt markiert werden.`,
+    );
+  }
+
+  if (invoice.paymentMethod === 'CASH') {
+    throw new ConflictError('Rechnung ist bereits als bar bezahlt markiert.');
+  }
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      paymentMethod: 'CASH',
+      cashPaymentDate: new Date(paymentDate),
+      cashConfirmedByUserId: userId,
+      processingStatus: 'RECONCILED',
+    },
+  });
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Invoice',
+    entityId: invoiceId,
+    action: 'CASH_PAYMENT',
+    newData: { paymentDate, previousStatus: invoice.processingStatus },
+  });
+
+  return updated;
+}
+
+export async function undoCashPayment(
+  tenantId: string,
+  userId: string,
+  invoiceId: string,
+) {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, tenantId },
+  });
+  if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
+
+  if (invoice.paymentMethod !== 'CASH') {
+    throw new ConflictError('Rechnung ist nicht als bar bezahlt markiert.');
+  }
+
+  // Determine restore status: if archived → ARCHIVED, else → PROCESSED
+  const restoredStatus = invoice.isLocked ? 'ARCHIVED' : 'PROCESSED';
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      paymentMethod: 'BANK',
+      cashPaymentDate: null,
+      cashConfirmedByUserId: null,
+      processingStatus: restoredStatus,
+    },
+  });
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Invoice',
+    entityId: invoiceId,
+    action: 'UNDO_CASH_PAYMENT',
+    newData: { restoredStatus },
+  });
+
+  return updated;
 }
 
 const NON_DELETABLE_STATUSES = ['ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED'] as const;
@@ -871,21 +975,34 @@ export async function runValidationAndSync(params: {
     validationOutput.overallStatus === 'GREEN' ? 'VALID' :
     validationOutput.overallStatus === 'YELLOW' ? 'WARNING' : 'INVALID';
 
-  // 4a. Check if vendor is TRUSTED → auto-approve GREEN invoices
-  let autoApprove = false;
-  if (validationOutput.overallStatus === 'GREEN') {
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: invoiceId },
-      select: { vendorId: true, processingStatus: true },
+  // 4a. Vendor Default Account: wenn Vendor erkannt und defaultAccountNumber gesetzt → auto-assign
+  const currentInvoice = await prisma.invoice.findUnique({
+    where: { id: invoiceId },
+    select: { vendorId: true, processingStatus: true, accountNumber: true },
+  });
+  if (currentInvoice?.vendorId && !extracted.accountNumber) {
+    const vendor = await prisma.vendor.findUnique({
+      where: { id: currentInvoice.vendorId },
+      select: { defaultAccountNumber: true, trustLevel: true },
     });
-    if (invoice?.vendorId) {
-      const vendor = await prisma.vendor.findUnique({
-        where: { id: invoice.vendorId },
-        select: { trustLevel: true },
+    if (vendor?.defaultAccountNumber) {
+      // Auto-assign account number from vendor default
+      await prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { accountNumber: vendor.defaultAccountNumber },
       });
-      if (vendor?.trustLevel === 'TRUSTED') {
-        autoApprove = true;
-      }
+    }
+  }
+
+  // 4b. Check if vendor is TRUSTED → auto-approve GREEN invoices
+  let autoApprove = false;
+  if (validationOutput.overallStatus === 'GREEN' && currentInvoice?.vendorId) {
+    const vendor = await prisma.vendor.findUnique({
+      where: { id: currentInvoice.vendorId },
+      select: { trustLevel: true },
+    });
+    if (vendor?.trustLevel === 'TRUSTED') {
+      autoApprove = true;
     }
   }
 
@@ -937,7 +1054,7 @@ export async function runValidationAndSync(params: {
     },
   });
 
-  // 4b. Auto-approve for TRUSTED vendors: enqueue archival job
+  // 4c. Auto-approve for TRUSTED vendors: enqueue archival job
   if (autoApprove) {
     invoiceQueue.add('archive-invoice', { invoiceId, tenantId }, {
       attempts: 2,
@@ -954,4 +1071,42 @@ export async function runValidationAndSync(params: {
   }
 
   return validationOutput;
+}
+
+// ============================================================
+// CORRECTION REQUEST (PENDING_CORRECTION workflow)
+// ============================================================
+
+export async function requestCorrection(tenantId: string, userId: string, invoiceId: string, note: string) {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, tenantId },
+  });
+  if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
+
+  const allowedStatuses = ['PROCESSED', 'REVIEW_REQUIRED'];
+  if (!allowedStatuses.includes(invoice.processingStatus)) {
+    throw new ConflictError(
+      `Korrekturanfrage nur möglich für Status PROCESSED/REVIEW_REQUIRED, aktuell: ${invoice.processingStatus}`,
+    );
+  }
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      processingStatus: 'PENDING_CORRECTION',
+      correctionRequestedAt: new Date(),
+      correctionNote: note,
+    },
+  });
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Invoice',
+    entityId: invoiceId,
+    action: 'REQUEST_CORRECTION',
+    newData: { note },
+  });
+
+  return updated;
 }

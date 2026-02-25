@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getMonthlyReconciliationApi, runMatchingApi, confirmMatchingApi, rejectMatchingApi,
   deleteMatchingApi, createManualMatchingApi, listMatchingsApi, updatePaymentDifferenceApi,
+  createTransactionBookingApi,
 } from '../api/matchings';
 import { listBankStatementsApi, getBankStatementApi } from '../api/bankStatements';
 import { apiClient } from '../api/client';
@@ -13,7 +14,7 @@ import type {
 import {
   ArrowLeftRight, Loader2, CheckCircle, Clock, FileText, Building2,
   Check, X, RefreshCw, Plus, Trash2, ChevronLeft, ChevronRight,
-  TrendingUp, TrendingDown, AlertTriangle, Receipt, ChevronDown, Upload, FilePlus2,
+  TrendingUp, TrendingDown, AlertTriangle, Receipt, ChevronDown, Upload, FilePlus2, Wallet,
 } from 'lucide-react';
 import { InvoiceUploadDialog } from '../components/InvoiceUploadDialog';
 import { BelegFormDialog } from '../components/BelegFormDialog';
@@ -42,6 +43,8 @@ export function MatchingPage() {
   const [showEigenbelegDialog, setShowEigenbelegDialog] = useState(false);
   const [eigenbelegTx, setEigenbelegTx] = useState<ReconciliationUnmatchedTransaction | null>(null);
   const [showVorsteuer, setShowVorsteuer] = useState(false);
+  const [privateTxId, setPrivateTxId] = useState<string | null>(null);
+  const [privateNotes, setPrivateNotes] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['matching-monthly', activeMonth],
@@ -76,6 +79,16 @@ export function MatchingPage() {
   const deleteMutation = useMutation({
     mutationFn: deleteMatchingApi,
     onSuccess: invalidate,
+  });
+
+  const privateBookingMutation = useMutation({
+    mutationFn: (data: { transactionId: string; bookingType: 'PRIVATE_WITHDRAWAL' | 'PRIVATE_DEPOSIT'; notes?: string | null }) =>
+      createTransactionBookingApi(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['matching-monthly'] });
+      setPrivateTxId(null);
+      setPrivateNotes('');
+    },
   });
 
   const suggestedCount = reconciliation?.matched.filter((m) => m.matchStatus === 'SUGGESTED').length ?? 0;
@@ -318,6 +331,7 @@ export function MatchingPage() {
               }}
               onUpload={() => setShowUploadDialog(true)}
               onEigenbeleg={(tx) => { setEigenbelegTx(tx); setShowEigenbelegDialog(true); }}
+              onPrivate={(tx) => setPrivateTxId(tx.id)}
             />
           )}
           {activeTab === 'unmatched_inv' && (
@@ -380,6 +394,81 @@ export function MatchingPage() {
           }}
         />
       )}
+
+      {/* Private Booking Dialog */}
+      {privateTxId && (() => {
+        const tx = reconciliation?.unmatchedTransactions.find((t) => t.id === privateTxId);
+        if (!tx) return null;
+        const isWithdrawal = parseFloat(tx.amount) < 0;
+        const bookingType = isWithdrawal ? 'PRIVATE_WITHDRAWAL' as const : 'PRIVATE_DEPOSIT' as const;
+        const label = isWithdrawal ? 'Privatentnahme' : 'Privateinlage';
+        const accountNr = isWithdrawal ? '9600' : '9610';
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setPrivateTxId(null); setPrivateNotes(''); }}>
+            <div className="bg-white rounded-xl p-6 w-96 shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold mb-1 flex items-center gap-2">
+                <Wallet size={18} className="text-purple-600" />
+                {label}
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Transaktion als {label} (Konto {accountNr}) buchen
+              </p>
+
+              <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Betrag</span>
+                  <span className="font-medium">{formatCurrency(tx.amount)} {tx.currency}</span>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-gray-500">Datum</span>
+                  <span>{formatDate(tx.transactionDate)}</span>
+                </div>
+                {tx.counterpartName && (
+                  <div className="flex justify-between mt-1">
+                    <span className="text-gray-500">Empfänger</span>
+                    <span className="truncate ml-2">{tx.counterpartName}</span>
+                  </div>
+                )}
+              </div>
+
+              <label className="block text-sm text-gray-600 mb-1">Notiz (optional)</label>
+              <input
+                type="text"
+                value={privateNotes}
+                onChange={(e) => setPrivateNotes(e.target.value)}
+                placeholder="z.B. Private Einkäufe"
+                className="input-field w-full mb-4"
+              />
+
+              {privateBookingMutation.isError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">
+                  {(privateBookingMutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
+                    || (privateBookingMutation.error as Error).message
+                    || 'Fehler beim Buchen'}
+                </div>
+              )}
+
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => { setPrivateTxId(null); setPrivateNotes(''); }} className="btn-secondary text-sm">
+                  Abbrechen
+                </button>
+                <button
+                  onClick={() => privateBookingMutation.mutate({
+                    transactionId: privateTxId,
+                    bookingType,
+                    notes: privateNotes || null,
+                  })}
+                  disabled={privateBookingMutation.isPending}
+                  className="btn-primary text-sm"
+                >
+                  {privateBookingMutation.isPending ? 'Buche...' : `Als ${label} buchen`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -580,12 +669,13 @@ function MatchedTab({ items, onConfirm, onReject, onDelete }: {
 // Unmatched Transactions Tab
 // ============================================================
 
-function UnmatchedTxTab({ items, onConfirmSuggested, onManualMatch, onUpload, onEigenbeleg }: {
+function UnmatchedTxTab({ items, onConfirmSuggested, onManualMatch, onUpload, onEigenbeleg, onPrivate }: {
   items: ReconciliationUnmatchedTransaction[];
   onConfirmSuggested: (id: string) => void;
   onManualMatch: (tx: ReconciliationUnmatchedTransaction) => void;
   onUpload: () => void;
   onEigenbeleg: (tx: ReconciliationUnmatchedTransaction) => void;
+  onPrivate: (tx: ReconciliationUnmatchedTransaction) => void;
 }) {
   if (items.length === 0) {
     return (
@@ -674,6 +764,13 @@ function UnmatchedTxTab({ items, onConfirmSuggested, onManualMatch, onUpload, on
                 title="Manuell zuordnen"
               >
                 <Plus size={16} />
+              </button>
+              <button
+                onClick={() => onPrivate(tx)}
+                className="p-2 rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors touch-target"
+                title={parseFloat(tx.amount) < 0 ? 'Privatentnahme' : 'Privateinlage'}
+              >
+                <Wallet size={16} />
               </button>
             </div>
           </div>

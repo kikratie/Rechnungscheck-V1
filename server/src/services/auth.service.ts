@@ -15,6 +15,7 @@ import type {
   UserProfile,
 } from '@buchungsai/shared';
 import { writeAuditLog } from '../middleware/auditLogger.js';
+import { seedAccountsForTenant } from './account.service.js';
 
 const SALT_ROUNDS = 12;
 
@@ -65,6 +66,7 @@ export async function register(data: RegisterRequest): Promise<{ user: UserProfi
       data: {
         name: data.tenantName,
         slug,
+        accountingType: data.accountingType || 'EA',
       },
     });
 
@@ -80,6 +82,37 @@ export async function register(data: RegisterRequest): Promise<{ user: UserProfi
     });
 
     return { tenant, user };
+  });
+
+  // Standard-Kontenplan für neuen Mandanten seeden
+  await seedAccountsForTenant(result.tenant.id);
+
+  // BMD NTCS System-Exportprofil erstellen
+  await prisma.exportConfig.create({
+    data: {
+      tenantId: result.tenant.id,
+      name: 'BMD NTCS',
+      format: 'BMD_CSV',
+      columnMapping: {
+        belegart: 'direction',
+        belegnummer: 'archivalNumber',
+        datum: 'invoiceDate',
+        konto: 'accountNumber',
+        gegenkonto: 'paymentMethod',
+        betrag: 'grossAmount',
+        steuercode: 'vatRate',
+        text: 'vendorName',
+        lieferant: 'vendorName',
+        uid: 'vendorUid',
+      },
+      delimiter: ';',
+      dateFormat: 'dd.MM.yyyy',
+      decimalSeparator: ',',
+      encoding: 'UTF-8',
+      includeHeader: true,
+      isDefault: true,
+      isSystem: true,
+    },
   });
 
   // Tokens generieren
@@ -118,6 +151,7 @@ export async function register(data: RegisterRequest): Promise<{ user: UserProfi
     role: result.user.role,
     tenantName: result.tenant.name,
     onboardingComplete: false,
+    accountingType: result.tenant.accountingType,
   };
 
   return { user: userProfile, tokens };
@@ -190,6 +224,7 @@ export async function login(
     role: user.role,
     tenantName: user.tenant.name,
     onboardingComplete: user.tenant.onboardingComplete,
+    accountingType: user.tenant.accountingType,
   };
 
   return { user: userProfile, tokens };
@@ -265,5 +300,6 @@ export async function getMe(userId: string): Promise<UserProfile> {
     role: user.role,
     tenantName: user.tenant.name,
     onboardingComplete: user.tenant.onboardingComplete,
+    accountingType: user.tenant.accountingType,
   };
 }

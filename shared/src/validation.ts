@@ -19,6 +19,7 @@ export const registerSchema = z.object({
     .regex(/[0-9]/, 'Passwort muss mindestens eine Zahl enthalten'),
   firstName: z.string().min(1, 'Vorname ist erforderlich').max(50),
   lastName: z.string().min(1, 'Nachname ist erforderlich').max(50),
+  accountingType: z.enum(['EA', 'ACCRUAL']).optional().default('EA'),
 });
 
 // ============================================================
@@ -66,6 +67,7 @@ export const completeOnboardingSchema = z.object({
   country: z.string().length(2).optional().nullable(),
   phone: z.string().max(30).optional().nullable(),
   email: z.string().email('Ungültige E-Mail-Adresse').optional().nullable(),
+  accountingType: z.enum(['EA', 'ACCRUAL']).optional(),
   // Optional: first bank account created during onboarding
   bankAccount: z.object({
     label: z.string().min(1).max(100),
@@ -156,7 +158,7 @@ export const invoiceFilterSchema = paginationSchema.extend({
   search: z.string().optional(),
   direction: z.enum(['INCOMING', 'OUTGOING']).optional(),
   processingStatus: z
-    .enum(['UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'REJECTED', 'PARKED', 'ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED', 'ERROR', 'REPLACED'])
+    .enum(['INBOX', 'UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'PENDING_CORRECTION', 'REJECTED', 'PARKED', 'ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED', 'ERROR', 'REPLACED'])
     .optional(),
   validationStatus: z.enum(['PENDING', 'VALID', 'WARNING', 'INVALID']).optional(),
   vendorName: z.string().optional(),
@@ -176,6 +178,11 @@ export const exportGenerateSchema = z.object({
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
   invoiceIds: z.array(z.string().uuid()).optional(),
+});
+
+export const ocrCheckExportSchema = z.object({
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
 });
 
 // ============================================================
@@ -230,6 +237,8 @@ export const updateExtractedDataSchema = z.object({
   hospitalityReason: z.string().max(500).optional().nullable(),
   deductibilityPercent: z.number().int().min(0).max(100).optional().nullable(),
   deductibilityNote: z.string().max(500).optional().nullable(),
+  // Privatanteil (0-100%)
+  privatePercent: z.number().int().min(0).max(100).optional().nullable(),
   editReason: z.string().max(500).optional(),
 });
 
@@ -364,6 +373,49 @@ export const deleteAccountSchema = z.object({
 // Company Access Schema (Steuerberater-Zugang)
 // ============================================================
 
+// ============================================================
+// Chart of Accounts Schemas
+// ============================================================
+
+export const createAccountSchema = z.object({
+  number: z.string().min(1).max(10).regex(/^\d+$/, 'Kontonummer muss numerisch sein'),
+  name: z.string().min(1, 'Name ist erforderlich').max(100),
+  type: z.enum(['ASSET', 'LIABILITY', 'EXPENSE', 'REVENUE', 'EQUITY']),
+  category: z.string().max(100).optional().nullable(),
+  taxCode: z.string().max(10).optional().nullable(),
+  sortOrder: z.number().int().min(0).default(0),
+});
+
+export const updateAccountSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  category: z.string().max(100).optional().nullable(),
+  taxCode: z.string().max(10).optional().nullable(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+// ============================================================
+// Cash Payment Schema
+// ============================================================
+
+export const cashPaymentSchema = z.object({
+  paymentDate: z.string().min(1, 'Zahlungsdatum ist erforderlich'),
+});
+
+// ============================================================
+// Transaction Booking Schemas (Privatentnahme/Privateinlage)
+// ============================================================
+
+export const createTransactionBookingSchema = z.object({
+  transactionId: z.string().uuid('Ungültige Transaktions-ID'),
+  bookingType: z.enum(['PRIVATE_WITHDRAWAL', 'PRIVATE_DEPOSIT']),
+  notes: z.string().max(500).optional().nullable(),
+});
+
+// ============================================================
+// Company Access Schema (Steuerberater-Zugang)
+// ============================================================
+
 export const grantAccessSchema = z.object({
   email: z.string().email('Ungültige E-Mail-Adresse'),
   accessLevel: z.enum(['READ', 'WRITE', 'ADMIN']).default('READ'),
@@ -380,4 +432,12 @@ export const monthlyReportSchema = z.object({
 
 export const fullExportSchema = z.object({
   year: z.coerce.number().int().min(2020).max(2100).optional(),
+});
+
+// ============================================================
+// Correction Request Schema (PENDING_CORRECTION workflow)
+// ============================================================
+
+export const requestCorrectionSchema = z.object({
+  note: z.string().min(1, 'Korrekturhinweis ist erforderlich').max(2000),
 });

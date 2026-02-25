@@ -593,6 +593,7 @@ export async function getMonthlyReconciliation(
     matchingsInPeriod,
     confirmedInvoiceIds,
     availableMonthsRaw,
+    transactionBookingsInPeriod,
   ] = await Promise.all([
     // A: All transactions in month
     prisma.bankTransaction.findMany({
@@ -610,6 +611,7 @@ export async function getMonthlyReconciliation(
             invoice: { select: { vendorName: true, customerName: true, invoiceNumber: true } },
           },
         },
+        booking: { select: { id: true, bookingType: true, accountNumber: true, amount: true, notes: true } },
       },
       orderBy: { transactionDate: 'desc' },
     }),
@@ -658,6 +660,25 @@ export async function getMonthlyReconciliation(
       ORDER BY month DESC
       LIMIT 24
     `,
+
+    // E: Transaction bookings in period (Privatentnahme/Privateinlage)
+    prisma.transactionBooking.findMany({
+      where: {
+        tenantId,
+        transaction: {
+          transactionDate: { gte: periodStart, lte: periodEnd },
+        },
+      },
+      include: {
+        transaction: {
+          select: {
+            id: true, transactionDate: true, amount: true, currency: true,
+            counterpartName: true, reference: true, bookingText: true,
+          },
+        },
+      },
+      orderBy: { confirmedAt: 'desc' },
+    }),
   ]);
 
   // 3. Open invoices (not confirmed-matched)
@@ -685,15 +706,19 @@ export async function getMonthlyReconciliation(
 
   // 4. Build sets for categorization
   const confirmedTxIds = new Set<string>();
+  const bookedTxIds = new Set<string>();
   for (const tx of allTransactions) {
     if (tx.matchings.some((m) => m.status === 'CONFIRMED')) {
       confirmedTxIds.add(tx.id);
     }
+    if (tx.booking) {
+      bookedTxIds.add(tx.id);
+    }
   }
 
-  // 5. Unmatched transactions
+  // 5. Unmatched transactions (exclude confirmed matchings AND transaction bookings)
   const unmatchedTransactions = allTransactions
-    .filter((tx) => !confirmedTxIds.has(tx.id))
+    .filter((tx) => !confirmedTxIds.has(tx.id) && !bookedTxIds.has(tx.id))
     .map((tx) => {
       const suggested = tx.matchings.find((m) => m.status === 'SUGGESTED');
       return {
@@ -768,6 +793,25 @@ export async function getMonthlyReconciliation(
     };
   });
 
+  // 7b. Booked transactions (Privatentnahme/Privateinlage)
+  const bookedTransactions = transactionBookingsInPeriod.map((b) => ({
+    bookingId: b.id,
+    bookingType: b.bookingType,
+    accountNumber: b.accountNumber,
+    amount: new Decimal(b.amount).toString(),
+    notes: b.notes,
+    confirmedAt: b.confirmedAt.toISOString(),
+    transaction: {
+      id: b.transaction.id,
+      transactionDate: b.transaction.transactionDate.toISOString(),
+      amount: new Decimal(b.transaction.amount).toString(),
+      currency: b.transaction.currency,
+      counterpartName: b.transaction.counterpartName,
+      reference: b.transaction.reference,
+      bookingText: b.transaction.bookingText,
+    },
+  }));
+
   // 8. Summary calculations
   let totalIncome = 0;
   let totalExpenses = 0;
@@ -802,16 +846,17 @@ export async function getMonthlyReconciliation(
       return { rate, netAmount: net.toFixed(2), vatAmount: vat.toFixed(2) };
     });
 
+  const resolvedTxCount = confirmedTxIds.size + bookedTxIds.size;
   const summary = {
     month: targetMonth,
     totalIncome: totalIncome.toFixed(2),
     totalExpenses: totalExpenses.toFixed(2),
     totalTransactions: allTransactions.length,
-    matchedTransactions: confirmedTxIds.size,
+    matchedTransactions: resolvedTxCount,
     unmatchedTransactions: unmatchedTransactions.length,
     openInvoices: openInvoices.length,
     matchedPercent: allTransactions.length > 0
-      ? Math.round((confirmedTxIds.size / allTransactions.length) * 100)
+      ? Math.round((resolvedTxCount / allTransactions.length) * 100)
       : 0,
     vorsteuerTotal: vorsteuerTotal.toFixed(2),
     vorsteuerByRate,
@@ -822,6 +867,7 @@ export async function getMonthlyReconciliation(
     matched,
     unmatchedTransactions,
     unmatchedInvoices: unmatchedInvoiceItems,
+    bookedTransactions,
     availableMonths: availableMonthsRaw.map((r) => r.month),
   };
 }

@@ -6,9 +6,12 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import { logoutApi } from '../../api/auth';
 import { getAccessibleTenantsApi } from '../../api/tenant';
 import { BottomTabBar } from '../mobile/BottomTabBar';
+import { useAccountingType } from '../../hooks/useAccountingType';
+import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard,
-  FileText,
+  FileSearch,
+  Inbox,
   Users,
   UserCheck,
   Building2,
@@ -17,21 +20,14 @@ import {
   ScrollText,
   Settings,
   LogOut,
-  Camera,
+  BookOpen,
+  Receipt,
 } from 'lucide-react';
 
-const navItems = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/scan', label: 'Scannen', icon: Camera },
-  { to: '/invoices', label: 'Rechnungen', icon: FileText },
-  { to: '/vendors', label: 'Lieferanten', icon: Users },
-  { to: '/customers', label: 'Kunden', icon: UserCheck },
-  { to: '/bank-statements', label: 'Kontoauszüge', icon: Building2 },
-  { to: '/matching', label: 'Abgleich', icon: ArrowLeftRight },
-  { to: '/export', label: 'Export', icon: Download },
-  { to: '/audit-log', label: 'Audit-Log', icon: ScrollText },
-  { to: '/settings', label: 'Einstellungen', icon: Settings },
-];
+interface NavGroup {
+  label: string;
+  items: Array<{ to: string; label: string; icon: LucideIcon }>;
+}
 
 export function AppLayout() {
   const { user, refreshToken, logout, activeTenantId, accessibleTenants, setActiveTenant, setAccessibleTenants } = useAuthStore();
@@ -39,8 +35,48 @@ export function AppLayout() {
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const isMobile = useIsMobile();
+  const accountingType = useAccountingType();
 
   const isTaxAdvisor = user?.role === 'TAX_ADVISOR';
+
+  // Build navigation groups based on accountingType
+  const navGroups: NavGroup[] = [
+    {
+      label: 'Hauptprozess',
+      items: [
+        { to: '/inbox', label: 'A: Rechnungseingang', icon: Inbox },
+        { to: '/invoices', label: 'B: Rechnungs-Check', icon: FileSearch },
+        { to: '/matching', label: 'C: Zahlungs-Check', icon: ArrowLeftRight },
+      ],
+    },
+    {
+      label: 'Stammdaten',
+      items: [
+        { to: '/vendors', label: 'Lieferanten', icon: Users },
+        { to: '/customers', label: 'Kunden', icon: UserCheck },
+        { to: '/bank-statements', label: 'Kontoauszüge', icon: Building2 },
+        { to: '/accounts', label: 'Kontenplan', icon: BookOpen },
+      ],
+    },
+    {
+      label: 'Berichte & Export',
+      items: [
+        { to: '/export', label: 'Export', icon: Download },
+        ...(accountingType === 'EA'
+          ? [{ to: '/tax/uva', label: 'UVA-Bericht', icon: Receipt }]
+          : []),
+      ],
+    },
+    {
+      label: 'System',
+      items: [
+        { to: '/audit-log', label: 'Audit-Log', icon: ScrollText },
+        { to: '/settings', label: 'Einstellungen', icon: Settings },
+      ],
+    },
+  ];
+
+  const allNavItems = navGroups.flatMap((g) => g.items);
 
   // Load accessible tenants for TAX_ADVISOR
   useEffect(() => {
@@ -50,7 +86,7 @@ export function AppLayout() {
   }, [isTaxAdvisor, setAccessibleTenants]);
 
   // Get current page title for mobile header
-  const currentPage = navItems.find((item) =>
+  const currentPage = allNavItems.find((item) =>
     item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to),
   );
 
@@ -105,23 +141,47 @@ export function AppLayout() {
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/'}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                    isActive
-                      ? 'bg-primary-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`
-                }
-              >
-                <item.icon size={18} />
-                {item.label}
-              </NavLink>
+          <nav className="flex-1 p-4 space-y-4 overflow-y-auto">
+            {/* Dashboard link */}
+            <NavLink
+              to="/"
+              end
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isActive
+                    ? 'bg-primary-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                }`
+              }
+            >
+              <LayoutDashboard size={18} />
+              Dashboard
+            </NavLink>
+
+            {navGroups.map((group) => (
+              <div key={group.label}>
+                <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  {group.label}
+                </p>
+                <div className="space-y-0.5">
+                  {group.items.map((item) => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                          isActive
+                            ? 'bg-primary-600 text-white'
+                            : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                        }`
+                      }
+                    >
+                      <item.icon size={18} />
+                      {item.label}
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
 

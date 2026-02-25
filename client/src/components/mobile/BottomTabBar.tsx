@@ -3,13 +3,15 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Camera,
-  FileText,
+  Inbox,
+  FileSearch,
   ArrowLeftRight,
   MoreHorizontal,
   Users,
   UserCheck,
   Landmark,
   Download,
+  BookOpen,
   ClipboardList,
   Settings,
   LogOut,
@@ -27,16 +29,18 @@ interface TabItem {
 
 const mainTabs: TabItem[] = [
   { to: '/', icon: LayoutDashboard, label: 'Home', end: true },
-  { to: '/invoices', icon: FileText, label: 'Belege' },
+  { to: '/inbox', icon: Inbox, label: 'Eingang' },
   { to: '/scan', icon: Camera, label: 'Scannen', isCenter: true },
-  { to: '/matching', icon: ArrowLeftRight, label: 'Abgleich' },
+  { to: '/invoices', icon: FileSearch, label: 'Prüfung' },
   { to: '__more__', icon: MoreHorizontal, label: 'Mehr' },
 ];
 
 const moreItems = [
+  { to: '/matching', icon: ArrowLeftRight, label: 'Zahlungs-Check' },
   { to: '/vendors', icon: Users, label: 'Lieferanten' },
   { to: '/customers', icon: UserCheck, label: 'Kunden' },
   { to: '/bank-statements', icon: Landmark, label: 'Kontoauszüge' },
+  { to: '/accounts', icon: BookOpen, label: 'Kontenplan' },
   { to: '/export', icon: Download, label: 'Export' },
   { to: '/audit-log', icon: ClipboardList, label: 'Audit-Log' },
   { to: '/settings', icon: Settings, label: 'Einstellungen' },

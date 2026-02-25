@@ -2,8 +2,8 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireTenant } from '../middleware/tenantContext.js';
 import { validateBody } from '../middleware/validate.js';
-import { exportGenerateSchema, monthlyReportSchema, fullExportSchema } from '@buchungsai/shared';
-import { generateBmdCsv, generateFullExport } from '../services/export.service.js';
+import { exportGenerateSchema, monthlyReportSchema, fullExportSchema, ocrCheckExportSchema } from '@buchungsai/shared';
+import { generateBmdCsv, generateFullExport, generateOcrCheckCsv } from '../services/export.service.js';
 import { generateMonthlyReport } from '../services/report.service.js';
 
 const router = Router();
@@ -64,6 +64,25 @@ router.post('/full-export', validateBody(fullExportSchema), async (req, res, nex
     const yearStr = req.body.year ? `-${req.body.year}` : '';
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="vollexport${yearStr}.zip"`);
+    res.send(buffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/exports/ocr-check — Generate OCR quality check CSV
+router.post('/ocr-check', validateBody(ocrCheckExportSchema), async (req, res, next) => {
+  try {
+    const buffer = await generateOcrCheckCsv({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      dateFrom: req.body.dateFrom,
+      dateTo: req.body.dateTo,
+    });
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="ocr-pruefexport-${dateStr}.csv"`);
     res.send(buffer);
   } catch (err) {
     next(err);

@@ -18,10 +18,12 @@ export const BMD_TAX_CODES: Record<number, string> = {
 
 // Verarbeitungsstatus
 export const PROCESSING_STATUS = {
+  INBOX: 'INBOX',
   UPLOADED: 'UPLOADED',
   PROCESSING: 'PROCESSING',
   PROCESSED: 'PROCESSED',
   REVIEW_REQUIRED: 'REVIEW_REQUIRED',
+  PENDING_CORRECTION: 'PENDING_CORRECTION',
   REJECTED: 'REJECTED',
   PARKED: 'PARKED',
   ARCHIVED: 'ARCHIVED',
@@ -179,6 +181,62 @@ export const DEDUCTIBILITY_OPTIONS = [
   { value: 50, label: '50% abzugsfähig', description: 'Bewirtung von Geschäftspartnern (§20 Abs 1 Z 3 EStG)' },
   { value: 0, label: 'Nicht abzugsfähig', description: 'Rein private Bewirtung' },
 ] as const;
+
+// ============================================================
+// Chart of Accounts — Standard-Kontenrahmen für E/A-Rechner (AT)
+// ============================================================
+
+export const DEFAULT_ACCOUNTS = [
+  // Aktiva — Zahlungsmittel
+  { number: '2700', name: 'Kassa', type: 'ASSET' as const, category: 'Zahlungsmittel', taxCode: null, sortOrder: 10 },
+  { number: '2800', name: 'Bank', type: 'ASSET' as const, category: 'Zahlungsmittel', taxCode: null, sortOrder: 20 },
+  // Erlöse
+  { number: '4000', name: 'Erlöse 20%', type: 'REVENUE' as const, category: 'Erlöse', taxCode: 'V20', sortOrder: 100 },
+  { number: '4010', name: 'Erlöse 10%', type: 'REVENUE' as const, category: 'Erlöse', taxCode: 'V10', sortOrder: 110 },
+  { number: '4020', name: 'Erlöse 13%', type: 'REVENUE' as const, category: 'Erlöse', taxCode: 'V13', sortOrder: 120 },
+  { number: '4050', name: 'Erlöse steuerfrei', type: 'REVENUE' as const, category: 'Erlöse', taxCode: 'V00', sortOrder: 130 },
+  // Material
+  { number: '5000', name: 'Wareneinsatz / Material', type: 'EXPENSE' as const, category: 'Material', taxCode: 'V20', sortOrder: 200 },
+  { number: '5100', name: 'Bezugsnebenkosten', type: 'EXPENSE' as const, category: 'Material', taxCode: 'V20', sortOrder: 210 },
+  // Betriebliche Aufwendungen
+  { number: '7000', name: 'Mietaufwand', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 300 },
+  { number: '7010', name: 'Betriebskosten', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 310 },
+  { number: '7020', name: 'Energiekosten', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 320 },
+  { number: '7100', name: 'Büromaterial', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 330 },
+  { number: '7200', name: 'Telefon / Internet', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 340 },
+  { number: '7300', name: 'Versicherungen', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V00', sortOrder: 350 },
+  { number: '7310', name: 'KFZ-Versicherung', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V00', sortOrder: 355 },
+  { number: '7350', name: 'KFZ-Aufwand', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 360 },
+  { number: '7400', name: 'Werbung / Marketing', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 370 },
+  { number: '7500', name: 'Reisekosten', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 380 },
+  { number: '7510', name: 'Bewirtung (50%)', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 385 },
+  { number: '7600', name: 'Beratung / Steuerberater', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 390 },
+  { number: '7700', name: 'Abschreibung (AfA)', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: null, sortOrder: 400 },
+  { number: '7800', name: 'Sonstige Aufwendungen', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 410 },
+  { number: '7810', name: 'Bankspesen', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V00', sortOrder: 420 },
+  { number: '7900', name: 'Software / Lizenzen', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 430 },
+  // Eigenkapital / Privat
+  { number: '9600', name: 'Privatentnahme', type: 'EQUITY' as const, category: 'Privat', taxCode: null, sortOrder: 900 },
+  { number: '9610', name: 'Privateinlage', type: 'EQUITY' as const, category: 'Privat', taxCode: null, sortOrder: 910 },
+] as const;
+
+// Zahlungsmethoden
+export const PAYMENT_METHODS = {
+  BANK: { label: 'Überweisung', gegenkontoDefault: '2800' },
+  CASH: { label: 'Bar', gegenkontoDefault: '2700' },
+} as const;
+
+// Buchungstypen (Privatentnahme/Privateinlage)
+export const BOOKING_TYPES = {
+  PRIVATE_WITHDRAWAL: { label: 'Privatentnahme', accountNumber: '9600', description: 'Privatentnahme aus Geschäftskonto' },
+  PRIVATE_DEPOSIT: { label: 'Privateinlage', accountNumber: '9610', description: 'Privateinlage ins Geschäftskonto' },
+} as const;
+
+// Gewinnermittlungsart (Accounting Type)
+export const ACCOUNTING_TYPES = {
+  EA: { label: 'Einnahmen-Ausgaben-Rechnung', description: 'Einzelunternehmer, Freiberufler (E/A-Rechner)' },
+  ACCRUAL: { label: 'Bilanzierung', description: 'GmbH, AG (doppelte Buchführung)' },
+} as const;
 
 // Steuerberater Zugangsebenen
 export const ACCESS_LEVELS = {

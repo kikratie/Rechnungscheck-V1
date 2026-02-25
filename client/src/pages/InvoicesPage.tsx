@@ -14,8 +14,12 @@ import {
   batchApproveInvoicesApi,
   parkInvoiceApi,
   unparkInvoiceApi,
+  markCashPaymentApi,
+  undoCashPaymentApi,
+  requestCorrectionApi,
 } from '../api/invoices';
 import { generateCorrectionEmailApi } from '../api/mail';
+import { exportOcrCheckApi, downloadBlob } from '../api/exports';
 import type { InvoiceFilters } from '../api/invoices';
 import type { ValidationCheck, TrafficLightStatus } from '@buchungsai/shared';
 import {
@@ -23,8 +27,9 @@ import {
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
   ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight, MinusCircle,
   ArrowUp, ArrowDown, ArrowUpDown, Lock, Archive, Mail, SlidersHorizontal,
-  PauseCircle, Play,
+  PauseCircle, Play, Banknote,
 } from 'lucide-react';
+import { AccountSelector } from '../components/AccountSelector';
 import { SendEmailDialog } from '../components/SendEmailDialog';
 import { InvoiceUploadDialog } from '../components/InvoiceUploadDialog';
 import { BelegFormDialog } from '../components/BelegFormDialog';
@@ -49,7 +54,39 @@ export function InvoicesPage() {
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [emailPrefill, setEmailPrefill] = useState<{ to?: string; subject?: string; body?: string } | undefined>(undefined);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
+  const [showCashDialog, setShowCashDialog] = useState(false);
+  const [cashDate, setCashDate] = useState('');
+  const [ocrExportLoading, setOcrExportLoading] = useState(false);
+  const [showCorrectionDialog, setShowCorrectionDialog] = useState(false);
+  const [correctionNote, setCorrectionNote] = useState('');
   const isMobile = useIsMobile();
+
+  const cashPaymentMutation = useMutation({
+    mutationFn: ({ id, date }: { id: string; date: string }) => markCashPaymentApi(id, date),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+      setShowCashDialog(false);
+    },
+  });
+
+  const undoCashMutation = useMutation({
+    mutationFn: (id: string) => undoCashPaymentApi(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+    },
+  });
+
+  const correctionMutation = useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string }) => requestCorrectionApi(id, note),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      if (selectedId) queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+      setShowCorrectionDialog(false);
+      setCorrectionNote('');
+    },
+  });
 
   const batchApproveMutation = useMutation({
     mutationFn: ({ ids, comment }: { ids: string[]; comment?: string | null }) => batchApproveInvoicesApi(ids, comment),
@@ -128,6 +165,7 @@ export function InvoicesPage() {
       vatRate: ed.vatRate || '',
       accountNumber: ed.accountNumber || '',
       category: ed.category || '',
+      privatePercent: detail.privatePercent ?? null,
     });
     setEditMode(true);
   }
@@ -257,10 +295,31 @@ Mit freundlichen Grüßen`;
             </p>
           </div>
           {!isMobile && (
-            <button className="btn-primary flex items-center gap-2" onClick={() => setShowUpload(true)}>
-              <Upload size={18} />
-              Hochladen
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                className="btn-secondary flex items-center gap-2 text-sm"
+                disabled={ocrExportLoading}
+                onClick={async () => {
+                  setOcrExportLoading(true);
+                  try {
+                    const blob = await exportOcrCheckApi();
+                    const dateStr = new Date().toISOString().split('T')[0];
+                    downloadBlob(blob, `ocr-pruefexport-${dateStr}.csv`);
+                  } catch {
+                    alert('OCR-Export fehlgeschlagen');
+                  } finally {
+                    setOcrExportLoading(false);
+                  }
+                }}
+              >
+                {ocrExportLoading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                OCR-Export
+              </button>
+              <button className="btn-primary flex items-center gap-2" onClick={() => setShowUpload(true)}>
+                <Upload size={18} />
+                Hochladen
+              </button>
+            </div>
           )}
         </div>
 
@@ -700,6 +759,17 @@ Mit freundlichen Grüßen`;
               startEdit={startEdit}
               navigate={navigate}
               queryClient={queryClient}
+              showCashDialog={showCashDialog}
+              setShowCashDialog={setShowCashDialog}
+              cashDate={cashDate}
+              setCashDate={setCashDate}
+              cashPaymentMutation={cashPaymentMutation}
+              undoCashMutation={undoCashMutation}
+              showCorrectionDialog={showCorrectionDialog}
+              setShowCorrectionDialog={setShowCorrectionDialog}
+              correctionNote={correctionNote}
+              setCorrectionNote={setCorrectionNote}
+              correctionMutation={correctionMutation}
             />}
           </div>
         </FullScreenPanel>
@@ -730,6 +800,17 @@ Mit freundlichen Grüßen`;
               startEdit={startEdit}
               navigate={navigate}
               queryClient={queryClient}
+              showCashDialog={showCashDialog}
+              setShowCashDialog={setShowCashDialog}
+              cashDate={cashDate}
+              setCashDate={setCashDate}
+              cashPaymentMutation={cashPaymentMutation}
+              undoCashMutation={undoCashMutation}
+              showCorrectionDialog={showCorrectionDialog}
+              setShowCorrectionDialog={setShowCorrectionDialog}
+              correctionNote={correctionNote}
+              setCorrectionNote={setCorrectionNote}
+              correctionMutation={correctionMutation}
             />
           </div>
         </div>
@@ -760,6 +841,8 @@ function InvoiceDetailContent({
   setShowRejectDialog, setRejectReason, setShowErsatzbelegDialog, setShowEmailDialog,
   setEmailPrefill,
   startEdit, navigate, queryClient,
+  showCashDialog, setShowCashDialog, cashDate, setCashDate, cashPaymentMutation, undoCashMutation,
+  showCorrectionDialog, setShowCorrectionDialog, correctionNote, setCorrectionNote, correctionMutation,
 }: {
   selectedId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -782,6 +865,20 @@ function InvoiceDetailContent({
   navigate: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   queryClient: any;
+  showCashDialog: boolean;
+  setShowCashDialog: (v: boolean) => void;
+  cashDate: string;
+  setCashDate: (v: string) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cashPaymentMutation: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  undoCashMutation: any;
+  showCorrectionDialog: boolean;
+  setShowCorrectionDialog: (v: boolean) => void;
+  correctionNote: string;
+  setCorrectionNote: (v: string) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  correctionMutation: any;
 }) {
   if (detailLoading) {
     return (
@@ -1079,7 +1176,7 @@ function InvoiceDetailContent({
           )}
 
           {/* Action buttons */}
-          {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && detail.processingStatus !== 'REJECTED' && detail.processingStatus !== 'PARKED' && (
+          {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && detail.processingStatus !== 'REJECTED' && detail.processingStatus !== 'PARKED' && detail.processingStatus !== 'PENDING_CORRECTION' && (
             <div className="border-t pt-4 flex gap-2">
               <ApproveButton
                 invoiceId={selectedId}
@@ -1096,6 +1193,121 @@ function InvoiceDetailContent({
                 <ThumbsDown size={14} />
                 Ablehnen
               </button>
+            </div>
+          )}
+
+          {/* Correction request button (PROCESSED / REVIEW_REQUIRED) */}
+          {(detail.processingStatus === 'PROCESSED' || detail.processingStatus === 'REVIEW_REQUIRED') && (
+            <div className="border-t pt-4">
+              <button
+                onClick={() => { setCorrectionNote(''); setShowCorrectionDialog(true); }}
+                className="btn-secondary flex items-center gap-2 text-sm w-full justify-center text-amber-700 border-amber-300 hover:bg-amber-50"
+              >
+                <Edit3 size={16} />
+                Korrektur anfordern
+              </button>
+            </div>
+          )}
+
+          {/* Correction request dialog */}
+          {showCorrectionDialog && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+              <div className="bg-white rounded-xl p-6 w-96 shadow-xl">
+                <h3 className="text-lg font-semibold mb-2">Korrektur anfordern</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  Die Rechnung wird auf &quot;Wartet auf Korrektur&quot; gesetzt. Beschreiben Sie, was korrigiert werden soll.
+                </p>
+                <textarea
+                  value={correctionNote}
+                  onChange={(e) => setCorrectionNote(e.target.value)}
+                  placeholder="z.B. UID-Nummer fehlt, Rechnungsdatum falsch..."
+                  className="input-field w-full mb-4 h-24 resize-none"
+                  maxLength={2000}
+                />
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setShowCorrectionDialog(false)} className="btn-secondary text-sm">Abbrechen</button>
+                  <button
+                    onClick={() => correctionMutation.mutate({ id: selectedId!, note: correctionNote })}
+                    disabled={!correctionNote.trim() || correctionMutation.isPending}
+                    className="btn-primary text-sm"
+                  >
+                    {correctionMutation.isPending ? 'Wird gespeichert...' : 'Korrektur anfordern'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PENDING_CORRECTION info */}
+          {detail.processingStatus === 'PENDING_CORRECTION' && (
+            <div className="border-t pt-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Clock size={14} className="text-amber-600" />
+                  <span className="text-sm font-medium text-amber-800">Wartet auf korrigierte Rechnung</span>
+                </div>
+                {detail.correctionNote && (
+                  <p className="text-xs text-amber-700 mt-1">{detail.correctionNote}</p>
+                )}
+                {detail.correctionRequestedAt && (
+                  <p className="text-xs text-amber-500 mt-1">
+                    Angefordert am {new Date(detail.correctionRequestedAt).toLocaleDateString('de-AT')}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Cash payment section */}
+          <div className="border-t pt-4">
+            {detail.paymentMethod === 'CASH' ? (
+              <div className="flex items-center gap-2 px-3 py-2 bg-green-50 rounded-lg">
+                <Banknote size={16} className="text-green-600" />
+                <span className="text-sm text-green-700 font-medium">
+                  Bar bezahlt {detail.cashPaymentDate ? `am ${formatDate(detail.cashPaymentDate)}` : ''}
+                </span>
+                <button
+                  onClick={() => undoCashMutation.mutate(detail.id)}
+                  className="ml-auto text-xs text-gray-500 hover:text-red-600 underline"
+                  disabled={undoCashMutation.isPending}
+                >
+                  {undoCashMutation.isPending ? 'Wird rückgängig...' : 'Rückgängig'}
+                </button>
+              </div>
+            ) : (['PROCESSED', 'REVIEW_REQUIRED', 'ARCHIVED'].includes(detail.processingStatus)) && (
+              <button
+                onClick={() => { setCashDate(new Date().toISOString().slice(0, 10)); setShowCashDialog(true); }}
+                className="btn-secondary flex items-center gap-2 text-sm w-full justify-center"
+              >
+                <Banknote size={16} />
+                Bar bezahlt
+              </button>
+            )}
+          </div>
+
+          {/* Cash payment dialog */}
+          {showCashDialog && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+              <div className="bg-white rounded-xl p-6 w-80 shadow-xl">
+                <h3 className="text-lg font-semibold mb-4">Barzahlung bestätigen</h3>
+                <label className="block text-sm text-gray-600 mb-1">Zahlungsdatum</label>
+                <input
+                  type="date"
+                  value={cashDate}
+                  onChange={(e) => setCashDate(e.target.value)}
+                  className="input-field w-full mb-4"
+                />
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setShowCashDialog(false)} className="btn-secondary text-sm">Abbrechen</button>
+                  <button
+                    onClick={() => cashPaymentMutation.mutate({ id: selectedId!, date: cashDate })}
+                    disabled={!cashDate || cashPaymentMutation.isPending}
+                    className="btn-primary text-sm"
+                  >
+                    {cashPaymentMutation.isPending ? 'Speichere...' : 'Bestätigen'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1258,9 +1470,33 @@ function EditForm({
       </div>
       <div className="grid grid-cols-2 gap-2">
         {field('USt-Satz %', 'vatRate', 'number')}
-        {field('Konto', 'accountNumber')}
+        <div>
+          <label className="block text-xs text-gray-500 mb-0.5">Konto</label>
+          <AccountSelector
+            value={(fields.accountNumber as string) || null}
+            onChange={(val) => setFields({ ...fields, accountNumber: val || '' })}
+          />
+        </div>
       </div>
       {field('Kategorie', 'category')}
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">Privatanteil %</label>
+        <input
+          type="number"
+          min="0"
+          max="100"
+          value={(fields.privatePercent as number) ?? ''}
+          onChange={(e) => setFields({ ...fields, privatePercent: e.target.value ? parseInt(e.target.value) : null })}
+          placeholder="0"
+          className="input-field !py-1.5 text-sm w-full"
+        />
+        {(fields.privatePercent as number) != null && (fields.privatePercent as number) > 0 && (fields.grossAmount as string) && (
+          <p className="text-xs text-gray-500 mt-1">
+            Betrieblich: {((1 - (fields.privatePercent as number) / 100) * parseFloat(fields.grossAmount as string)).toFixed(2)} EUR
+            ({100 - (fields.privatePercent as number)}% von {parseFloat(fields.grossAmount as string).toFixed(2)} EUR)
+          </p>
+        )}
+      </div>
 
       {error && <div className="text-xs text-red-600">{error}</div>}
 
@@ -1727,6 +1963,8 @@ function ProcessingBadge({ status }: { status: string }) {
     PROCESSED: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Verarbeitet' },
     REVIEW_REQUIRED: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Review nötig' },
     REJECTED: { bg: 'bg-red-100', text: 'text-red-700', label: 'Abgelehnt' },
+    INBOX: { bg: 'bg-blue-50', text: 'text-blue-600', label: 'Eingang' },
+    PENDING_CORRECTION: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Wartet auf Korrektur' },
     PARKED: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Geparkt' },
     ARCHIVED: { bg: 'bg-green-100', text: 'text-green-700', label: 'Archiviert' },
     RECONCILED: { bg: 'bg-teal-100', text: 'text-teal-700', label: 'Abgeglichen' },

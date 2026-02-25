@@ -43,3 +43,17 @@ export async function updatePaymentDifferenceApi(matchingId: string, data: { dif
   const response = await apiClient.put<ApiResponse<unknown>>(`/matchings/${matchingId}/difference`, data);
   return response.data;
 }
+
+export async function createTransactionBookingApi(data: {
+  transactionId: string;
+  bookingType: 'PRIVATE_WITHDRAWAL' | 'PRIVATE_DEPOSIT';
+  notes?: string | null;
+}) {
+  const response = await apiClient.post<ApiResponse<unknown>>('/matchings/bookings', data);
+  return response.data;
+}
+
+export async function deleteTransactionBookingApi(id: string) {
+  const response = await apiClient.delete<ApiResponse<null>>(`/matchings/bookings/${id}`);
+  return response.data;
+}

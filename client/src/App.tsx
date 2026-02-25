@@ -17,6 +17,9 @@ import { ScanPage } from './pages/ScanPage';
 import { ShareTargetPage } from './pages/ShareTargetPage';
 import { TermsPage } from './pages/TermsPage';
 import { PrivacyPage } from './pages/PrivacyPage';
+import { AccountsPage } from './pages/AccountsPage';
+import { InboxPage } from './pages/InboxPage';
+import { UvaReportPage } from './pages/UvaReportPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useAuthStore();
@@ -90,13 +93,16 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="inbox" element={<InboxPage />} />
         <Route path="scan" element={<ScanPage />} />
         <Route path="invoices" element={<InvoicesPage />} />
         <Route path="vendors" element={<VendorsPage />} />
         <Route path="customers" element={<CustomersPage />} />
         <Route path="bank-statements" element={<BankStatementsPage />} />
+        <Route path="accounts" element={<AccountsPage />} />
         <Route path="matching" element={<MatchingPage />} />
         <Route path="export" element={<ExportPage />} />
+        <Route path="tax/uva" element={<UvaReportPage />} />
         <Route path="audit-log" element={<AuditLogPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

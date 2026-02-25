@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 25. Februar 2026 (Session 12 — Steuerberater-Feedback)
+**Letzte Aktualisierung:** 25. Februar 2026 (Session 15 — Phase 11: Ausgangsrechnungen)
 
 ---
 
@@ -193,31 +193,26 @@
 ### Prio 2: Bankabgleich
 
 - [x] **Bankkonten-Verwaltung** (CRUD `/api/bank-accounts`) → Phase 4
-- [ ] **CSV-Import für Kontoauszüge** (Parsing verschiedener Bankformate)
-- [ ] **Matching-Algorithmen** (3-stufig)
-  - Exakt: Betrag + Rechnungsnr. im Verwendungszweck
-  - Betrags-Match: Betrag + Lieferantenname
-  - Fuzzy: Betrag ±2% + Datum ±5 Tage
+- [x] **CSV-Import für Kontoauszüge** (Flexible Header-Erkennung, AT/DE Bankformate, meinElba-Support) — ✅ Phase 8
+- [x] **Matching-Algorithmen** (4-stufig: Exakt 99% → RechnungsNr-Match 80% → Betrags-Match 70% → Fuzzy 50%) — ✅ Phase 8
 - [x] **Gruppenfreigabe** (alle grünen per Klick) → Phase 3: Batch-Genehmigung
 
 ### Prio 3: Export & Kommunikation
 
-- [x] **BMD CSV-Export** (Semikolon, UTF-8 BOM, dd.MM.yyyy) — ✅ Phase 8 (Steuerberater-Feedback)
+- [x] **BMD CSV-Export** (Semikolon, UTF-8 BOM, dd.MM.yyyy) — ✅ Phase 8
 - [ ] **Editierbare Exportfelder** (Export-Templates)
 - [x] **Korrektur-Mail an Lieferant** (LLM-generiert mit Fallback) — ✅ Phase 8
-- [ ] **E-Mail-Weiterleitung** (IMAP-Listener)
+- [ ] **E-Mail-Weiterleitung** (Inbound Webhook)
 
 ### Prio 4: Eingangskanäle
 
-- [ ] **Mobiler Scan (PWA)** — Kamerazugriff, Dokumentenerkennung, Perspektivkorrektur
+- [x] **Mobiler Scan (PWA)** — Kamera-Capture im Upload-Dialog vorhanden (camera input capture="environment")
 - [ ] **WhatsApp-Bot** — Webhook-Endpunkt
 
 ### Prio 5: Admin-Backend
 
 - [ ] **LLM-Konfiguration UI** (Provider, Modell, API-Key, Fallback)
-- [ ] **Storage-Konfiguration UI**
-- [ ] **Mandantenverwaltung** (alle Mandanten als Admin)
-- [ ] **Nutzerverwaltung** (mandantenübergreifend)
+- [ ] **Nutzerverwaltung im Mandant** (User CRUD innerhalb Tenant)
 
 ---
 
@@ -363,3 +358,212 @@ VIES-Abfrage ist implementiert (validateUid + compareCompanyNames in vies.servic
 - ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
 - ✅ `npm run test` — 174 bestehende Tests laufen (server)
 - ✅ Prisma-Migration angewandt
+
+---
+
+## Phase 9: Kontenplan + Barzahlung + Privatentnahme ✅
+
+**25. Februar 2026** — Fünf neue Features für vollständige E/A-Rechner-Buchhaltung.
+
+### Zusammenfassung
+
+#### 1. Editierbarer Kontenplan (Chart of Accounts)
+- [x] Account-Tabelle im Prisma-Schema (pro Mandant, `@@unique([tenantId, number])`)
+- [x] 26 Standard-Konten (österreichischer EKR): 2700 Kassa, 2800 Bank, 4000-4050 Erlöse, 5000-5100 Material, 7000-7900 Aufwendungen, 9600/9610 Privat
+- [x] CRUD-API: `GET/POST/PUT/DELETE /api/v1/accounts`, Seed-Endpoint
+- [x] Auto-Seeding bei Registrierung neuer Mandanten
+- [x] Frontend: AccountsPage mit Gruppierung, Suche, Typ-Filter, Inline-Edit, Deaktivierung
+- [x] AccountSelector-Kombobox ersetzt Freitext-Konto-Feld im Invoice-Edit
+
+#### 2. Barzahlung (Cash Payment)
+- [x] `paymentMethod` Enum (BANK/CASH) auf Invoice-Tabelle
+- [x] "Bar bezahlt" Button im Invoice-Detail → Datums-Dialog → Status wird RECONCILED ohne Matching
+- [x] Rückgängig-Funktion (undoCashPayment)
+- [x] BMD-Export: Gegenkonto 2700 (Kassa) bei CASH, 2800 (Bank) bei BANK
+
+#### 3. Privatentnahme / Privateinlage
+- [x] TransactionBooking-Tabelle für Buchungen ohne Rechnung (1:1 zu BankTransaction)
+- [x] "Privat" Button bei ungematchten Transaktionen in der Monatsabstimmung
+- [x] Automatische Konto-Zuordnung: Privatentnahme → 9600, Privateinlage → 9610
+- [x] Buchungs-Dialog mit optionalem Notiz-Feld
+- [x] Monatsabstimmung: bookedTransactions in Response, korrekte Statistiken
+
+#### 4. Privatanteil (%)
+- [x] `privatePercent` Int-Feld auf Invoice (0-100)
+- [x] Eingabefeld im Edit-Modus mit berechneter betrieblicher Anteil-Anzeige
+- [x] BMD-Export: Betrag × (100 - privatePercent)/100
+
+#### 5. Vendor Default Account (Lerneffekt)
+- [x] `defaultAccountNumber` Feld auf Vendor-Tabelle
+- [x] Auto-Zuweisung bei Rechnungsverarbeitung: wenn Vendor bekannt + Konto hinterlegt → auto-assign
+- [x] Lerneffekt: wenn User Konto manuell ändert → Vendor.defaultAccountNumber aktualisiert
+
+### Neue Dateien (Phase 9)
+
+| Datei | Zweck |
+|-------|-------|
+| `server/src/services/account.service.ts` | Kontenplan CRUD + Seeding |
+| `server/src/services/transactionBooking.service.ts` | Privatentnahme/-einlage |
+| `server/src/routes/account.routes.ts` | Kontenplan API |
+| `client/src/api/accounts.ts` | Kontenplan API-Client |
+| `client/src/pages/AccountsPage.tsx` | Kontenplan-Seite |
+| `client/src/components/AccountSelector.tsx` | Konto-Dropdown Komponente |
+| `prisma/migrations/20260225120000_add_accounts_cash_private/` | DB-Migration |
+
+### Geänderte Dateien (Phase 9)
+
+| Datei | Änderungen |
+|-------|-----------|
+| `prisma/schema.prisma` | 3 Enums, 2 Tabellen, 4 Invoice-Felder, 1 Vendor-Feld |
+| `shared/src/types.ts` | Neue Types + InvoiceDetail erweitert + ReconciliationBookedTransaction |
+| `shared/src/constants.ts` | DEFAULT_ACCOUNTS, PAYMENT_METHODS, BOOKING_TYPES |
+| `shared/src/validation.ts` | 4 neue Schemas, privatePercent in updateExtractedData |
+| `server/src/services/invoice.service.ts` | markCashPayment, undoCashPayment, privatePercent, Vendor Default |
+| `server/src/services/matching.service.ts` | Reconciliation: bookedTransactions, korrigierte Statistiken |
+| `server/src/services/export.service.ts` | Gegenkonto, Privatanteil, TransactionBookings-Export |
+| `server/src/services/auth.service.ts` | seedAccountsForTenant bei Registrierung |
+| `server/src/routes/invoice.routes.ts` | + cash-payment Routes |
+| `server/src/routes/matching.routes.ts` | + bookings Routes |
+| `server/src/app.ts` | Account-Routes registriert |
+| `client/src/pages/InvoicesPage.tsx` | AccountSelector, Bar-bezahlt-Button, Privatanteil |
+| `client/src/pages/MatchingPage.tsx` | Privat-Button bei ungematchten Transaktionen |
+| `client/src/App.tsx` | + /accounts Route |
+| `client/src/components/layout/AppLayout.tsx` | + Kontenplan Nav-Item |
+| `prisma/seed.ts` | Standard-Konten seeden |
+
+### Verifikation
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+- ✅ Prisma-Migration angewandt
+- ✅ Seed: 26 Standard-Konten für Demo-Mandant erstellt
+
+## Phase 10: Zwei-Zielgruppen-Strategie + A-B-C Workflow ✅
+
+**Basis-Dokumente:** `docs/Analyse & Umsetzung_ Zwei-Zielgruppen-Strategie.md` + `docs/Neuer 3-Prozess-Workflow_ A-B-C.md`
+
+### 10a: AccountingType auf Tenant
+- [x] Neues `AccountingType` Enum (EA, ACCRUAL) in Prisma-Schema
+- [x] `accountingType` Feld auf Tenant (default EA)
+- [x] `AccountingTypeValue` Type in shared/types.ts
+- [x] `ACCOUNTING_TYPES` Konstante mit Label + Description
+- [x] Register-Schema + Onboarding-Schema erweitert
+- [x] Server: accountingType in register/login/getMe durchgereicht
+- [x] Client: Auswahl-Cards auf RegisterPage + OnboardingPage
+
+### 10b: Neue ProcessingStatus-Werte
+- [x] `INBOX` + `PENDING_CORRECTION` in ProcessingStatus Enum
+- [x] `correctionRequestedAt` + `correctionNote` Felder auf Invoice
+- [x] `requestCorrectionSchema` Zod-Validierung
+- [x] Server: `requestCorrection()` Service-Funktion (PROCESSED/REVIEW_REQUIRED → PENDING_CORRECTION)
+- [x] Server: `POST /:id/request-correction` Route
+- [x] Server: Comma-separated `processingStatus` Filter (für Inbox: `INBOX,UPLOADED`)
+- [x] Client: `requestCorrectionApi()` + Korrektur-Button im Detail-Panel
+- [x] Client: PENDING_CORRECTION Info-Box mit Note + Datum
+- [x] Client: INBOX + PENDING_CORRECTION Badges in ProcessingBadge
+
+### 10c: Navigation umbauen auf A-B-C
+- [x] AppLayout: Grouped nav (Hauptprozess / Stammdaten / Berichte & Export / System)
+- [x] Dashboard erreichbar über Logo-Klick + eigenem Link
+- [x] Neue InboxPage (`/inbox`): Upload + INBOX/UPLOADED Belege, Drag&Drop
+- [x] BottomTabBar: Home → Eingang → Scannen → Prüfung → Mehr
+- [x] App.tsx: `/inbox` + `/tax/uva` Routen hinzugefügt
+
+### 10d: Conditional UI nach accountingType
+- [x] `useAccountingType()` Hook
+- [x] AppLayout: UVA-Bericht nur für EA sichtbar
+- [x] ExportPage: BMD CSV nur für ACCRUAL sichtbar
+- [x] UvaReportPage: Placeholder ("Kommt bald")
+
+### 10e: OCR-Prüfexport
+- [x] Server: `generateOcrCheckCsv()` in export.service.ts (21 Spalten inkl. Confidence-Scores)
+- [x] Server: `POST /exports/ocr-check` Route
+- [x] `ocrCheckExportSchema` Zod-Schema
+- [x] Client: `exportOcrCheckApi()` API-Funktion
+- [x] Client: "OCR-Export" Button auf InvoicesPage Header
+
+### 10f: BMD als fixes ExportConfig-Profil
+- [x] `isSystem Boolean @default(false)` auf ExportConfig
+- [x] Server: BMD ExportConfig Seed bei Registration (isSystem: true)
+- [x] Seed: Demo-Tenant BMD Config mit isSystem: true
+
+### Migration
+- Einzelne Migration: `20260226120000_add_accounting_type_inbox_correction`
+- AccountingType Enum + Feld, INBOX/PENDING_CORRECTION, correction fields, isSystem
+
+### Neue Dateien (Phase 10)
+
+| Datei | Zweck |
+|-------|-------|
+| `client/src/pages/InboxPage.tsx` | Prozess A: Rechnungseingang mit Upload + Belegliste |
+| `client/src/pages/UvaReportPage.tsx` | UVA-Bericht Placeholder (EA only) |
+| `client/src/hooks/useAccountingType.ts` | accountingType aus AuthStore |
+| `prisma/migrations/20260226120000_add_accounting_type_inbox_correction/` | DB-Migration |
+
+### Geänderte Dateien (Phase 10)
+
+| Datei | Änderung |
+|-------|----------|
+| `prisma/schema.prisma` | AccountingType Enum, ProcessingStatus +2, Invoice +2 Felder, ExportConfig +isSystem |
+| `shared/src/types.ts` | AccountingTypeValue, ProcessingStatusType +2, UserProfile/TenantProfile/RegisterRequest +accountingType |
+| `shared/src/constants.ts` | ACCOUNTING_TYPES, PROCESSING_STATUS +2 |
+| `shared/src/validation.ts` | registerSchema +accountingType, requestCorrectionSchema, ocrCheckExportSchema |
+| `server/src/services/auth.service.ts` | accountingType in register/login/getMe, BMD ExportConfig Seed |
+| `server/src/services/invoice.service.ts` | requestCorrection(), parkableStatuses +INBOX/PENDING_CORRECTION |
+| `server/src/services/export.service.ts` | generateOcrCheckCsv() |
+| `server/src/routes/invoice.routes.ts` | POST request-correction, comma-filter |
+| `server/src/routes/export.routes.ts` | POST ocr-check |
+| `client/src/components/layout/AppLayout.tsx` | Grouped navGroups, useAccountingType |
+| `client/src/components/mobile/BottomTabBar.tsx` | A-B-C Tabs |
+| `client/src/pages/RegisterPage.tsx` | accountingType Auswahl |
+| `client/src/pages/OnboardingPage.tsx` | accountingType Auswahl |
+| `client/src/pages/ExportPage.tsx` | Conditional BMD (ACCRUAL only) |
+| `client/src/pages/InvoicesPage.tsx` | Korrektur-Button, PENDING_CORRECTION Badge, OCR-Export |
+| `client/src/api/invoices.ts` | requestCorrectionApi() |
+| `client/src/api/exports.ts` | exportOcrCheckApi() |
+| `client/src/App.tsx` | /inbox, /tax/uva Routen |
+| `prisma/seed.ts` | BMD Config isSystem: true |
+
+### Verifikation
+
+- ✅ `npx tsc --noEmit` — server + client kompilieren ohne Fehler
+- ✅ Prisma-Migration erstellt und angewandt
+- ✅ Shared-Paket gebaut
+
+## Phase 11: Ausgangsrechnungen (OUTGOING) ✅
+
+**25. Februar 2026** — Kompletter Support für Ausgangsrechnungen.
+
+### Bereits vorhandene Infrastruktur (aus früheren Phasen)
+- ✅ `direction` Feld auf Invoice (INCOMING/OUTGOING), Index `@@index([tenantId, direction])`
+- ✅ Customer-Model + customer.service.ts (findOrCreate, list, detail, update)
+- ✅ Customer-Routes `/api/v1/customers` (GET /, GET /:id, PUT /:id)
+- ✅ CustomersPage mit Suche, Detail-Panel, Edit, E-Mail-Dialog, VIES-Badges
+- ✅ InvoiceUploadDialog mit Direction-Picker (INCOMING/OUTGOING Toggle)
+- ✅ Direction-Tabs in InvoicesPage (Alle/Eingang/Ausgang)
+- ✅ Archival-Prefix: RE für Eingang, AR für Ausgang
+- ✅ Matching-Service: OUTGOING korrekt von Vorsteuer ausgeschlossen
+- ✅ 4 Validierungsregeln direction-aware (IBAN, ReverseCharge, ForeignVat, IssuerNotSelf)
+
+### Neue Änderungen (Session 15)
+- [x] **InboxPage Direction-Toggle**: Eingangsrechnung/Ausgangsrechnung Buttons vor Upload-Area
+- [x] **InboxPage Upload**: Direction wird an `uploadInvoiceApi()` durchgereicht
+- [x] **InboxPage AR/ER-Badge**: Jeder Beleg zeigt direction-Badge (AR blau, ER grau)
+- [x] **InboxPage Name-Anzeige**: OUTGOING zeigt customerName statt vendorName
+- [x] **BMD CSV Export**: Partner-Name/-UID direction-aware (OUTGOING → Customer, INCOMING → Vendor)
+- [x] **BMD CSV Export**: Customer-UID via Relation geladen (kein Feld auf Invoice)
+- [x] **Monatsreport PDF**: Getrennte Summen (Ausgaben ER / Einnahmen AR)
+- [x] **Monatsreport PDF**: Typ-Spalte (ER/AR) in Belegtabelle, sortiert nach Direction
+- [x] **Full ZIP Export**: Ordnerstruktur `ER-Eingang/YYYY-MM/` vs. `AR-Ausgang/YYYY-MM/`
+- [x] **Full ZIP Summary**: Typ-Spalte im summary.csv
+
+### Geänderte Dateien (Phase 11)
+
+| Datei | Änderung |
+|-------|----------|
+| `client/src/pages/InboxPage.tsx` | Direction-Toggle, AR/ER-Badge, customerName für OUTGOING |
+| `server/src/services/export.service.ts` | BMD: partnerName/partnerUid direction-aware, customer relation; ZIP: direction-Subfolder |
+| `server/src/services/report.service.ts` | Getrennte ER/AR-Summen, Typ-Spalte, Direction-Sortierung |
+
+### Verifikation
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler

@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { DEFAULT_ACCOUNTS } from '../shared/dist/index.js';
 
 const prisma = new PrismaClient();
 
@@ -63,6 +64,22 @@ async function main() {
   ]);
 
   console.log(`${bankAccounts.length} Bankkonten erstellt`);
+
+  // Standard-Kontenplan seeden
+  const accountResult = await prisma.account.createMany({
+    data: DEFAULT_ACCOUNTS.map((acc) => ({
+      tenantId: tenant.id,
+      number: acc.number,
+      name: acc.name,
+      type: acc.type,
+      category: acc.category ?? null,
+      taxCode: acc.taxCode ?? null,
+      sortOrder: acc.sortOrder,
+      isDefault: true,
+    })),
+    skipDuplicates: true,
+  });
+  console.log(`${accountResult.count} Standard-Konten erstellt`);
 
   // Admin User
   const adminPassword = await bcrypt.hash('Admin123!', 12);
@@ -142,10 +159,11 @@ async function main() {
       encoding: 'ISO-8859-1',
       includeHeader: true,
       isDefault: true,
+      isSystem: true,
     },
   });
 
-  console.log('BMD Export-Konfiguration erstellt');
+  console.log('BMD Export-Konfiguration erstellt (isSystem)');
 
   // ============================================================
   // RECHNUNGEN (Invoices) — verschiedene Status & Lieferanten
@@ -1082,6 +1100,7 @@ async function main() {
   console.log('  Buchhalter:    buchhalter@demo.at / Buchhalter123!');
   console.log('  Steuerberater: steuerberater@demo.at / Steuerberater123!');
   console.log('\nTestdaten:');
+  console.log('  26 Standard-Konten (Kontenplan)');
   console.log('  10 Rechnungen (verschiedene Status: UPLOADED, PROCESSING, ARCHIVED, ERROR, REVIEW_REQUIRED, EXPORTED)');
   console.log('  10 Rechnungspositionen');
   console.log('  2  Kontoauszüge (Jänner + Februar 2026)');

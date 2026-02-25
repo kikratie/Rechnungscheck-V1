@@ -37,6 +37,7 @@ export interface RegisterRequest {
   password: string;
   firstName: string;
   lastName: string;
+  accountingType?: AccountingTypeValue;
 }
 
 export interface AuthTokens {
@@ -57,6 +58,12 @@ export type UserRoleType = 'ADMIN' | 'ACCOUNTANT' | 'TAX_ADVISOR';
 
 export type VendorTrustLevel = 'NEW' | 'VERIFIED' | 'TRUSTED';
 
+// Chart of Accounts & Payment Types
+export type AccountTypeValue = 'ASSET' | 'LIABILITY' | 'EXPENSE' | 'REVENUE' | 'EQUITY';
+export type PaymentMethodType = 'BANK' | 'CASH';
+export type BookingTypeValue = 'PRIVATE_WITHDRAWAL' | 'PRIVATE_DEPOSIT';
+export type AccountingTypeValue = 'EA' | 'ACCRUAL';
+
 export type InvoiceDirection = 'INCOMING' | 'OUTGOING';
 
 export interface UserProfile {
@@ -68,6 +75,7 @@ export interface UserProfile {
   role: UserRoleType;
   tenantName: string;
   onboardingComplete: boolean;
+  accountingType: AccountingTypeValue;
 }
 
 export type BankAccountType = 'CHECKING' | 'SAVINGS' | 'CREDIT_CARD' | 'PAYPAL' | 'OTHER';
@@ -99,6 +107,7 @@ export interface TenantProfile {
   phone: string | null;
   email: string | null;
   onboardingComplete: boolean;
+  accountingType: AccountingTypeValue;
   bankAccounts: BankAccountItem[];
 }
 
@@ -107,10 +116,12 @@ export interface TenantProfile {
 // ============================================================
 
 export type ProcessingStatusType =
+  | 'INBOX'
   | 'UPLOADED'
   | 'PROCESSING'
   | 'PROCESSED'
   | 'REVIEW_REQUIRED'
+  | 'PENDING_CORRECTION'
   | 'REJECTED'
   | 'PARKED'
   | 'ARCHIVED'
@@ -181,6 +192,9 @@ export interface InvoiceDetail extends InvoiceListItem {
   isDuplicate: boolean;
   notes: string | null;
   lineItems: InvoiceLineItemData[];
+  paymentMethod: PaymentMethodType;
+  cashPaymentDate: string | null;
+  privatePercent: number | null;
 }
 
 export interface InvoiceLineItemData {
@@ -309,6 +323,9 @@ export interface InvoiceDetailExtended extends InvoiceDetail {
   archivedFileName: string | null;
   stampFailed: boolean;
   approvalComment: string | null;
+  // Correction request fields
+  correctionRequestedAt: string | null;
+  correctionNote: string | null;
 }
 
 // ============================================================
@@ -457,11 +474,30 @@ export interface ReconciliationUnmatchedInvoice {
   suggestedTransactionDate: string | null;
 }
 
+export interface ReconciliationBookedTransaction {
+  bookingId: string;
+  bookingType: BookingTypeValue;
+  accountNumber: string;
+  amount: string;
+  notes: string | null;
+  confirmedAt: string;
+  transaction: {
+    id: string;
+    transactionDate: string;
+    amount: string;
+    currency: string;
+    counterpartName: string | null;
+    reference: string | null;
+    bookingText: string | null;
+  };
+}
+
 export interface MonthlyReconciliationData {
   summary: MonthlyReconciliationSummary;
   matched: ReconciliationMatchedItem[];
   unmatchedTransactions: ReconciliationUnmatchedTransaction[];
   unmatchedInvoices: ReconciliationUnmatchedInvoice[];
+  bookedTransactions: ReconciliationBookedTransaction[];
   availableMonths: string[];
 }
 
@@ -509,6 +545,46 @@ export interface SubstituteDocumentItem {
   vatNote: string | null;
   storagePath: string | null;
   createdByUserId: string;
+  createdAt: string;
+}
+
+// ============================================================
+// User Company Access Types (Steuerberater Multi-Tenant)
+// ============================================================
+
+// ============================================================
+// Chart of Accounts Types
+// ============================================================
+
+export interface AccountItem {
+  id: string;
+  tenantId: string;
+  number: string;
+  name: string;
+  type: AccountTypeValue;
+  category: string | null;
+  taxCode: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================================
+// Transaction Booking Types (Privatentnahme/Privateinlage)
+// ============================================================
+
+export interface TransactionBookingItem {
+  id: string;
+  tenantId: string;
+  transactionId: string;
+  bookingType: BookingTypeValue;
+  accountNumber: string;
+  amount: string;
+  notes: string | null;
+  confirmedByUserId: string;
+  confirmedAt: string;
   createdAt: string;
 }
 

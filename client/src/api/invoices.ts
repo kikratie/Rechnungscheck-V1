@@ -108,3 +108,18 @@ export async function revalidateAllApi() {
   const response = await apiClient.post<ApiResponse<{ revalidated: number }>>('/invoices/revalidate-all');
   return response.data;
 }
+
+export async function markCashPaymentApi(id: string, paymentDate: string) {
+  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/cash-payment`, { paymentDate });
+  return response.data;
+}
+
+export async function undoCashPaymentApi(id: string) {
+  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/undo-cash-payment`);
+  return response.data;
+}
+
+export async function requestCorrectionApi(id: string, note: string) {
+  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/request-correction`, { note });
+  return response.data;
+}
