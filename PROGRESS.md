@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 25. Februar 2026 (Session 15 — Phase 11: Ausgangsrechnungen)
+**Letzte Aktualisierung:** 26. Februar 2026 (Session 16 — Phase 12: E-Mail-Weiterleitung)
 
 ---
 
@@ -35,7 +35,7 @@
 
 | Modul | Zweck | Ist-Stand |
 |-------|-------|-----------|
-| `/modules/ingestion` | Upload, E-Mail, Scan, WhatsApp | ✅ Upload implementiert (Multer + S3) |
+| `/modules/ingestion` | Upload, E-Mail, Scan, WhatsApp | ✅ Upload (Multer + S3) + E-Mail IMAP-Polling (Phase 12) |
 | `/modules/ocr` | Dreistufige Erkennungs-Pipeline | ✅ Implementiert (pdf-parse → Vision → sharp) |
 | `/modules/llm` | LLM-Abstraktionsschicht | ✅ Implementiert (OpenAI, env-konfiguriert) |
 | `/modules/validation` | Regel-Engine (§11 UStG) | ✅ 18 Prüfregeln + Ampel-Logik |
@@ -564,6 +564,114 @@ VIES-Abfrage ist implementiert (validateUid + compareCompanyNames in vies.servic
 | `server/src/services/export.service.ts` | BMD: partnerName/partnerUid direction-aware, customer relation; ZIP: direction-Subfolder |
 | `server/src/services/report.service.ts` | Getrennte ER/AR-Summen, Typ-Spalte, Direction-Sortierung |
 
-### Verifikation
+### Verifikation (Phase 11)
 
 - ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+
+---
+
+## Phase 12: E-Mail-Weiterleitung (Inbound Email Ingestion) ✅
+
+**26. Februar 2026** — Automatischer Rechnungseingang per E-Mail via IMAP-Polling.
+
+### Zusammenfassung
+
+Mandanten konfigurieren IMAP-Mailboxen in den Einstellungen. BullMQ pollt regelmäßig (Standard: alle 5 Minuten), extrahiert PDF/Bild-Attachments und speist sie automatisch in die bestehende `uploadInvoice()`-Pipeline ein. Passwörter werden mit AES-256-GCM verschlüsselt gespeichert.
+
+### Features
+
+#### 1. EmailConnector (Prisma Model + CRUD)
+- [x] `EmailConnector` Tabelle: IMAP-Config, verschlüsseltes Passwort, Sync-Status, Fehler-Tracking
+- [x] `@@unique([tenantId, username])` — ein Konto pro Mandant
+- [x] Invoice: +emailSender, +emailSubject, +emailMessageId (nullable)
+- [x] Index `(tenantId, emailMessageId)` für Dedup
+- [x] REST API: GET/POST/PUT/DELETE `/api/v1/email-connectors`, POST `/test`, POST `/:id/sync`
+- [x] ADMIN-only für Erstellen/Ändern/Löschen
+
+#### 2. AES-256-GCM Verschlüsselung
+- [x] `encryption.service.ts`: encrypt/decrypt mit ENCRYPTION_KEY aus `.env`
+- [x] Format: `iv:authTag:ciphertext` (hex-kodiert)
+- [x] `isEncryptionConfigured()` Guard — Feature deaktiviert ohne Key
+
+#### 3. IMAP-Sync (Kernlogik)
+- [x] `imapflow` + `mailparser` für IMAP-Verbindung und Mail-Parsing
+- [x] UID-basiertes Tracking (nur neue Mails nach `lastSyncedUid`)
+- [x] Erster Sync: UNSEEN-Mails
+- [x] Attachment-Filter: nur PDF, JPEG, PNG, TIFF, WebP
+- [x] Inline-Images (ohne Dateiname) werden ignoriert
+- [x] Pro Attachment → `uploadInvoice()` mit `ingestionChannel: 'EMAIL'`
+- [x] Email-Metadaten (Absender, Betreff, Message-ID) auf Invoice gesetzt
+
+#### 4. Deduplication + Fehlerbehandlung
+- [x] Dedup via `tenantId + emailMessageId + originalFileName`
+- [x] Auto-Deaktivierung nach 3 aufeinanderfolgenden Fehlern (MAX_CONSECUTIVE_FAILURES)
+- [x] Audit-Log bei Deaktivierung
+- [x] Fehler-Counter Reset bei Reaktivierung
+
+#### 5. BullMQ Job-Scheduling
+- [x] Eigene Queue `email-sync` mit Concurrency 2
+- [x] Repeatable Jobs pro Connector (konfigurierbar: 1–60 Minuten)
+- [x] Manueller Sync-Trigger möglich
+- [x] Server-Boot: alle aktiven Connectors registrieren, alte Jobs aufräumen
+- [x] Graceful Shutdown: emailSyncWorker.close()
+
+#### 6. Settings UI (E-Mail-Abruf)
+- [x] Connector-Liste mit Status-Badges (SUCCESS grün, RUNNING blau, ERROR rot)
+- [x] Hinzufügen-Dialog: Host, Port, SSL, Username, App-Passwort, Ordner, Intervall
+- [x] "Verbindung testen" Button
+- [x] Pro Connector: Bearbeiten, Löschen, "Jetzt synchronisieren", Aktiv-Toggle
+- [x] Auto-Deaktivierung Warnung (3x fehlgeschlagen)
+- [x] Nur für ADMIN sichtbar
+
+#### 7. InboxPage Enhancement
+- [x] Email-Icon (lila) + "E-Mail" Badge bei `ingestionChannel === 'EMAIL'`
+- [x] Absender als Tooltip
+
+### Neue Dateien (Phase 12)
+
+| Datei | Zweck |
+|-------|-------|
+| `server/src/services/encryption.service.ts` | AES-256-GCM für IMAP-Passwörter |
+| `server/src/services/emailConnector.service.ts` | CRUD + Job-Management |
+| `server/src/services/emailSync.service.ts` | IMAP-Sync Kernlogik |
+| `server/src/jobs/emailSyncQueue.ts` | BullMQ Queue + Worker |
+| `server/src/routes/emailConnector.routes.ts` | REST-Endpoints |
+| `client/src/api/emailConnectors.ts` | API-Client Funktionen |
+| `prisma/migrations/20260226150000_add_email_connectors/` | DB-Migration |
+
+### Geänderte Dateien (Phase 12)
+
+| Datei | Änderung |
+|-------|----------|
+| `prisma/schema.prisma` | +EmailConnector Model, +3 Email-Felder auf Invoice |
+| `shared/src/types.ts` | +EmailConnectorItem, +Create/Update/Test Request Types |
+| `shared/src/constants.ts` | +EMAIL_CONNECTOR_SYNC_STATUS, +MAX_CONSECUTIVE_FAILURES, +ALLOWED_EMAIL_ATTACHMENT_MIMES |
+| `shared/src/validation.ts` | +3 Zod-Schemas (create, update, test connector) |
+| `server/src/config/env.ts` | +ENCRYPTION_KEY (optional, 64 hex chars) |
+| `server/src/services/invoice.service.ts` | +ingestionChannel Parameter in UploadParams |
+| `server/src/routes/invoice.routes.ts` | +ingestionChannel/emailSender in List-Select |
+| `server/src/app.ts` | emailConnector Routes registriert |
+| `server/src/index.ts` | +Email-Sync Worker, +registerAllActiveConnectors(), +Graceful Shutdown |
+| `client/src/pages/SettingsPage.tsx` | +EmailConnectorsSection (ADMIN only) |
+| `client/src/pages/InboxPage.tsx` | +Email-Icon + Absender-Badge |
+
+### Setup-Anleitung
+
+```bash
+# 1. ENCRYPTION_KEY generieren und in server/.env setzen:
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# → ENCRYPTION_KEY=<64-hex-chars>
+
+# 2. Migration anwenden:
+npm run db:migrate
+
+# 3. Gmail-Test:
+# Gmail → Einstellungen → Sicherheit → App-Passwörter → neues Passwort generieren
+# Connector anlegen: Host=imap.gmail.com, Port=993, SSL=ja, Username=email@gmail.com
+```
+
+### Verifikation (Phase 12)
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+- ✅ Prisma-Migration erstellt und angewandt
+- ✅ TypeScript: tsc --noEmit fehlerfrei (server + client)
