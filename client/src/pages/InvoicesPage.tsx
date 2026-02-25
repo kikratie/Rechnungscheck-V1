@@ -1163,8 +1163,8 @@ function InvoiceDetailContent({
             </div>
           )}
 
-          {/* Delete */}
-          {(detail.processingStatus === 'ERROR' || detail.processingStatus === 'UPLOADED') && (
+          {/* Delete — allowed for all non-archived/reconciled/exported invoices */}
+          {!['ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED'].includes(detail.processingStatus) && (
             <div className="border-t pt-4">
               <DeleteButton
                 invoiceId={selectedId}

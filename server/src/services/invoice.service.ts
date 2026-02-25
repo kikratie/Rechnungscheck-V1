@@ -713,7 +713,7 @@ export async function getInvoiceVersions(tenantId: string, invoiceId: string) {
   });
 }
 
-const DELETABLE_STATUSES = ['UPLOADED', 'ERROR'] as const;
+const NON_DELETABLE_STATUSES = ['ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED'] as const;
 
 export async function deleteInvoice(tenantId: string, userId: string, invoiceId: string) {
   const invoice = await prisma.invoice.findFirst({
@@ -721,9 +721,9 @@ export async function deleteInvoice(tenantId: string, userId: string, invoiceId:
   });
   if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
 
-  if (!DELETABLE_STATUSES.includes(invoice.processingStatus as typeof DELETABLE_STATUSES[number])) {
+  if (NON_DELETABLE_STATUSES.includes(invoice.processingStatus as typeof NON_DELETABLE_STATUSES[number])) {
     throw new ConflictError(
-      `Rechnung mit Status "${invoice.processingStatus}" kann nicht gelöscht werden. Nur Rechnungen mit Status UPLOADED oder ERROR sind löschbar.`,
+      `Rechnung mit Status "${invoice.processingStatus}" kann nicht gelöscht werden. Archivierte, abgeglichene und exportierte Rechnungen sind geschützt.`,
     );
   }
 

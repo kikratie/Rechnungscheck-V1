@@ -3,7 +3,12 @@
     "allow": [
       "Bash(npm run test:*)",
       "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 3001 2>$null | Select-Object OwningProcess -Unique\")",
-      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | Select-Object OwningProcess -Unique\")"
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | Select-Object OwningProcess -Unique\")",
+      "Bash(npx prisma migrate resolve --rolled-back 20260225080000_steuerberater_feedback --schema ../prisma/schema.prisma)",
+      "Bash(timeout 15 bash -c ':*)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\josef\\OneDrive - ProAgentur GmbH\\CODE\\Rechnungscheck V1\\prisma\\migrations"
     ]
   }
 }
