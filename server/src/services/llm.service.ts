@@ -165,6 +165,20 @@ BETRÄGE (WICHTIG — immer als JSON-Number, NIEMALS als String!):
 - currency: Währung (ISO 4217, Default EUR)
 Dezimaltrennzeichen ist PUNKT (1234.56), nicht Komma. Alle Beträge als reine Zahlen ohne Währungszeichen.
 
+ART DER LEISTUNG:
+- serviceType: Art der Leistung. Werte: "DELIVERY" (Warenlieferung), "SERVICE" (Dienstleistung), "BOTH" (beides gemischt).
+  Hinweise zur Erkennung:
+  - DELIVERY: Warenlieferung, Materiallieferung, Bestellungen, Versandhandel, physische Produkte
+  - SERVICE: Beratung, Reparatur, Miete, Telekommunikation, Versicherung, Hosting, SaaS, Wartung
+  - BOTH: Lieferung inkl. Montage, Waren mit Dienstleistung kombiniert
+
+BEWIRTUNGSBELEG-ERKENNUNG:
+- isHospitality: true wenn es sich um einen Bewirtungsbeleg handelt (Restaurant, Gastronomie, Catering, Hotel-Restaurant).
+  Hinweise: Firmenname enthält "Restaurant", "Gasthaus", "Café", "Catering", "Wirtshaus", "Pizzeria", "Bistro", etc.
+  ODER Positionen enthalten Speisen/Getränke UND es gibt gemischte USt-Sätze (10% + 20%).
+- hospitalityGuests: Bei Bewirtungsbeleg: Anzahl/Namen der bewirteten Personen (falls auf dem Beleg erkennbar, sonst null)
+- hospitalityReason: Bei Bewirtungsbeleg: Geschäftsanlass der Bewirtung (falls auf dem Beleg erkennbar, sonst null)
+
 SONSTIGES:
 - isReverseCharge: true wenn Reverse Charge Vermerk
 - accountNumber: Sachkonto/Aufwandskonto (falls angegeben)

@@ -88,3 +88,23 @@ export async function getInvoiceVersionsApi(id: string) {
   const response = await apiClient.get<ApiResponse<ExtractedDataItem[]>>(`/invoices/${id}/versions`);
   return response.data;
 }
+
+export async function parkInvoiceApi(id: string, reason: string) {
+  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/park`, { reason });
+  return response.data;
+}
+
+export async function unparkInvoiceApi(id: string) {
+  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/unpark`);
+  return response.data;
+}
+
+export async function cancelNumberApi(id: string, reason: string) {
+  const response = await apiClient.post<ApiResponse<unknown>>(`/invoices/${id}/cancel-number`, { reason });
+  return response.data;
+}
+
+export async function revalidateAllApi() {
+  const response = await apiClient.post<ApiResponse<{ revalidated: number }>>('/invoices/revalidate-all');
+  return response.data;
+}

@@ -181,8 +181,8 @@ async function main() {
         uidValidationStatus: 'VALID',
         uidValidationDate: new Date('2026-01-15'),
         processingStatus: 'ARCHIVED',
-        archivalNumber: 'ER-2026-00001',
-        archivalPrefix: 'ER',
+        archivalNumber: 'RE-2026-02-0001',
+        archivalPrefix: 'RE',
         archivedAt: new Date('2026-01-16T10:30:00Z'),
         archivedByUserId: admin.id,
         isLocked: true,
@@ -393,8 +393,8 @@ async function main() {
         uidValidationStatus: 'VALID',
         uidValidationDate: new Date('2026-01-28'),
         processingStatus: 'ARCHIVED',
-        archivalNumber: 'ER-2026-00002',
-        archivalPrefix: 'ER',
+        archivalNumber: 'RE-2026-02-0002',
+        archivalPrefix: 'RE',
         archivedAt: new Date('2026-01-29T09:15:00Z'),
         archivedByUserId: admin.id,
         isLocked: true,
@@ -1041,7 +1041,7 @@ async function main() {
     data: [
       { tenantId: tenant.id, userId: admin.id, entityType: 'Invoice', entityId: 'inv-001', action: 'UPLOAD', metadata: { fileName: 'RE-2026-0042_Papyrus.pdf' }, createdAt: new Date('2026-01-15T08:30:00Z') },
       { tenantId: tenant.id, userId: null, entityType: 'Invoice', entityId: 'inv-001', action: 'AI_PROCESSED', metadata: { confidence: 0.965, duration_ms: 3200 }, createdAt: new Date('2026-01-15T08:30:45Z') },
-      { tenantId: tenant.id, userId: accountant.id, entityType: 'Invoice', entityId: 'inv-001', action: 'APPROVE_AND_ARCHIVE', metadata: { archivalNumber: 'ER-2026-00001' }, createdAt: new Date('2026-01-16T10:30:00Z') },
+      { tenantId: tenant.id, userId: accountant.id, entityType: 'Invoice', entityId: 'inv-001', action: 'APPROVE_AND_ARCHIVE', metadata: { archivalNumber: 'RE-2026-02-0001' }, createdAt: new Date('2026-01-16T10:30:00Z') },
       { tenantId: tenant.id, userId: accountant.id, entityType: 'Matching', entityId: 'match-002', action: 'CONFIRM', metadata: { invoiceId: 'inv-001', transactionId: 'bt-002' }, createdAt: new Date('2026-01-17T10:00:00Z') },
       { tenantId: tenant.id, userId: admin.id, entityType: 'Invoice', entityId: 'inv-006', action: 'UPLOAD', metadata: { fileName: 'RE_2026_Consulting_XY.pdf' }, createdAt: new Date('2026-02-01T14:00:00Z') },
       { tenantId: tenant.id, userId: null, entityType: 'Invoice', entityId: 'inv-006', action: 'UID_VALIDATION_FAILED', metadata: { uid: 'ATU99999999', reason: 'VIES: ungültig' }, createdAt: new Date('2026-02-01T14:01:00Z') },
@@ -1057,22 +1057,24 @@ async function main() {
 
   await prisma.sequentialNumber.upsert({
     where: {
-      tenantId_prefix_year: {
+      tenantId_prefix_year_month: {
         tenantId: tenant.id,
-        prefix: 'ER',
+        prefix: 'RE',
         year: 2026,
+        month: 2,
       },
     },
     update: { lastNumber: 2 },
     create: {
       tenantId: tenant.id,
-      prefix: 'ER',
+      prefix: 'RE',
       year: 2026,
+      month: 2,
       lastNumber: 2,
     },
   });
 
-  console.log('Sequential Number Counter erstellt (ER-2026: lastNumber=2)');
+  console.log('Sequential Number Counter erstellt (RE-2026-02: lastNumber=2)');
 
   console.log('\n--- Seed abgeschlossen ---');
   console.log('Demo-Logins:');
@@ -1086,7 +1088,7 @@ async function main() {
   console.log('  10 Banktransaktionen');
   console.log('  5  Matchings (3 bestätigt, 2 offen)');
   console.log('  6  Audit-Log Einträge');
-  console.log('  1  Sequential Number Counter (ER-2026)');
+  console.log('  1  Sequential Number Counter (RE-2026-02)');
 }
 
 main()

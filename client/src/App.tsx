@@ -15,6 +15,8 @@ import { VendorsPage } from './pages/VendorsPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { ScanPage } from './pages/ScanPage';
 import { ShareTargetPage } from './pages/ShareTargetPage';
+import { TermsPage } from './pages/TermsPage';
+import { PrivacyPage } from './pages/PrivacyPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useAuthStore();
@@ -74,6 +76,10 @@ export default function App() {
 
       {/* Share Target — standalone page (no AppLayout, handles auth internally) */}
       <Route path="/share-target" element={<ShareTargetPage />} />
+
+      {/* Legal pages (public, no auth required) */}
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
 
       {/* Protected Routes */}
       <Route

@@ -44,6 +44,22 @@ export async function validateUid(uid: string): Promise<ViesResult> {
 
     const data = await response.json() as Record<string, unknown>;
 
+    // VIES REST API returns actionSucceed: false on rate-limit / service errors
+    // (HTTP 200 but no actual validation result)
+    if (data.actionSucceed === false) {
+      const wrappers = data.errorWrappers as Array<{ error: string }> | undefined;
+      const errorCode = wrappers?.[0]?.error || 'UNKNOWN';
+      return {
+        valid: false,
+        countryCode,
+        vatNumber,
+        name: null,
+        address: null,
+        requestDate: new Date().toISOString(),
+        error: `VIES Service-Fehler: ${errorCode}`,
+      };
+    }
+
     return {
       valid: data.valid === true,
       countryCode: (data.countryCode as string) || countryCode,

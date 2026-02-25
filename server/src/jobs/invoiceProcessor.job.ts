@@ -116,6 +116,19 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
       netAmount = Math.round((grossAmount - vatAmount) * 100) / 100;
     }
 
+    // Determine serviceType from LLM response
+    const serviceTypeRaw = (fields.serviceType as string) || null;
+    const validServiceTypes = ['DELIVERY', 'SERVICE', 'BOTH'];
+    const serviceType = serviceTypeRaw && validServiceTypes.includes(serviceTypeRaw) ? serviceTypeRaw : null;
+
+    // Hospitality detection (Bewirtungsbeleg)
+    const isHospitality = (fields.isHospitality as boolean) || false;
+    const hospitalityGuests = isHospitality ? ((fields.hospitalityGuests as string) || null) : null;
+    const hospitalityReason = isHospitality ? ((fields.hospitalityReason as string) || null) : null;
+    // Default deductibility: 50% for hospitality, 100% otherwise
+    const deductibilityPercent = isHospitality ? 50 : 100;
+    const deductibilityNote = isHospitality ? 'Bewirtungsbeleg — 50% abzugsfähig (§20 Abs 1 Z 3 EStG)' : null;
+
     // Create ExtractedData Version 1
     const extractedData = await prisma.extractedData.create({
       data: {
@@ -147,6 +160,11 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
         accountNumber: (fields.accountNumber as string) || null,
         costCenter: (fields.costCenter as string) || null,
         category: (fields.category as string) || null,
+        serviceType,
+        hospitalityGuests,
+        hospitalityReason,
+        deductibilityPercent,
+        deductibilityNote,
         confidenceScores: extraction.confidenceScores as Prisma.InputJsonValue,
       },
     });

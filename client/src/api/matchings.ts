@@ -38,3 +38,8 @@ export async function deleteMatchingApi(id: string) {
   const response = await apiClient.delete<ApiResponse<null>>(`/matchings/${id}`);
   return response.data;
 }
+
+export async function updatePaymentDifferenceApi(matchingId: string, data: { differenceReason: string; notes?: string }) {
+  const response = await apiClient.put<ApiResponse<unknown>>(`/matchings/${matchingId}/difference`, data);
+  return response.data;
+}

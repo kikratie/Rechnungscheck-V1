@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 23. Februar 2026 (Session 10)
+**Letzte Aktualisierung:** 25. Februar 2026 (Session 12 — Steuerberater-Feedback)
 
 ---
 
@@ -40,8 +40,8 @@
 | `/modules/llm` | LLM-Abstraktionsschicht | ✅ Implementiert (OpenAI, env-konfiguriert) |
 | `/modules/validation` | Regel-Engine (§11 UStG) | ✅ 18 Prüfregeln + Ampel-Logik |
 | `/modules/workflow` | Ampel, Nummerierung, Archivierung | ✅ Ampel + Archivierung + Nummerierung (Phase 5) |
-| `/modules/reconciliation` | Bankabgleich-Algorithmen | ✅ CSV-Import + 3-Stufen-Matching (Phase 5) |
-| `/modules/export` | CSV/BMD-Export-Generierung | Stub-Route |
+| `/modules/reconciliation` | Bankabgleich-Algorithmen | ✅ CSV-Import + 4-Stufen-Matching (Phase 8: IBAN-Match + PaymentDifference) |
+| `/modules/export` | CSV/BMD-Export-Generierung | ✅ BMD CSV + Monatsreport PDF + Voll-ZIP-Export (Phase 8) |
 | `/modules/communication` | Mail-Versand | ✅ Nodemailer SMTP + SendEmailDialog (Phase 5) |
 | `/modules/admin` | Admin-Backend | Nicht implementiert |
 
@@ -202,9 +202,9 @@
 
 ### Prio 3: Export & Kommunikation
 
-- [ ] **BMD CSV-Export** (Semikolon, ISO-8859-1, dd.MM.yyyy)
+- [x] **BMD CSV-Export** (Semikolon, UTF-8 BOM, dd.MM.yyyy) — ✅ Phase 8 (Steuerberater-Feedback)
 - [ ] **Editierbare Exportfelder** (Export-Templates)
-- [ ] **Korrektur-Mail an Lieferant** (E-Mail aus Rechnung extrahiert)
+- [x] **Korrektur-Mail an Lieferant** (LLM-generiert mit Fallback) — ✅ Phase 8
 - [ ] **E-Mail-Weiterleitung** (IMAP-Listener)
 
 ### Prio 4: Eingangskanäle
@@ -292,3 +292,74 @@ VIES-Abfrage ist implementiert (validateUid + compareCompanyNames in vies.servic
 |-------|-------|
 | `server/src/services/archival.service.ts` | Kernlogik: Nummerierung + PDF-Stempel + Archivierung |
 | `prisma/migrations/20260223200000_add_archival_workflow/` | DB-Migration: SequentialNumber, CancelledNumber, Invoice-Archivfelder, APPROVED→ARCHIVED |
+
+---
+
+## Phase 8: Steuerberater-Feedback (13 Punkte) ✅
+
+**25. Februar 2026** — Implementierung aller 13 Verbesserungspunkte vom Steuerberater.
+
+### Zusammenfassung der Änderungen
+
+#### A. DB-Schema + Nummernschema + Parken + ServiceType + Stempel
+- [x] 3 neue Enums (ServiceType, DifferenceReason, AccessLevel), 3 neue Tabellen (SubstituteDocument, PaymentDifference, UserCompanyAccess)
+- [x] ProcessingStatus erweitert: +PARKED, RECONCILED_WITH_DIFFERENCE
+- [x] ExtractedData: 5 neue Felder (serviceType, hospitalityGuests, hospitalityReason, deductibilityPercent, deductibilityNote)
+- [x] Nummernformat: ER-JJJJ-NNNNN → RE-JJJJ-MM-NNNN (mit Monat)
+- [x] Stempel: sachliches Design ohne Farben, Validierungs-Notizen als Bullet-Points
+- [x] Invoice-Parken: parkInvoice/unparkInvoice + Frontend-Buttons
+- [x] ServiceType (Lieferung/Leistung/Beides): LLM-Erkennung + Speicherung
+
+#### B. Matching-Logik + Zahlungsdifferenzen
+- [x] 4-stufiger Matching-Algorithmus (Exakt 99% → Rechnungsnr.-Match 80% → Betrags-Match 70% → Fuzzy 50%)
+- [x] IBAN-Matching (Vendor-IBAN vs. Transaction counterpartIban)
+- [x] PaymentDifference auto-create bei Betrags-Differenz
+- [x] Differenz-Grund-Dropdown (Skonto, Kursdifferenz, Trinkgeld, Teilzahlung, Rundung, Sonstiges)
+- [x] USt-Korrektur-Hinweis bei Skonto
+
+#### C. Bewirtungsbeleg-Erkennung
+- [x] LLM-Prompt: isHospitality, hospitalityGuests, hospitalityReason
+- [x] Validation-Rule: HOSPITALITY_CHECK (§20 Abs 1 Z 3 EStG)
+- [x] Auto-Erkennung: Restaurant-Keywords im Firmennamen + gemischte 10%/20% USt
+
+#### D. Ersatzbeleg + Korrektur-Mail
+- [x] Korrektur-Mail per LLM (GPT-4.1-nano) mit Fallback-Template
+- [x] Frontend: Korrektur-Mail-Button öffnet vorausgefüllten SendEmailDialog
+
+#### E. Monatsreport PDF + BMD-Export + Voll-Export
+- [x] BMD CSV-Export: Semikolon, Komma-Dezimal, dd.MM.yyyy, UTF-8 BOM
+- [x] Monatsreport PDF (A4 quer): Zusammenfassung, Ampel-Verteilung, Beleg-Tabelle
+- [x] Voll-Export ZIP: archivierte PDFs nach Monat + summary.csv
+- [x] Frontend: ExportPage komplett überarbeitet (Datums-Picker, Download-Buttons)
+
+#### F. Multi-Tenant Steuerberater-Zugang
+- [x] companyAccess.service.ts: grantAccess, revokeAccess, getAccessibleTenants
+- [x] tenantContext.ts: X-Tenant-Id Header für TAX_ADVISOR-Mandantenwechsel
+- [x] Tenant-Routes: accessible-tenants, grant/revoke-access, access-list
+- [x] Frontend: Mandanten-Switcher im Sidebar, Kontext-Banner, authStore erweitert
+
+#### G. Legal Pages + DSGVO
+- [x] /terms — Aufbewahrungspflichten (§132 BAO)
+- [x] /privacy — Datenschutzerklärung (DSGVO)
+- [x] GDPR-Service: Account-Löschung (Art. 17) + Datenexport (Art. 20)
+- [x] Settings: Steuerberater-Zugang-Verwaltung + DSGVO-Sektion
+
+### Neue Dateien (Phase 8)
+
+| Datei | Zweck |
+|-------|-------|
+| `server/src/services/export.service.ts` | BMD CSV + Voll-ZIP Export |
+| `server/src/services/report.service.ts` | Monatsreport-PDF |
+| `server/src/services/companyAccess.service.ts` | Steuerberater Multi-Tenant |
+| `server/src/services/gdpr.service.ts` | Konto-Löschung + Datenexport |
+| `client/src/api/exports.ts` | Export-API-Client |
+| `client/src/pages/TermsPage.tsx` | Aufbewahrungspflicht |
+| `client/src/pages/PrivacyPage.tsx` | Datenschutzerklärung |
+| `prisma/migrations/20260225080000_steuerberater_feedback/` | Hauptmigration |
+| `prisma/migrations/20260225090000_add_terms_accepted_at/` | termsAcceptedAt Feld |
+
+### Verifikation
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+- ✅ `npm run test` — 174 bestehende Tests laufen (server)
+- ✅ Prisma-Migration angewandt

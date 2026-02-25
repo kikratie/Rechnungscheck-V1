@@ -2,8 +2,8 @@
  * Archival Service — Genehmigungs- und Archivierungs-Workflow
  *
  * Handles:
- * - Sequential number generation (ER-2026-00001) with SELECT FOR UPDATE
- * - PDF stamping (digital Eingangsstempel)
+ * - Sequential number generation (RE-2026-02-0001) with SELECT FOR UPDATE
+ * - PDF stamping (sachlicher Eingangsstempel, ohne Farbcodes)
  * - Image-to-PDF conversion for non-PDF uploads
  * - File rename + move to archive/
  * - Single and batch archival
@@ -24,7 +24,7 @@ import sharp from 'sharp';
 
 interface NextNumberResult {
   number: number;
-  formatted: string; // "ER-2026-00001"
+  formatted: string; // "RE-2026-02-0001"
 }
 
 interface StampData {
@@ -32,8 +32,7 @@ interface StampData {
   eingangsdatum: Date;    // Upload date
   archivedAt: Date;       // Approval timestamp
   approvedBy: string;     // "Max Mustermann"
-  validationStatus: string; // "VALID", "WARNING", "INVALID"
-  comment?: string | null; // Optional: Begründung bei Warnung/Ungültig
+  validationNotes: string[]; // RED/YELLOW checks als sachliche Notizen
 }
 
 interface ArchiveResult {
@@ -65,6 +64,7 @@ interface InvoiceForArchival {
 
 /**
  * Gets next sequential number using SELECT FOR UPDATE to prevent duplicates.
+ * Format: RE-2026-02-0001 (prefix-year-month-number)
  * MUST be called inside a Prisma interactive transaction.
  */
 export async function getNextSequentialNumber(
@@ -72,6 +72,7 @@ export async function getNextSequentialNumber(
   tenantId: string,
   prefix: string,
   year: number,
+  month: number,
 ): Promise<NextNumberResult> {
   // SELECT FOR UPDATE — locks the row for this transaction
   const rows = await tx.$queryRaw<Array<{ id: string; lastNumber: number }>>`
@@ -80,17 +81,18 @@ export async function getNextSequentialNumber(
     WHERE "tenantId" = ${tenantId}
       AND prefix = ${prefix}
       AND year = ${year}
+      AND month = ${month}
     FOR UPDATE
   `;
 
   let nextNumber: number;
 
   if (rows.length === 0) {
-    // First number for this tenant/prefix/year
+    // First number for this tenant/prefix/year/month
     nextNumber = 1;
     await tx.$executeRaw`
-      INSERT INTO sequential_numbers (id, "tenantId", prefix, year, "lastNumber", "createdAt", "updatedAt")
-      VALUES (gen_random_uuid(), ${tenantId}, ${prefix}, ${year}, 1, NOW(), NOW())
+      INSERT INTO sequential_numbers (id, "tenantId", prefix, year, month, "lastNumber", "createdAt", "updatedAt")
+      VALUES (gen_random_uuid(), ${tenantId}, ${prefix}, ${year}, ${month}, 1, NOW(), NOW())
     `;
   } else {
     nextNumber = rows[0].lastNumber + 1;
@@ -101,7 +103,8 @@ export async function getNextSequentialNumber(
     `;
   }
 
-  const formatted = `${prefix}-${year}-${String(nextNumber).padStart(5, '0')}`;
+  const monthStr = String(month).padStart(2, '0');
+  const formatted = `${prefix}-${year}-${monthStr}-${String(nextNumber).padStart(4, '0')}`;
   return { number: nextNumber, formatted };
 }
 
@@ -130,17 +133,17 @@ export function sanitizeVendorName(name: string | null): string {
 
 /**
  * Determines the archival prefix based on document type and direction.
- * CREDIT_NOTE → GS, OUTGOING → AR, default (INCOMING) → ER
+ * CREDIT_NOTE → GS, OUTGOING → AR, default (INCOMING) → RE
  */
 export function getArchivalPrefix(documentType: string, direction?: string): string {
   if (documentType === 'CREDIT_NOTE') return 'GS';
   if (direction === 'OUTGOING') return 'AR';
-  return 'ER'; // INVOICE, RECEIPT, ERSATZBELEG (INCOMING)
+  return 'RE'; // Rechnung Eingang (INVOICE, RECEIPT, ERSATZBELEG)
 }
 
 /**
  * Builds the archived filename.
- * Format: ER-2026-00001_Lieferantenname_2026-01-15.pdf
+ * Format: RE-2026-02-0001_Lieferantenname_2026-01-15.pdf
  */
 export function buildArchivedFileName(
   archivalNumber: string,
@@ -156,7 +159,7 @@ export function buildArchivedFileName(
 
 /**
  * Builds the archive storage path.
- * Format: {tenantId}/archive/{year}/{filename}
+ * Format: {tenantId}/archive/{year}/{month}/{filename}
  */
 export function buildArchivePath(
   tenantId: string,
@@ -164,9 +167,12 @@ export function buildArchivePath(
   vendorName: string | null,
   invoiceDate: Date | null,
 ): string {
-  const year = archivalNumber.split('-')[1]; // Extract year from "ER-2026-00001"
+  // Extract year and month from "RE-2026-02-0001"
+  const parts = archivalNumber.split('-');
+  const year = parts[1];
+  const month = parts[2];
   const fileName = buildArchivedFileName(archivalNumber, vendorName, invoiceDate);
-  return `${tenantId}/archive/${year}/${fileName}`;
+  return `${tenantId}/archive/${year}/${month}/${fileName}`;
 }
 
 // ============================================================
@@ -174,8 +180,20 @@ export function buildArchivePath(
 // ============================================================
 
 /**
- * Adds a digital Eingangsstempel to the first page of a PDF.
- * Returns the stamped PDF as a Buffer.
+ * Adds a sachlicher Eingangsstempel to the first page of a PDF.
+ * Design: Neutral box (keine Farbcodes), mit Notizen aus Validierungs-Checks.
+ *
+ * Layout:
+ * ┌─────────────────────────────────┐
+ * │ RE-2026-02-0001                 │
+ * │ Eingang: 15.02.2026             │
+ * │ Geprüft: 15.02.2026 14:30      │
+ * │ Freigabe: Josef N.              │
+ * │                                 │
+ * │ Notizen:                        │
+ * │ • UID-Nummer nicht vorhanden    │
+ * │ • Lieferdatum nicht angegeben   │
+ * └─────────────────────────────────┘
  */
 export async function stampPdf(pdfBuffer: Buffer, stamp: StampData): Promise<Buffer> {
   const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
@@ -188,89 +206,107 @@ export async function stampPdf(pdfBuffer: Buffer, stamp: StampData): Promise<Buf
   const firstPage = pages[0];
   const { width, height } = firstPage.getSize();
 
-  // Truncate comment for stamp (full text stored in DB)
-  const commentText = stamp.comment ? stamp.comment.substring(0, 100) : null;
-  const hasComment = !!commentText;
+  // Prepare notes (max 5 lines to keep stamp compact)
+  const notes = stamp.validationNotes.slice(0, 5);
+  const hasNotes = notes.length > 0;
 
-  // Stamp box dimensions (top-right corner) — taller when comment present
-  const boxWidth = 230;
-  const boxHeight = hasComment ? 86 : 72;
+  // Dynamic box height based on note count
+  const baseHeight = 62; // archivalNumber + Eingang + Geprüft + Freigabe
+  const notesHeaderHeight = hasNotes ? 14 : 0;
+  const notesHeight = notes.length * 11;
+  const boxHeight = baseHeight + notesHeaderHeight + notesHeight + 8;
+  const boxWidth = 240;
   const margin = 8;
   const x = width - boxWidth - margin;
   const y = height - boxHeight - margin;
 
-  // Semi-transparent background
+  const textColor = rgb(0.2, 0.2, 0.2);
+  const lightColor = rgb(0.4, 0.4, 0.4);
+
+  // Neutral background box (kein Farbcode)
   firstPage.drawRectangle({
     x,
     y,
     width: boxWidth,
     height: boxHeight,
-    color: rgb(0.96, 0.96, 0.96),
-    borderColor: rgb(0.2, 0.55, 0.2),
-    borderWidth: 1.2,
-    opacity: 0.92,
+    color: rgb(0.97, 0.97, 0.97),
+    borderColor: rgb(0.4, 0.4, 0.4),
+    borderWidth: 0.8,
+    opacity: 0.93,
   });
+
+  let lineY = y + boxHeight - 16;
 
   // Line 1: Archival number (bold)
   firstPage.drawText(stamp.archivalNumber, {
     x: x + 8,
-    y: y + boxHeight - 16,
+    y: lineY,
     size: 11,
     font: helveticaBold,
-    color: rgb(0.1, 0.1, 0.1),
+    color: textColor,
   });
+  lineY -= 14;
 
-  // Line 2: Status
-  const statusMap: Record<string, { text: string; color: ReturnType<typeof rgb> }> = {
-    VALID: { text: 'GUELTIG', color: rgb(0.1, 0.55, 0.1) },
-    WARNING: { text: 'WARNUNG', color: rgb(0.75, 0.55, 0) },
-    INVALID: { text: 'GEPRUEFT', color: rgb(0.7, 0.1, 0.1) },
-  };
-  const statusInfo = statusMap[stamp.validationStatus] || statusMap.VALID;
-  firstPage.drawText(statusInfo.text, {
-    x: x + 8,
-    y: y + boxHeight - 30,
-    size: 8,
-    font: helveticaBold,
-    color: statusInfo.color,
-  });
-
-  // Line 3: Eingangsdatum
+  // Line 2: Eingangsdatum
   const eingangStr = stamp.eingangsdatum.toLocaleDateString('de-AT', {
     day: '2-digit', month: '2-digit', year: 'numeric',
   });
   firstPage.drawText(`Eingang: ${eingangStr}`, {
     x: x + 8,
-    y: y + boxHeight - 44,
+    y: lineY,
     size: 7.5,
     font: helvetica,
-    color: rgb(0.3, 0.3, 0.3),
+    color: lightColor,
   });
+  lineY -= 12;
 
-  // Line 4: Approved by + timestamp
+  // Line 3: Geprüft (Archivierungszeitpunkt)
   const archiveStr = stamp.archivedAt.toLocaleDateString('de-AT', {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
-  const approvedText = `${stamp.approvedBy} | ${archiveStr}`;
-  firstPage.drawText(approvedText.substring(0, 45), {
+  firstPage.drawText(`Geprueft: ${archiveStr}`, {
     x: x + 8,
-    y: y + boxHeight - 58,
-    size: 7,
+    y: lineY,
+    size: 7.5,
     font: helvetica,
-    color: rgb(0.4, 0.4, 0.4),
+    color: lightColor,
   });
+  lineY -= 12;
 
-  // Line 5 (optional): Approval comment
-  if (commentText) {
-    const displayComment = commentText.length >= 100 ? `Anm: ${commentText}...` : `Anm: ${commentText}`;
-    firstPage.drawText(displayComment.substring(0, 55), {
+  // Line 4: Freigabe (Approver name)
+  firstPage.drawText(`Freigabe: ${stamp.approvedBy.substring(0, 40)}`, {
+    x: x + 8,
+    y: lineY,
+    size: 7.5,
+    font: helvetica,
+    color: lightColor,
+  });
+  lineY -= 6;
+
+  // Notes section (sachliche Auflistung der Prüfungsergebnisse)
+  if (hasNotes) {
+    lineY -= 8;
+    firstPage.drawText('Notizen:', {
       x: x + 8,
-      y: y + boxHeight - 72,
-      size: 6.5,
-      font: helvetica,
-      color: rgb(0.45, 0.35, 0.0),
+      y: lineY,
+      size: 7,
+      font: helveticaBold,
+      color: textColor,
     });
+    lineY -= 11;
+
+    for (const note of notes) {
+      const bulletText = `\u2022 ${note.substring(0, 50)}`;
+      firstPage.drawText(bulletText, {
+        x: x + 10,
+        y: lineY,
+        size: 6.5,
+        font: helvetica,
+        color: lightColor,
+      });
+      lineY -= 11;
+    }
   }
 
   const stamped = await pdfDoc.save();
@@ -364,12 +400,12 @@ async function archiveInvoiceInTransaction(
 
   // 1. Get next sequential number (SELECT FOR UPDATE)
   const prefix = getArchivalPrefix(invoice.documentType, invoice.direction);
-  const year = invoice.invoiceDate
-    ? invoice.invoiceDate.getFullYear()
-    : new Date().getFullYear();
+  const refDate = invoice.invoiceDate || new Date();
+  const year = refDate.getFullYear();
+  const month = refDate.getMonth() + 1; // 1-12
 
   const { formatted: archivalNumber } = await getNextSequentialNumber(
-    tx, invoice.tenantId, prefix, year,
+    tx, invoice.tenantId, prefix, year, month,
   );
 
   // 2. Build archive path and filename
@@ -386,7 +422,10 @@ async function archiveInvoiceInTransaction(
     fileBuffer = await imageToPdf(fileBuffer, invoice.mimeType);
   }
 
-  // 5. Stamp the PDF (with error tolerance)
+  // 5. Load validation notes for stamp (RED/YELLOW checks)
+  const validationNotes = await getValidationNotes(tx, invoice.id);
+
+  // 6. Stamp the PDF (with error tolerance)
   const archivedAt = new Date();
   let stampFailed = false;
   try {
@@ -395,8 +434,7 @@ async function archiveInvoiceInTransaction(
       eingangsdatum: invoice.createdAt,
       archivedAt,
       approvedBy: userName,
-      validationStatus: invoice.validationStatus,
-      comment,
+      validationNotes,
     });
   } catch (err) {
     console.warn(`[Archival] PDF-Stempel fehlgeschlagen für ${invoice.id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -404,10 +442,10 @@ async function archiveInvoiceInTransaction(
     // Continue without stamp — archival still proceeds
   }
 
-  // 6. Upload stamped file to archive location
+  // 7. Upload stamped file to archive location
   await storageService.uploadFile(archivedStoragePath, fileBuffer, 'application/pdf');
 
-  // 7. Update invoice in DB (within transaction)
+  // 8. Update invoice in DB (within transaction)
   await tx.invoice.update({
     where: { id: invoice.id },
     data: {
@@ -427,6 +465,26 @@ async function archiveInvoiceInTransaction(
   });
 
   return { archivalNumber, archivedStoragePath, archivedFileName, archivedAt };
+}
+
+/**
+ * Loads validation check messages (RED/YELLOW) as notes for the stamp.
+ */
+async function getValidationNotes(
+  tx: Prisma.TransactionClient,
+  invoiceId: string,
+): Promise<string[]> {
+  const validation = await tx.validationResult.findFirst({
+    where: { invoiceId },
+    orderBy: { createdAt: 'desc' },
+    select: { checks: true },
+  });
+
+  if (!validation?.checks || !Array.isArray(validation.checks)) return [];
+
+  return (validation.checks as Array<{ status: string; message: string }>)
+    .filter((c) => c.status === 'RED' || c.status === 'YELLOW')
+    .map((c) => c.message);
 }
 
 // ============================================================

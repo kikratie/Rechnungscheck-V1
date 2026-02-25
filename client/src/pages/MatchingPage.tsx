@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getMonthlyReconciliationApi, runMatchingApi, confirmMatchingApi, rejectMatchingApi,
-  deleteMatchingApi, createManualMatchingApi, listMatchingsApi,
+  deleteMatchingApi, createManualMatchingApi, listMatchingsApi, updatePaymentDifferenceApi,
 } from '../api/matchings';
 import { listBankStatementsApi, getBankStatementApi } from '../api/bankStatements';
 import { apiClient } from '../api/client';
@@ -516,6 +516,28 @@ function MatchedTab({ items, onConfirm, onReject, onDelete }: {
               </div>
             </div>
 
+            {/* Payment difference banner */}
+            {(m as unknown as { paymentDifference?: { differenceAmount: string; differenceReason: string | null } }).paymentDifference && (() => {
+              const diff = (m as unknown as { paymentDifference: { differenceAmount: string; differenceReason: string | null; requiresVatCorrection?: boolean } }).paymentDifference;
+              const amt = parseFloat(diff.differenceAmount);
+              return (
+                <div className="px-4 py-2 bg-yellow-50 border-t border-yellow-200 flex items-center gap-2 text-xs">
+                  <AlertTriangle size={14} className="text-yellow-600 shrink-0" />
+                  <span className="text-yellow-800 font-medium">
+                    Differenz: {formatCurrency(Math.abs(amt).toString())}
+                  </span>
+                  <DifferenceReasonSelect
+                    matchingId={m.matchingId}
+                    currentReason={diff.differenceReason}
+                    onUpdated={() => {}}
+                  />
+                  {diff.requiresVatCorrection && (
+                    <span className="text-red-600 font-medium ml-auto">USt-Korrektur nötig</span>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Bottom bar */}
             <div className={`${isMobile ? 'px-3 py-2' : 'px-5 py-2.5'} bg-gray-50 border-t flex items-center justify-between gap-2`}>
               {!isMobile && <span className="text-xs text-gray-500 truncate flex-1">{m.matchReason || ''}</span>}
@@ -1001,4 +1023,45 @@ function formatCurrency(value: string): string {
 function formatMonthDE(monthStr: string): string {
   const [year, month] = monthStr.split('-').map(Number);
   return new Date(year, month - 1).toLocaleDateString('de-AT', { month: 'long', year: 'numeric' });
+}
+
+function DifferenceReasonSelect({ matchingId, currentReason, onUpdated }: {
+  matchingId: string;
+  currentReason: string | null;
+  onUpdated: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const reasons: Record<string, string> = {
+    SKONTO: 'Skonto',
+    CURRENCY_DIFFERENCE: 'Kursdifferenz',
+    TIP: 'Trinkgeld',
+    PARTIAL_PAYMENT: 'Teilzahlung',
+    ROUNDING: 'Rundung',
+    OTHER: 'Sonstiges',
+  };
+
+  const handleChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (!value) return;
+    try {
+      await updatePaymentDifferenceApi(matchingId, { differenceReason: value });
+      queryClient.invalidateQueries({ queryKey: ['monthly-reconciliation'] });
+      onUpdated();
+    } catch {
+      // silent
+    }
+  };
+
+  return (
+    <select
+      value={currentReason || ''}
+      onChange={handleChange}
+      className="text-xs border border-yellow-300 rounded px-1.5 py-0.5 bg-white text-yellow-800"
+    >
+      <option value="">Grund wählen...</option>
+      {Object.entries(reasons).map(([key, label]) => (
+        <option key={key} value={key}>{label}</option>
+      ))}
+    </select>
+  );
 }

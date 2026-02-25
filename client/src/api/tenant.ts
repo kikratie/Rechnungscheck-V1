@@ -52,3 +52,46 @@ export async function deleteBankAccountApi(id: string) {
   const response = await apiClient.delete<ApiResponse<{ message: string }>>(`/tenant/bank-accounts/${id}`);
   return response.data.data!;
 }
+
+// Steuerberater-Zugang (Multi-Tenant Access)
+export async function getAccessibleTenantsApi() {
+  const response = await apiClient.get<ApiResponse<Array<{ tenantId: string; name: string; slug: string; accessLevel: string }>>>('/tenant/accessible-tenants');
+  return response.data.data!;
+}
+
+export async function grantAccessApi(email: string, accessLevel: string = 'READ') {
+  const response = await apiClient.post<ApiResponse<unknown>>('/tenant/grant-access', { email, accessLevel });
+  return response.data;
+}
+
+export async function revokeAccessApi(userId: string) {
+  const response = await apiClient.delete<ApiResponse<{ message: string }>>(`/tenant/revoke-access/${userId}`);
+  return response.data;
+}
+
+export async function getAccessListApi() {
+  const response = await apiClient.get<ApiResponse<Array<{
+    id: string;
+    accessLevel: string;
+    user: { id: string; email: string; firstName: string; lastName: string };
+  }>>>('/tenant/access-list');
+  return response.data.data!;
+}
+
+// DSGVO / Terms
+export async function acceptTermsApi() {
+  const response = await apiClient.post<ApiResponse<{ message: string }>>('/tenant/accept-terms');
+  return response.data;
+}
+
+export async function deleteAccountApi(password: string) {
+  const response = await apiClient.delete<ApiResponse<{ message: string }>>('/tenant/account', {
+    data: { password },
+  });
+  return response.data;
+}
+
+export async function exportUserDataApi() {
+  const response = await apiClient.get('/tenant/data-export', { responseType: 'blob' });
+  return response.data as Blob;
+}

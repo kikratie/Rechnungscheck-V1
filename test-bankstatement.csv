@@ -1,0 +1,9 @@
+Buchungsdatum;Valutadatum;Auftraggeber/Empfänger;Buchungstext;Verwendungszweck;IBAN;Betrag;Währung
+01.12.2025;01.12.2025;internic Datenkommunikations GmbH;Überweisung;Rechnung 2025008572 Hosting Dezember;AT123456789012;-106,00;EUR
+17.12.2025;17.12.2025;A1 Telekom Austria AG;Lastschrift;001356032769 Mobilfunk Dezember 2025;AT987654321098;-344,79;EUR
+07.12.2025;07.12.2025;aWATTar GmbH;Lastschrift;Stromabrechnung Dezember;AT111222333444;-42,07;EUR
+05.12.2025;05.12.2025;Microsoft Osterreich GmbH;Kreditkarte;Azure Cloud Services;AT555666777888;-35,41;EUR
+01.12.2025;01.12.2025;Cleverbridge GmbH;PayPal;CCleaner Professional;AT999000111222;-99,96;EUR
+02.12.2025;02.12.2025;Mag. Wilfried Orth;Überweisung;Buchhaltung November;AT333444555666;-574,00;EUR
+15.12.2025;15.12.2025;Kunde XYZ GmbH;Gutschrift;Projektabrechnung Q4;AT777888999000;2.500,00;EUR
+20.12.2025;20.12.2025;Supermarkt Billa;Kreditkarte;Einkauf Bürobedarf;AT123123123123;-45,32;EUR

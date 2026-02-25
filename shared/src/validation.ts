@@ -156,7 +156,7 @@ export const invoiceFilterSchema = paginationSchema.extend({
   search: z.string().optional(),
   direction: z.enum(['INCOMING', 'OUTGOING']).optional(),
   processingStatus: z
-    .enum(['UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'ARCHIVED', 'RECONCILED', 'EXPORTED', 'ERROR'])
+    .enum(['UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'REJECTED', 'PARKED', 'ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED', 'ERROR', 'REPLACED'])
     .optional(),
   validationStatus: z.enum(['PENDING', 'VALID', 'WARNING', 'INVALID']).optional(),
   vendorName: z.string().optional(),
@@ -224,6 +224,12 @@ export const updateExtractedDataSchema = z.object({
   accountNumber: z.string().max(20).optional().nullable(),
   costCenter: z.string().max(50).optional().nullable(),
   category: z.string().max(100).optional().nullable(),
+  // Steuerberater-Feedback Felder
+  serviceType: z.enum(['DELIVERY', 'SERVICE', 'BOTH']).optional().nullable(),
+  hospitalityGuests: z.string().max(500).optional().nullable(),
+  hospitalityReason: z.string().max(500).optional().nullable(),
+  deductibilityPercent: z.number().int().min(0).max(100).optional().nullable(),
+  deductibilityNote: z.string().max(500).optional().nullable(),
   editReason: z.string().max(500).optional(),
 });
 
@@ -311,4 +317,67 @@ export const manualMatchingSchema = z.object({
 
 export const uidBatchSchema = z.object({
   uids: z.array(z.string()).min(1).max(50),
+});
+
+// ============================================================
+// Beleg-Parken Schemas
+// ============================================================
+
+export const parkInvoiceSchema = z.object({
+  reason: z.string().min(1, 'Begründung ist erforderlich').max(2000),
+});
+
+// ============================================================
+// Substitute Document Schema (Ersatzbeleg-Workflow)
+// ============================================================
+
+export const createSubstituteDocSchema = z.object({
+  reason: z.string().min(1, 'Begründung ist erforderlich').max(2000),
+  paymentDate: z.string().optional().nullable(),
+  amount: z.number().min(0.01, 'Betrag ist erforderlich'),
+  description: z.string().max(2000).optional().nullable(),
+  vatDeductible: z.boolean().default(true),
+  vatNote: z.string().max(500).optional().nullable(),
+});
+
+// ============================================================
+// Payment Difference Schema
+// ============================================================
+
+export const updatePaymentDifferenceSchema = z.object({
+  differenceReason: z.enum(['SKONTO', 'CURRENCY_DIFFERENCE', 'TIP', 'PARTIAL_PAYMENT', 'ROUNDING', 'OTHER']),
+  notes: z.string().max(2000).optional().nullable(),
+});
+
+// ============================================================
+// DSGVO — Account Delete Schema
+// ============================================================
+
+export const deleteAccountSchema = z.object({
+  password: z.string().min(1, 'Passwort ist erforderlich'),
+  confirmText: z.string().refine((val) => val === 'LÖSCHEN', {
+    message: 'Bitte "LÖSCHEN" eingeben zur Bestätigung',
+  }),
+});
+
+// ============================================================
+// Company Access Schema (Steuerberater-Zugang)
+// ============================================================
+
+export const grantAccessSchema = z.object({
+  email: z.string().email('Ungültige E-Mail-Adresse'),
+  accessLevel: z.enum(['READ', 'WRITE', 'ADMIN']).default('READ'),
+});
+
+// ============================================================
+// Export Schemas (erweitert)
+// ============================================================
+
+export const monthlyReportSchema = z.object({
+  year: z.coerce.number().int().min(2020).max(2100),
+  month: z.coerce.number().int().min(1).max(12),
+});
+
+export const fullExportSchema = z.object({
+  year: z.coerce.number().int().min(2020).max(2100).optional(),
 });

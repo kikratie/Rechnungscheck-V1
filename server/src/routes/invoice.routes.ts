@@ -5,7 +5,7 @@ import { validateBody } from '../middleware/validate.js';
 import { invoiceUpload } from '../middleware/upload.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
-import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, createEigenbelegSchema, batchApproveSchema, cancelNumberSchema } from '@buchungsai/shared';
+import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, createEigenbelegSchema, batchApproveSchema, cancelNumberSchema, parkInvoiceSchema } from '@buchungsai/shared';
 import * as invoiceService from '../services/invoice.service.js';
 import { cancelArchivalNumber } from '../services/archival.service.js';
 import * as storageService from '../services/storage.service.js';
@@ -258,6 +258,35 @@ router.post('/:id/reject', validateBody(rejectInvoiceSchema), async (req, res, n
       req.userId!,
       req.params.id as string,
       req.body.reason as string,
+    );
+    res.json({ success: true, data: invoice });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/park — Park invoice
+router.post('/:id/park', validateBody(parkInvoiceSchema), async (req, res, next) => {
+  try {
+    const invoice = await invoiceService.parkInvoice(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+      req.body.reason as string,
+    );
+    res.json({ success: true, data: invoice });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/unpark — Resume parked invoice
+router.post('/:id/unpark', async (req, res, next) => {
+  try {
+    const invoice = await invoiceService.unparkInvoice(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
     );
     res.json({ success: true, data: invoice });
   } catch (err) {

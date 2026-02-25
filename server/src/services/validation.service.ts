@@ -33,6 +33,9 @@ interface ValidationInput {
   estimatedEurGross?: number | null;
   exchangeRate?: number | null;
   exchangeRateDate?: string | null;
+  hospitalityGuests?: string | null;
+  hospitalityReason?: string | null;
+  isHospitality?: boolean;
 }
 
 export interface ValidationOutput {
@@ -1250,6 +1253,59 @@ function checkCurrencyInfo(
 // Main validation function
 // ============================================================
 
+// ============================================================
+// Bewirtungsbeleg-Prüfung (§20 Abs 1 Z 3 EStG)
+// ============================================================
+
+function checkHospitality(
+  fields: ExtractedFields,
+  hospitalityGuests?: string | null,
+  hospitalityReason?: string | null,
+  isHospitality?: boolean,
+): ValidationCheck {
+  const rule = VALIDATION_RULES.HOSPITALITY_CHECK;
+
+  // Auto-detect hospitality from issuer name or category
+  const hospKeywords = ['restaurant', 'gasthaus', 'café', 'cafe', 'catering', 'wirtshaus', 'pizzeria', 'bistro', 'trattoria', 'gasthof', 'hotel'];
+  const nameMatch = fields.issuerName && hospKeywords.some(k => fields.issuerName!.toLowerCase().includes(k));
+
+  // Mixed VAT rates (10% + 20%) is a strong indicator for Austrian restaurants
+  const hasMixedGastroRates = fields.vatBreakdown && fields.vatBreakdown.length >= 2 &&
+    fields.vatBreakdown.some(b => b.rate === 10) && fields.vatBreakdown.some(b => b.rate === 20);
+
+  const detected = isHospitality || nameMatch || hasMixedGastroRates;
+
+  if (!detected) {
+    return {
+      rule: rule.id,
+      status: 'GRAY',
+      message: 'Kein Bewirtungsbeleg erkannt',
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  // Hospitality detected → check required fields
+  const missing: string[] = [];
+  if (!hospitalityGuests) missing.push('Bewirtete Personen');
+  if (!hospitalityReason) missing.push('Anlass der Bewirtung');
+
+  if (missing.length > 0) {
+    return {
+      rule: rule.id,
+      status: 'YELLOW',
+      message: `Bewirtungsbeleg erkannt — fehlende Angaben: ${missing.join(', ')}. Bitte ergänzen für Vorsteuerabzug.`,
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  return {
+    rule: rule.id,
+    status: 'GREEN',
+    message: 'Bewirtungsbeleg: Alle Pflichtangaben vorhanden',
+    legalBasis: rule.legalBasis,
+  };
+}
+
 export async function validateInvoice(input: ValidationInput): Promise<ValidationOutput> {
   const { extractedFields: fields, tenantId, invoiceId, direction = 'INCOMING', estimatedEurGross, exchangeRate, exchangeRateDate } = input;
   const gross = toNum(fields.grossAmount);
@@ -1296,6 +1352,7 @@ export async function validateInvoice(input: ValidationInput): Promise<Validatio
     checkForeignVat(fields, direction),
     checkPlzUidConsistency(fields, amountClass),
     checkCurrencyInfo(fields, estimatedEurGross, exchangeRate, exchangeRateDate),
+    checkHospitality(fields, input.hospitalityGuests, input.hospitalityReason, input.isHospitality),
   ];
 
   // Async checks
@@ -1357,5 +1414,6 @@ export const _testing = {
   checkDuplicate,
   checkUidVies,
   checkCurrencyInfo,
+  checkHospitality,
   EU_UID_PREFIXES,
 };

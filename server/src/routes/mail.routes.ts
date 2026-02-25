@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireTenant } from '../middleware/tenantContext.js';
-import { isMailConfigured, sendMail } from '../services/mail.service.js';
+import { isMailConfigured, sendMail, generateCorrectionEmailText } from '../services/mail.service.js';
 
 const router = Router();
 router.use(authenticate, requireTenant);
@@ -46,6 +46,19 @@ router.post('/send', async (req: Request, res: Response, next: NextFunction) => 
       entityId,
     });
 
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/mail/generate-correction/:invoiceId — Generate correction email text via LLM
+router.post('/generate-correction/:invoiceId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const tenantId = req.tenantId!;
+    const invoiceId = req.params.invoiceId as string;
+
+    const result = await generateCorrectionEmailText(invoiceId, tenantId);
     res.json({ success: true, data: result });
   } catch (err) {
     next(err);

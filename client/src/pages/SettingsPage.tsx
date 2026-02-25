@@ -7,10 +7,16 @@ import {
   createBankAccountApi,
   updateBankAccountApi,
   deleteBankAccountApi,
+  grantAccessApi,
+  revokeAccessApi,
+  getAccessListApi,
+  deleteAccountApi,
+  exportUserDataApi,
 } from '../api/tenant';
+import { downloadBlob } from '../api/exports';
 import { getMailStatusApi } from '../api/mail';
 import type { TenantProfile, BankAccountItem, BankAccountType } from '@buchungsai/shared';
-import { Mail, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Mail, CheckCircle, AlertTriangle, Shield, Trash2, Download, UserPlus, X, Loader2 } from 'lucide-react';
 
 const ACCOUNT_TYPE_LABELS: Record<BankAccountType, string> = {
   CHECKING: 'Girokonto',
@@ -520,7 +526,220 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* Steuerberater-Zugang (only Admin) */}
+        {user?.role === 'ADMIN' && (
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Shield size={20} className="text-blue-600" />
+              Steuerberater-Zugang
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Geben Sie Ihrem Steuerberater Lesezugriff auf Ihre Belege.
+            </p>
+            <TaxAdvisorAccessSection />
+          </div>
+        )}
+
+        {/* DSGVO / Datenschutz */}
+        <div className="card p-6">
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Shield size={20} className="text-gray-600" />
+            Datenschutz & Konto
+          </h2>
+          <GdprSection isAdmin={user?.role === 'ADMIN'} />
+        </div>
       </div>
+    </div>
+  );
+}
+
+function TaxAdvisorAccessSection() {
+  const [email, setEmail] = useState('');
+  const [accessLevel, setAccessLevel] = useState('READ');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const queryClient = useQueryClient();
+
+  const { data: accessList, isLoading: listLoading } = useQuery({
+    queryKey: ['access-list'],
+    queryFn: getAccessListApi,
+  });
+
+  const handleGrant = async () => {
+    if (!email) return;
+    setLoading(true);
+    setError('');
+    try {
+      await grantAccessApi(email, accessLevel);
+      setEmail('');
+      queryClient.invalidateQueries({ queryKey: ['access-list'] });
+    } catch (err: unknown) {
+      setError((err as { response?: { data?: { error?: { message?: string } } } }).response?.data?.error?.message || 'Fehler beim Zugang gewähren');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRevoke = async (userId: string) => {
+    if (!confirm('Zugang wirklich entziehen?')) return;
+    try {
+      await revokeAccessApi(userId);
+      queryClient.invalidateQueries({ queryKey: ['access-list'] });
+    } catch {
+      alert('Fehler beim Entziehen des Zugangs');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Grant access form */}
+      <div className="flex gap-2 items-end">
+        <div className="flex-1">
+          <label className="block text-xs text-gray-500 mb-1">E-Mail des Steuerberaters</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="input-field text-sm"
+            placeholder="steuerberater@kanzlei.at"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Zugriff</label>
+          <select value={accessLevel} onChange={(e) => setAccessLevel(e.target.value)} className="input-field text-sm">
+            <option value="READ">Lesen</option>
+            <option value="WRITE">Schreiben</option>
+          </select>
+        </div>
+        <button className="btn-primary text-sm flex items-center gap-1" onClick={handleGrant} disabled={!email || loading}>
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+          Einladen
+        </button>
+      </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {/* Current access list */}
+      {listLoading ? (
+        <div className="flex items-center justify-center py-4"><Loader2 className="animate-spin text-gray-400" size={20} /></div>
+      ) : accessList && accessList.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs text-gray-500 font-medium">Aktive Zugänge</p>
+          {accessList.map((item) => (
+            <div key={item.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <div>
+                <p className="text-sm font-medium">{item.user.firstName} {item.user.lastName}</p>
+                <p className="text-xs text-gray-500">{item.user.email} · {item.accessLevel === 'READ' ? 'Lesen' : item.accessLevel === 'WRITE' ? 'Schreiben' : item.accessLevel}</p>
+              </div>
+              <button
+                onClick={() => handleRevoke(item.user.id)}
+                className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                title="Zugang entziehen"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-gray-400">Kein Steuerberater hat aktuell Zugang.</p>
+      )}
+    </div>
+  );
+}
+
+function GdprSection({ isAdmin }: { isAdmin: boolean }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [password, setPassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const { logout } = useAuthStore();
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await exportUserDataApi();
+      downloadBlob(blob, 'datenexport.json');
+    } catch {
+      alert('Export fehlgeschlagen');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!password) return;
+    setDeleting(true);
+    try {
+      await deleteAccountApi(password);
+      logout();
+      window.location.href = '/login';
+    } catch (err: unknown) {
+      alert((err as { response?: { data?: { error?: { message?: string } } } }).response?.data?.error?.message || 'Löschung fehlgeschlagen');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Data Export */}
+      <div>
+        <p className="text-sm text-gray-700 mb-2">
+          Gemäß Art. 20 DSGVO können Sie alle Ihre persönlichen Daten als JSON-Datei herunterladen.
+        </p>
+        <button className="btn-secondary text-sm flex items-center gap-1.5" onClick={handleExport} disabled={exporting}>
+          {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          Daten exportieren
+        </button>
+      </div>
+
+      {/* Account deletion (Admin only) */}
+      {isAdmin && (
+        <div className="border-t pt-4">
+          <p className="text-sm text-gray-700 mb-2">
+            Gemäß Art. 17 DSGVO können Sie Ihr Konto und alle zugehörigen Daten unwiderruflich löschen.
+          </p>
+          {!confirmDelete ? (
+            <button
+              className="btn-secondary text-sm flex items-center gap-1.5 text-red-600 hover:text-red-700 hover:border-red-300"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 size={14} />
+              Konto löschen
+            </button>
+          ) : (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-3">
+              <p className="text-sm text-red-700 font-medium">
+                Achtung: Alle Daten werden unwiderruflich gelöscht! Dies umfasst alle Rechnungen, Bankdaten, Lieferanten und Benutzer.
+              </p>
+              <div>
+                <label className="block text-xs text-red-600 mb-1">Passwort bestätigen</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="input-field text-sm border-red-300"
+                  placeholder="Aktuelles Passwort eingeben"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="px-3 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 flex items-center gap-1.5"
+                  onClick={handleDelete}
+                  disabled={!password || deleting}
+                >
+                  {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  Endgültig löschen
+                </button>
+                <button className="btn-secondary text-sm" onClick={() => { setConfirmDelete(false); setPassword(''); }}>
+                  Abbrechen
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -612,6 +612,83 @@ export async function createEigenbeleg(params: CreateEigenbelegParams) {
   return result;
 }
 
+// ============================================================
+// Beleg-Parken (Phase A5)
+// ============================================================
+
+export async function parkInvoice(tenantId: string, userId: string, invoiceId: string, reason: string) {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, tenantId },
+  });
+  if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
+
+  if (invoice.isLocked) {
+    throw new ConflictError('Archivierte Rechnung kann nicht geparkt werden.');
+  }
+
+  // Only parkable from certain statuses
+  const parkableStatuses = ['UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'ERROR'];
+  if (!parkableStatuses.includes(invoice.processingStatus)) {
+    throw new ConflictError(
+      `Rechnung mit Status "${invoice.processingStatus}" kann nicht geparkt werden.`,
+    );
+  }
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      processingStatus: 'PARKED',
+      notes: reason,
+    },
+  });
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Invoice',
+    entityId: invoiceId,
+    action: 'PARK',
+    newData: { reason },
+  });
+
+  return updated;
+}
+
+export async function unparkInvoice(tenantId: string, userId: string, invoiceId: string) {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, tenantId },
+  });
+  if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
+
+  if (invoice.processingStatus !== 'PARKED') {
+    throw new ConflictError('Nur geparkte Rechnungen können fortgesetzt werden.');
+  }
+
+  // Determine the correct status to restore to
+  // If there's extracted data → PROCESSED, otherwise → UPLOADED
+  const hasExtractedData = await prisma.extractedData.count({ where: { invoiceId } });
+  const restoredStatus = hasExtractedData > 0 ? 'PROCESSED' : 'UPLOADED';
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      processingStatus: restoredStatus,
+      notes: null,
+    },
+  });
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Invoice',
+    entityId: invoiceId,
+    action: 'UNPARK',
+    newData: { restoredStatus },
+  });
+
+  return updated;
+}
+
 export async function batchApproveInvoices(
   tenantId: string,
   userId: string,
@@ -742,6 +819,11 @@ export async function runValidationAndSync(params: {
   }
 
   // 2. Run validation with current rules (uses EUR estimate for amount class)
+  // Load hospitality fields from extracted data if available (for HOSPITALITY_CHECK)
+  const extractedRecord = extracted as unknown as Record<string, unknown>;
+  const hospitalityGuests = (extractedRecord.hospitalityGuests as string) || null;
+  const hospitalityReason = (extractedRecord.hospitalityReason as string) || null;
+
   const validationOutput = await validateInvoice({
     extractedFields: {
       issuerName: extracted.issuerName,
@@ -769,6 +851,8 @@ export async function runValidationAndSync(params: {
     estimatedEurGross,
     exchangeRate,
     exchangeRateDate: exchangeRateDateStr,
+    hospitalityGuests,
+    hospitalityReason,
   });
 
   // 3. Save validation result (append, keeps history)

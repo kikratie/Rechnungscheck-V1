@@ -22,8 +22,11 @@ export const PROCESSING_STATUS = {
   PROCESSING: 'PROCESSING',
   PROCESSED: 'PROCESSED',
   REVIEW_REQUIRED: 'REVIEW_REQUIRED',
+  REJECTED: 'REJECTED',
+  PARKED: 'PARKED',
   ARCHIVED: 'ARCHIVED',
   RECONCILED: 'RECONCILED',
+  RECONCILED_WITH_DIFFERENCE: 'RECONCILED_WITH_DIFFERENCE',
   EXPORTED: 'EXPORTED',
   ERROR: 'ERROR',
   REPLACED: 'REPLACED',
@@ -31,7 +34,7 @@ export const PROCESSING_STATUS = {
 
 // Archivierungs-Prefixes
 export const ARCHIVAL_PREFIXES = {
-  INCOMING: 'ER',   // Eingangsrechnung
+  INCOMING: 'RE',   // Rechnung Eingang
   OUTGOING: 'AR',   // Ausgangsrechnung
   CREDIT_NOTE: 'GS', // Gutschrift
 } as const;
@@ -150,4 +153,36 @@ export const VALIDATION_RULES = {
   UID_VIES_CHECK: { id: 'UID_VIES_CHECK', label: 'UID-Prüfung (VIES)', legalBasis: 'Art 28 MwStSystRL / VO (EU) 904/2010', requiredFor: ['STANDARD', 'LARGE'] },
   PLZ_UID_CHECK: { id: 'PLZ_UID_CHECK', label: 'PLZ-UID Plausibilität', legalBasis: '§11 Abs 1 Z 1–2 UStG', requiredFor: ['STANDARD', 'LARGE'] },
   CURRENCY_INFO: { id: 'CURRENCY_INFO', label: 'Fremdwährungs-Info', legalBasis: '§20 Abs 2 UStG', requiredFor: [] },
+  HOSPITALITY_CHECK: { id: 'HOSPITALITY_CHECK', label: 'Bewirtungsbeleg-Prüfung', legalBasis: '§20 Abs 1 Z 3 EStG', requiredFor: ['SMALL', 'STANDARD', 'LARGE'] },
+} as const;
+
+// Zahlungsdifferenz-Gründe (Labels)
+export const DIFFERENCE_REASONS = {
+  SKONTO: { label: 'Skonto', requiresVatCorrection: true },
+  CURRENCY_DIFFERENCE: { label: 'Kursdifferenz', requiresVatCorrection: false },
+  TIP: { label: 'Trinkgeld', requiresVatCorrection: false },
+  PARTIAL_PAYMENT: { label: 'Teilzahlung', requiresVatCorrection: false },
+  ROUNDING: { label: 'Rundungsdifferenz', requiresVatCorrection: false },
+  OTHER: { label: 'Sonstiges', requiresVatCorrection: false },
+} as const;
+
+// Service-Typen (Lieferung/Leistung)
+export const SERVICE_TYPES = {
+  DELIVERY: { label: 'Lieferung', description: 'Lieferung von Waren' },
+  SERVICE: { label: 'Leistung', description: 'Erbringung von Dienstleistungen' },
+  BOTH: { label: 'Beides', description: 'Lieferung und Leistung' },
+} as const;
+
+// Abzugsfähigkeit (Bewirtung)
+export const DEDUCTIBILITY_OPTIONS = [
+  { value: 100, label: '100% abzugsfähig', description: 'Betrieblich veranlasst, keine Bewirtung' },
+  { value: 50, label: '50% abzugsfähig', description: 'Bewirtung von Geschäftspartnern (§20 Abs 1 Z 3 EStG)' },
+  { value: 0, label: 'Nicht abzugsfähig', description: 'Rein private Bewirtung' },
+] as const;
+
+// Steuerberater Zugangsebenen
+export const ACCESS_LEVELS = {
+  READ: { label: 'Lesezugriff', description: 'Nur Ansicht, keine Bearbeitung' },
+  WRITE: { label: 'Schreibzugriff', description: 'Belege bearbeiten und archivieren' },
+  ADMIN: { label: 'Vollzugriff', description: 'Wie Schreibzugriff + Benutzer verwalten' },
 } as const;

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run test:*)",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 3001 2>$null | Select-Object OwningProcess -Unique\")",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | Select-Object OwningProcess -Unique\")"
+    ]
+  }
+}

@@ -12,7 +12,10 @@ import {
 
   getInvoiceDownloadUrl,
   batchApproveInvoicesApi,
+  parkInvoiceApi,
+  unparkInvoiceApi,
 } from '../api/invoices';
+import { generateCorrectionEmailApi } from '../api/mail';
 import type { InvoiceFilters } from '../api/invoices';
 import type { ValidationCheck, TrafficLightStatus } from '@buchungsai/shared';
 import {
@@ -20,6 +23,7 @@ import {
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
   ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight, MinusCircle,
   ArrowUp, ArrowDown, ArrowUpDown, Lock, Archive, Mail, SlidersHorizontal,
+  PauseCircle, Play,
 } from 'lucide-react';
 import { SendEmailDialog } from '../components/SendEmailDialog';
 import { InvoiceUploadDialog } from '../components/InvoiceUploadDialog';
@@ -43,6 +47,7 @@ export function InvoicesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchApproveDialog, setShowBatchApproveDialog] = useState(false);
   const [showEmailDialog, setShowEmailDialog] = useState(false);
+  const [emailPrefill, setEmailPrefill] = useState<{ to?: string; subject?: string; body?: string } | undefined>(undefined);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const isMobile = useIsMobile();
 
@@ -231,11 +236,11 @@ Mit freundlichen Grüßen`;
 
         return (
           <SendEmailDialog
-            onClose={() => setShowEmailDialog(false)}
-            onSuccess={() => setShowEmailDialog(false)}
-            defaultTo={recipientEmail}
-            defaultSubject={defaultSubject}
-            defaultBody={defaultBody}
+            onClose={() => { setShowEmailDialog(false); setEmailPrefill(undefined); }}
+            onSuccess={() => { setShowEmailDialog(false); setEmailPrefill(undefined); }}
+            defaultTo={emailPrefill?.to || recipientEmail}
+            defaultSubject={emailPrefill?.subject || defaultSubject}
+            defaultBody={emailPrefill?.body || defaultBody}
             entityType="Invoice"
             entityId={selectedId}
           />
@@ -691,6 +696,7 @@ Mit freundlichen Grüßen`;
               setRejectReason={setRejectReason}
               setShowErsatzbelegDialog={setShowErsatzbelegDialog}
               setShowEmailDialog={setShowEmailDialog}
+              setEmailPrefill={setEmailPrefill}
               startEdit={startEdit}
               navigate={navigate}
               queryClient={queryClient}
@@ -720,6 +726,7 @@ Mit freundlichen Grüßen`;
               setRejectReason={setRejectReason}
               setShowErsatzbelegDialog={setShowErsatzbelegDialog}
               setShowEmailDialog={setShowEmailDialog}
+              setEmailPrefill={setEmailPrefill}
               startEdit={startEdit}
               navigate={navigate}
               queryClient={queryClient}
@@ -751,6 +758,7 @@ function InvoiceDetailContent({
   selectedId, detail, detailLoading, detailError,
   editMode, editFields, setEditFields, setEditMode, setSelectedId,
   setShowRejectDialog, setRejectReason, setShowErsatzbelegDialog, setShowEmailDialog,
+  setEmailPrefill,
   startEdit, navigate, queryClient,
 }: {
   selectedId: string;
@@ -768,6 +776,7 @@ function InvoiceDetailContent({
   setRejectReason: (v: string) => void;
   setShowErsatzbelegDialog: (v: boolean) => void;
   setShowEmailDialog: (v: boolean) => void;
+  setEmailPrefill: (v: { to?: string; subject?: string; body?: string } | undefined) => void;
   startEdit: () => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   navigate: any;
@@ -1070,7 +1079,7 @@ function InvoiceDetailContent({
           )}
 
           {/* Action buttons */}
-          {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && detail.processingStatus !== 'REJECTED' && (
+          {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && detail.processingStatus !== 'REJECTED' && detail.processingStatus !== 'PARKED' && (
             <div className="border-t pt-4 flex gap-2">
               <ApproveButton
                 invoiceId={selectedId}
@@ -1087,6 +1096,43 @@ function InvoiceDetailContent({
                 <ThumbsDown size={14} />
                 Ablehnen
               </button>
+            </div>
+          )}
+
+          {/* Park / Unpark */}
+          {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && (
+            <div className="border-t pt-4">
+              {detail.processingStatus === 'PARKED' ? (
+                <UnparkButton
+                  invoiceId={selectedId}
+                  onSuccess={() => {
+                    queryClient.invalidateQueries({ queryKey: ['invoices'] });
+                    queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+                  }}
+                />
+              ) : (
+                <ParkButton
+                  invoiceId={selectedId}
+                  onSuccess={() => {
+                    queryClient.invalidateQueries({ queryKey: ['invoices'] });
+                    queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+                  }}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Correction Mail */}
+          {detail.validationStatus !== 'VALID' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && (
+            <div className="border-t pt-4">
+              <CorrectionMailButton
+                invoiceId={selectedId}
+                vendorEmail={(detail as unknown as { vendor?: { email?: string } }).vendor?.email}
+                onOpenEmailDialog={(prefill) => {
+                  setEmailPrefill(prefill);
+                  setShowEmailDialog(true);
+                }}
+              />
             </div>
           )}
 
@@ -1681,8 +1727,10 @@ function ProcessingBadge({ status }: { status: string }) {
     PROCESSED: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Verarbeitet' },
     REVIEW_REQUIRED: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Review nötig' },
     REJECTED: { bg: 'bg-red-100', text: 'text-red-700', label: 'Abgelehnt' },
+    PARKED: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Geparkt' },
     ARCHIVED: { bg: 'bg-green-100', text: 'text-green-700', label: 'Archiviert' },
     RECONCILED: { bg: 'bg-teal-100', text: 'text-teal-700', label: 'Abgeglichen' },
+    RECONCILED_WITH_DIFFERENCE: { bg: 'bg-teal-100', text: 'text-teal-700', label: 'Abgeglichen (Differenz)' },
     EXPORTED: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Exportiert' },
     ERROR: { bg: 'bg-red-100', text: 'text-red-700', label: 'Fehler' },
     REPLACED: { bg: 'bg-gray-200', text: 'text-gray-600', label: 'Ersetzt' },
@@ -1733,5 +1781,124 @@ function SortHeader({
         )}
       </div>
     </th>
+  );
+}
+
+function ParkButton({ invoiceId, onSuccess }: { invoiceId: string; onSuccess: () => void }) {
+  const [showDialog, setShowDialog] = useState(false);
+  const [reason, setReason] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handlePark = async () => {
+    if (!reason.trim()) return;
+    setLoading(true);
+    try {
+      await parkInvoiceApi(invoiceId, reason);
+      setShowDialog(false);
+      onSuccess();
+    } catch {
+      alert('Parken fehlgeschlagen');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!showDialog) {
+    return (
+      <button
+        className="btn-secondary flex items-center gap-1.5 text-sm w-full justify-center text-gray-600"
+        onClick={() => setShowDialog(true)}
+      >
+        <PauseCircle size={14} />
+        Parken
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium">Rechnung parken</p>
+      <textarea
+        className="input-field text-sm"
+        rows={2}
+        placeholder="Grund für das Parken..."
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        autoFocus
+      />
+      <div className="flex gap-2">
+        <button className="btn-primary text-sm flex-1" onClick={handlePark} disabled={!reason.trim() || loading}>
+          {loading ? <Loader2 size={14} className="animate-spin" /> : 'Parken'}
+        </button>
+        <button className="btn-secondary text-sm" onClick={() => setShowDialog(false)}>Abbrechen</button>
+      </div>
+    </div>
+  );
+}
+
+function UnparkButton({ invoiceId, onSuccess }: { invoiceId: string; onSuccess: () => void }) {
+  const [loading, setLoading] = useState(false);
+
+  const handleUnpark = async () => {
+    setLoading(true);
+    try {
+      await unparkInvoiceApi(invoiceId);
+      onSuccess();
+    } catch {
+      alert('Fortsetzen fehlgeschlagen');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      className="btn-primary flex items-center gap-1.5 text-sm w-full justify-center"
+      onClick={handleUnpark}
+      disabled={loading}
+    >
+      {loading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+      Fortsetzen (Entparken)
+    </button>
+  );
+}
+
+function CorrectionMailButton({
+  invoiceId,
+  vendorEmail,
+  onOpenEmailDialog,
+}: {
+  invoiceId: string;
+  vendorEmail?: string;
+  onOpenEmailDialog: (prefill: { to?: string; subject?: string; body?: string }) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    setLoading(true);
+    try {
+      const result = await generateCorrectionEmailApi(invoiceId);
+      onOpenEmailDialog({
+        to: result.data?.to || vendorEmail || '',
+        subject: result.data?.subject || '',
+        body: result.data?.body || '',
+      });
+    } catch {
+      // Fallback: open email dialog with default values
+      onOpenEmailDialog({ to: vendorEmail || '' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      className="btn-secondary flex items-center gap-1.5 text-sm w-full justify-center text-orange-600 hover:text-orange-700 hover:border-orange-300"
+      onClick={handleClick}
+      disabled={loading}
+    >
+      {loading ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
+      Korrektur-Mail
+    </button>
   );
 }

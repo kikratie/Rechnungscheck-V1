@@ -112,11 +112,18 @@ export type ProcessingStatusType =
   | 'PROCESSED'
   | 'REVIEW_REQUIRED'
   | 'REJECTED'
+  | 'PARKED'
   | 'ARCHIVED'
   | 'RECONCILED'
+  | 'RECONCILED_WITH_DIFFERENCE'
   | 'EXPORTED'
   | 'REPLACED'
   | 'ERROR';
+
+// Steuerberater-Feedback Types
+export type ServiceType = 'DELIVERY' | 'SERVICE' | 'BOTH';
+export type DifferenceReasonType = 'SKONTO' | 'CURRENCY_DIFFERENCE' | 'TIP' | 'PARTIAL_PAYMENT' | 'ROUNDING' | 'OTHER';
+export type AccessLevelType = 'READ' | 'WRITE' | 'ADMIN';
 
 export type ValidationStatusType =
   | 'PENDING'
@@ -235,6 +242,12 @@ export interface ExtractedDataItem {
   accountNumber: string | null;
   costCenter: string | null;
   category: string | null;
+  // Steuerberater-Feedback
+  serviceType: ServiceType | null;
+  hospitalityGuests: string | null;
+  hospitalityReason: string | null;
+  deductibilityPercent: number | null;
+  deductibilityNote: string | null;
   confidenceScores: Record<string, number>;
   source: string;
   pipelineStage: string | null;
@@ -339,6 +352,17 @@ export interface BankTransactionItem {
 export type MatchTypeValue = 'AUTO' | 'AI_SUGGESTED' | 'MANUAL';
 export type MatchStatusValue = 'SUGGESTED' | 'CONFIRMED' | 'REJECTED';
 
+export interface PaymentDifferenceItem {
+  id: string;
+  matchingId: string;
+  invoiceAmount: string;
+  paidAmount: string;
+  differenceAmount: string;
+  differenceReason: DifferenceReasonType;
+  notes: string | null;
+  requiresVatCorrection: boolean;
+}
+
 export interface MatchingItem {
   id: string;
   invoiceId: string;
@@ -349,6 +373,7 @@ export interface MatchingItem {
   status: MatchStatusValue;
   invoice: InvoiceListItem;
   transaction: BankTransactionItem;
+  paymentDifference: PaymentDifferenceItem | null;
 }
 
 // ============================================================
@@ -449,6 +474,7 @@ export interface DashboardStats {
   pendingReview: number;
   matchedInvoices: number;
   unmatchedInvoices: number;
+  parkedInvoices: number;
   validationSummary: {
     valid: number;
     warning: number;
@@ -465,4 +491,39 @@ export interface ActivityItem {
   type: string;
   description: string;
   timestamp: string;
+}
+
+// ============================================================
+// Substitute Document Types (Ersatzbeleg-Workflow)
+// ============================================================
+
+export interface SubstituteDocumentItem {
+  id: string;
+  invoiceId: string;
+  tenantId: string;
+  reason: string;
+  paymentDate: string | null;
+  amount: string;
+  description: string | null;
+  vatDeductible: boolean;
+  vatNote: string | null;
+  storagePath: string | null;
+  createdByUserId: string;
+  createdAt: string;
+}
+
+// ============================================================
+// User Company Access Types (Steuerberater Multi-Tenant)
+// ============================================================
+
+export interface UserCompanyAccessItem {
+  id: string;
+  userId: string;
+  tenantId: string;
+  accessLevel: AccessLevelType;
+  grantedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user?: { id: string; email: string; firstName: string; lastName: string };
+  tenant?: { id: string; name: string; slug: string };
 }

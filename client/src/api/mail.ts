@@ -19,3 +19,8 @@ export async function getMailStatusApi() {
   const response = await apiClient.get<ApiResponse<{ configured: boolean }>>('/mail/status');
   return response.data;
 }
+
+export async function generateCorrectionEmailApi(invoiceId: string) {
+  const response = await apiClient.post<ApiResponse<{ to: string; subject: string; body: string }>>(`/mail/generate-correction/${invoiceId}`);
+  return response.data;
+}

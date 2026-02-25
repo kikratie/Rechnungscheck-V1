@@ -3,7 +3,7 @@ import { authenticate } from '../middleware/auth.js';
 import { requireTenant } from '../middleware/tenantContext.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
-import { manualMatchingSchema } from '@buchungsai/shared';
+import { manualMatchingSchema, updatePaymentDifferenceSchema } from '@buchungsai/shared';
 import { validateBody } from '../middleware/validate.js';
 import * as matchingService from '../services/matching.service.js';
 
@@ -79,6 +79,7 @@ router.get('/', async (req, res, next) => {
               isMatched: true,
             },
           },
+          paymentDifference: true,
         },
       }),
       prisma.matching.count({ where }),
@@ -147,6 +148,21 @@ router.post('/:id/reject', async (req, res, next) => {
     const matching = await matchingService.rejectMatching(tenantId, userId, req.params.id);
 
     res.json({ success: true, data: matching });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/v1/matchings/:id/difference — Update payment difference reason
+router.put('/:id/difference', validateBody(updatePaymentDifferenceSchema), async (req, res, next) => {
+  try {
+    const result = await matchingService.updatePaymentDifference(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
+      req.body,
+    );
+    res.json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/authStore';
 import { getDashboardStatsApi } from '../api/dashboard';
-import { FileText, Building2, ArrowLeftRight, AlertTriangle, CheckCircle, XCircle, Clock, TrendingUp, Loader2 } from 'lucide-react';
+import { FileText, Building2, ArrowLeftRight, AlertTriangle, CheckCircle, XCircle, Clock, TrendingUp, Loader2, PauseCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { DashboardStats } from '@buchungsai/shared';
 
@@ -81,8 +81,8 @@ export function DashboardPage() {
             </div>
           </div>
 
-          {/* Second row: matching + amount */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-8">
+          {/* Second row: matching + amount + parked */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 md:gap-6 mb-6 md:mb-8">
             <div className="card p-6">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-purple-100 rounded-lg">
@@ -121,6 +121,20 @@ export function DashboardPage() {
                 </div>
               </div>
             </div>
+
+            {(stats.parkedInvoices ?? 0) > 0 && (
+              <div className="card p-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-gray-100 rounded-lg">
+                    <PauseCircle className="text-gray-600" size={24} />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Geparkt</p>
+                    <p className="text-2xl font-bold text-gray-600">{stats.parkedInvoices}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Recent Activity + Quick Actions */}

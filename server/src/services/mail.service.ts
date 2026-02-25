@@ -89,3 +89,101 @@ export async function sendMail(input: SendMailInput): Promise<{ messageId: strin
 
   return { messageId: info.messageId };
 }
+
+/**
+ * Generates a professional correction email text using LLM based on validation results.
+ * Used when the user wants to request a corrected invoice from a vendor.
+ */
+export async function generateCorrectionEmailText(
+  invoiceId: string,
+  tenantId: string,
+): Promise<{ subject: string; body: string; vendorEmail: string | null }> {
+  // Load invoice + validation + extracted data
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, tenantId },
+    select: {
+      vendorName: true,
+      invoiceNumber: true,
+      invoiceDate: true,
+      grossAmount: true,
+      issuerEmail: true,
+    },
+  });
+  if (!invoice) throw new Error('Rechnung nicht gefunden');
+
+  const validation = await prisma.validationResult.findFirst({
+    where: { invoiceId },
+    orderBy: { createdAt: 'desc' },
+    select: { checks: true },
+  });
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { name: true },
+  });
+
+  // Extract RED/YELLOW issues
+  const issues = (validation?.checks as Array<{ status: string; message: string; legalBasis?: string }> || [])
+    .filter((c) => c.status === 'RED' || c.status === 'YELLOW')
+    .map((c) => `- ${c.message}${c.legalBasis ? ` (${c.legalBasis})` : ''}`);
+
+  if (issues.length === 0) {
+    return {
+      subject: `Rechnungskorrektur: ${invoice.invoiceNumber || 'ohne Nr.'}`,
+      body: 'Keine Beanstandungen gefunden. Die Rechnung scheint korrekt zu sein.',
+      vendorEmail: invoice.issuerEmail,
+    };
+  }
+
+  // Try LLM generation
+  try {
+    const { callLlm } = await import('./llm.service.js');
+
+    const response = await callLlm({
+      task: 'correction_email',
+      systemPrompt: `Du bist ein professioneller Buchhalter in Österreich. Verfasse eine höfliche, sachliche E-Mail an den Lieferanten, in der du um eine korrigierte Rechnung bittest. Die E-Mail soll auf Deutsch sein, professionell und freundlich. Antworte als JSON mit "subject" und "body".`,
+      userContent: `Erstelle eine Korrektur-E-Mail für folgende Rechnung:
+
+Lieferant: ${invoice.vendorName || 'Unbekannt'}
+Rechnungsnummer: ${invoice.invoiceNumber || 'keine'}
+Rechnungsdatum: ${invoice.invoiceDate ? new Date(invoice.invoiceDate).toLocaleDateString('de-AT') : 'unbekannt'}
+Bruttobetrag: ${invoice.grossAmount || 'unbekannt'}€
+Unser Unternehmen: ${tenant?.name || 'Ki2Go Accounting'}
+
+Festgestellte Mängel:
+${issues.join('\n')}
+
+Die E-Mail soll:
+- Höflich um eine korrigierte Rechnung bitten
+- Die konkreten Mängel auflisten
+- Auf die gesetzliche Grundlage verweisen (§11 UStG)
+- Um zeitnahe Korrektur bitten`,
+      temperature: 0.3,
+      maxTokens: 1024,
+    });
+
+    const parsed = JSON.parse(response.content);
+    return {
+      subject: parsed.subject || `Rechnungskorrektur: ${invoice.invoiceNumber || 'ohne Nr.'}`,
+      body: parsed.body || issues.join('\n'),
+      vendorEmail: invoice.issuerEmail,
+    };
+  } catch {
+    // Fallback: manual template
+    const dateStr = invoice.invoiceDate ? new Date(invoice.invoiceDate).toLocaleDateString('de-AT') : 'unbekannt';
+    return {
+      subject: `Bitte um Rechnungskorrektur — ${invoice.invoiceNumber || 'ohne Nr.'} vom ${dateStr}`,
+      body: `Sehr geehrte Damen und Herren,
+
+bei der Prüfung Ihrer Rechnung ${invoice.invoiceNumber || ''} vom ${dateStr} über ${invoice.grossAmount || ''}€ haben wir folgende Mängel festgestellt:
+
+${issues.join('\n')}
+
+Wir bitten Sie, uns eine korrigierte Rechnung gemäß §11 UStG zukommen zu lassen.
+
+Mit freundlichen Grüßen
+${tenant?.name || ''}`,
+      vendorEmail: invoice.issuerEmail,
+    };
+  }
+}

@@ -4,7 +4,7 @@ import { writeAuditLog } from '../middleware/auditLogger.js';
 import { AppError, NotFoundError, ConflictError } from '../utils/errors.js';
 
 // ============================================================
-// 3-Stage Matching Algorithm
+// 4-Stage Matching Algorithm
 // ============================================================
 
 interface MatchCandidate {
@@ -13,6 +13,7 @@ interface MatchCandidate {
   confidence: number;
   matchReason: string;
   stage: number;
+  differenceAmount?: number; // For stage 2 (invoice number match with amount difference)
 }
 
 /**
@@ -75,12 +76,25 @@ export async function runMatching(
     deleted = deleteResult.count;
   }
 
-  // 4. Run 3-stage matching
+  // 4. Build IBAN lookup for vendors (for Stage 3 IBAN matching)
+  const vendorIbans = new Map<string, string>(); // vendorId → iban
+  const vendorIds = [...new Set(invoices.map(i => i.vendorId).filter(Boolean))] as string[];
+  if (vendorIds.length > 0) {
+    const vendors = await prisma.vendor.findMany({
+      where: { id: { in: vendorIds }, iban: { not: null } },
+      select: { id: true, iban: true },
+    });
+    for (const v of vendors) {
+      if (v.iban) vendorIbans.set(v.id, v.iban.replace(/\s/g, '').toUpperCase());
+    }
+  }
+
+  // 5. Run 4-stage matching
   const candidates: MatchCandidate[] = [];
   const matchedTxIds = new Set<string>();
   const matchedInvIds = new Set<string>();
 
-  // Stage 1: Exact Match (amount + invoice number in reference)
+  // Stage 1: Exakt (99%) — Invoice number in reference + amount exact
   for (const tx of transactions) {
     if (matchedTxIds.has(tx.id)) continue;
     const txAmount = Math.abs(new Decimal(tx.amount).toNumber());
@@ -93,15 +107,14 @@ export async function runMatching(
       const invAmount = new Decimal(inv.grossAmount).toNumber();
       if (Math.abs(txAmount - invAmount) > 0.01) continue;
 
-      // Check if invoice number appears in reference/bookingText
       const invNum = inv.invoiceNumber.toLowerCase().trim();
       if (!invNum || !txRef.includes(invNum)) continue;
 
       candidates.push({
         invoiceId: inv.id,
         transactionId: tx.id,
-        confidence: 0.97,
-        matchReason: `Betrag ${txAmount.toFixed(2)}€ und Rechnungsnr. "${inv.invoiceNumber}" im Verwendungszweck`,
+        confidence: 0.99,
+        matchReason: `Betrag ${txAmount.toFixed(2)}€ exakt + Rechnungsnr. "${inv.invoiceNumber}" im Verwendungszweck`,
         stage: 1,
       });
       matchedTxIds.add(tx.id);
@@ -110,12 +123,46 @@ export async function runMatching(
     }
   }
 
-  // Stage 2: Amount + Vendor/Customer Name Match
+  // Stage 2: Rechnungsnr.-Match (80%) — Invoice number in reference + amount ±10% → PaymentDifference
+  for (const tx of transactions) {
+    if (matchedTxIds.has(tx.id)) continue;
+    const txAmount = Math.abs(new Decimal(tx.amount).toNumber());
+    const txRef = [tx.reference, tx.bookingText].filter(Boolean).join(' ').toLowerCase();
+
+    for (const inv of invoices) {
+      if (matchedInvIds.has(inv.id)) continue;
+      if (!inv.grossAmount || !inv.invoiceNumber) continue;
+
+      const invAmount = new Decimal(inv.grossAmount).toNumber();
+      const invNum = inv.invoiceNumber.toLowerCase().trim();
+      if (!invNum || !txRef.includes(invNum)) continue;
+
+      // Amount within ±10%
+      const tolerance = invAmount * 0.10;
+      const diff = txAmount - invAmount;
+      if (Math.abs(diff) > tolerance || Math.abs(diff) <= 0.01) continue; // Skip exact (already handled in stage 1)
+
+      candidates.push({
+        invoiceId: inv.id,
+        transactionId: tx.id,
+        confidence: 0.80,
+        matchReason: `Rechnungsnr. "${inv.invoiceNumber}" im Verwendungszweck, Differenz ${diff.toFixed(2)}€ (${txAmount.toFixed(2)}€ vs ${invAmount.toFixed(2)}€)`,
+        stage: 2,
+        differenceAmount: diff,
+      });
+      matchedTxIds.add(tx.id);
+      matchedInvIds.add(inv.id);
+      break;
+    }
+  }
+
+  // Stage 3: Betrags-Match (70%) — Amount exact + (vendor name OR IBAN match)
   for (const tx of transactions) {
     if (matchedTxIds.has(tx.id)) continue;
     const txAmount = Math.abs(new Decimal(tx.amount).toNumber());
     const counterpart = tx.counterpartName?.toLowerCase().trim() || '';
-    if (!counterpart) continue;
+    const txIban = (tx as Record<string, unknown>).counterpartIban as string | null;
+    const txIbanClean = txIban?.replace(/\s/g, '').toUpperCase() || '';
 
     for (const inv of invoices) {
       if (matchedInvIds.has(inv.id)) continue;
@@ -124,23 +171,34 @@ export async function runMatching(
       const invAmount = new Decimal(inv.grossAmount).toNumber();
       if (Math.abs(txAmount - invAmount) > 0.01) continue;
 
-      // Check vendor or customer name in counterpart
+      // Check vendor name OR IBAN match
       const vendorName = inv.vendor?.name?.toLowerCase().trim() || inv.vendorName?.toLowerCase().trim() || '';
       const customerName = inv.customer?.name?.toLowerCase().trim() || inv.customerName?.toLowerCase().trim() || '';
       const name = vendorName || customerName;
-      if (!name) continue;
 
-      // Partial match: at least one significant word from the name appears in counterpart
-      const nameWords = name.split(/\s+/).filter((w) => w.length >= 3);
-      const hasNameMatch = nameWords.some((w) => counterpart.includes(w)) || counterpart.includes(name);
-      if (!hasNameMatch) continue;
+      let hasNameMatch = false;
+      if (name && counterpart) {
+        const nameWords = name.split(/\s+/).filter((w) => w.length >= 3);
+        hasNameMatch = nameWords.some((w) => counterpart.includes(w)) || counterpart.includes(name);
+      }
+
+      let hasIbanMatch = false;
+      if (txIbanClean && inv.vendorId && vendorIbans.has(inv.vendorId)) {
+        hasIbanMatch = vendorIbans.get(inv.vendorId) === txIbanClean;
+      }
+
+      if (!hasNameMatch && !hasIbanMatch) continue;
+
+      const reason = hasIbanMatch
+        ? `Betrag ${txAmount.toFixed(2)}€ exakt + IBAN-Übereinstimmung`
+        : `Betrag ${txAmount.toFixed(2)}€ exakt + "${name}" als Empfänger/Auftraggeber`;
 
       candidates.push({
         invoiceId: inv.id,
         transactionId: tx.id,
-        confidence: 0.85,
-        matchReason: `Betrag ${txAmount.toFixed(2)}€ und "${name}" als Empfänger/Auftraggeber`,
-        stage: 2,
+        confidence: 0.70,
+        matchReason: reason,
+        stage: 3,
       });
       matchedTxIds.add(tx.id);
       matchedInvIds.add(inv.id);
@@ -148,11 +206,12 @@ export async function runMatching(
     }
   }
 
-  // Stage 3: Fuzzy Match (amount ±2%, date ±5 days)
+  // Stage 4: Fuzzy (50%) — Amount ±2% + Date ±5 days + vendor name similar
   for (const tx of transactions) {
     if (matchedTxIds.has(tx.id)) continue;
     const txAmount = Math.abs(new Decimal(tx.amount).toNumber());
     const txDate = new Date(tx.transactionDate);
+    const counterpart = tx.counterpartName?.toLowerCase().trim() || '';
 
     for (const inv of invoices) {
       if (matchedInvIds.has(inv.id)) continue;
@@ -169,14 +228,22 @@ export async function runMatching(
       const daysDiff = Math.abs(txDate.getTime() - invDate.getTime()) / (1000 * 60 * 60 * 24);
       if (daysDiff > 5) continue;
 
-      const confidence = 0.65 + (1 - Math.abs(txAmount - invAmount) / invAmount) * 0.05 + (1 - daysDiff / 5) * 0.05;
+      // Optional: name match boosts confidence
+      const vendorName = inv.vendor?.name?.toLowerCase().trim() || inv.vendorName?.toLowerCase().trim() || '';
+      let nameBoost = 0;
+      if (vendorName && counterpart) {
+        const nameWords = vendorName.split(/\s+/).filter((w) => w.length >= 3);
+        if (nameWords.some((w) => counterpart.includes(w))) nameBoost = 0.10;
+      }
+
+      const confidence = 0.50 + nameBoost + (1 - Math.abs(txAmount - invAmount) / invAmount) * 0.05 + (1 - daysDiff / 5) * 0.05;
 
       candidates.push({
         invoiceId: inv.id,
         transactionId: tx.id,
-        confidence: Math.min(confidence, 0.75),
+        confidence: Math.min(confidence, 0.70),
         matchReason: `Betrag ähnlich (${txAmount.toFixed(2)}€ vs ${invAmount.toFixed(2)}€), Datum nah (${formatDateDE(txDate)} vs ${formatDateDE(invDate)})`,
-        stage: 3,
+        stage: 4,
       });
       matchedTxIds.add(tx.id);
       matchedInvIds.add(inv.id);
@@ -184,7 +251,7 @@ export async function runMatching(
     }
   }
 
-  // 5. Create matching records
+  // 6. Create matching records
   if (candidates.length > 0) {
     await prisma.matching.createMany({
       data: candidates.map((c) => ({
@@ -198,6 +265,43 @@ export async function runMatching(
       })),
       skipDuplicates: true,
     });
+
+    // Create PaymentDifference records for Stage 2 matches (invoice number + amount difference)
+    const stage2Candidates = candidates.filter((c) => c.stage === 2 && c.differenceAmount);
+    if (stage2Candidates.length > 0) {
+      // Look up created matchings to get their IDs
+      const createdMatchings = await prisma.matching.findMany({
+        where: {
+          tenantId,
+          invoiceId: { in: stage2Candidates.map((c) => c.invoiceId) },
+          transactionId: { in: stage2Candidates.map((c) => c.transactionId) },
+          status: 'SUGGESTED',
+        },
+        select: { id: true, invoiceId: true, transactionId: true },
+      });
+
+      for (const candidate of stage2Candidates) {
+        const matching = createdMatchings.find(
+          (m) => m.invoiceId === candidate.invoiceId && m.transactionId === candidate.transactionId,
+        );
+        if (!matching) continue;
+
+        const inv = invoices.find((i) => i.id === candidate.invoiceId);
+        const invAmount = inv?.grossAmount ? new Decimal(inv.grossAmount).toNumber() : 0;
+        const paidAmount = invAmount + (candidate.differenceAmount || 0);
+
+        await prisma.paymentDifference.create({
+          data: {
+            matchingId: matching.id,
+            invoiceAmount: invAmount,
+            paidAmount,
+            differenceAmount: candidate.differenceAmount || 0,
+            differenceReason: 'OTHER', // Default, user can change
+            requiresVatCorrection: false,
+          },
+        });
+      }
+    }
   }
 
   writeAuditLog({
@@ -225,9 +329,14 @@ export async function runMatching(
 export async function confirmMatching(tenantId: string, userId: string, matchingId: string) {
   const matching = await prisma.matching.findFirst({
     where: { id: matchingId, tenantId },
+    include: { paymentDifference: true },
   });
   if (!matching) throw new NotFoundError('Matching', matchingId);
   if (matching.status === 'CONFIRMED') return matching;
+
+  // Determine invoice status: RECONCILED or RECONCILED_WITH_DIFFERENCE
+  const hasDifference = matching.paymentDifference && Math.abs(Number(matching.paymentDifference.differenceAmount)) > 0.01;
+  const invoiceStatus = hasDifference ? 'RECONCILED_WITH_DIFFERENCE' : 'RECONCILED';
 
   const updated = await prisma.$transaction(async (tx) => {
     const m = await tx.matching.update({
@@ -242,6 +351,11 @@ export async function confirmMatching(tenantId: string, userId: string, matching
       where: { id: matching.transactionId },
       data: { isMatched: true },
     });
+    // Update invoice status to RECONCILED or RECONCILED_WITH_DIFFERENCE
+    await tx.invoice.update({
+      where: { id: matching.invoiceId },
+      data: { processingStatus: invoiceStatus },
+    });
     return m;
   });
 
@@ -251,7 +365,53 @@ export async function confirmMatching(tenantId: string, userId: string, matching
     entityType: 'Matching',
     entityId: matchingId,
     action: 'MATCHING_CONFIRMED',
-    newData: { invoiceId: matching.invoiceId, transactionId: matching.transactionId },
+    newData: {
+      invoiceId: matching.invoiceId,
+      transactionId: matching.transactionId,
+      invoiceStatus,
+      hasDifference,
+    },
+  });
+
+  return updated;
+}
+
+// ============================================================
+// PaymentDifference CRUD
+// ============================================================
+
+export async function updatePaymentDifference(
+  tenantId: string,
+  userId: string,
+  matchingId: string,
+  data: { differenceReason: string; notes?: string | null },
+) {
+  const matching = await prisma.matching.findFirst({
+    where: { id: matchingId, tenantId },
+    include: { paymentDifference: true },
+  });
+  if (!matching) throw new NotFoundError('Matching', matchingId);
+  if (!matching.paymentDifference) throw new NotFoundError('Zahlungsdifferenz', matchingId);
+
+  // SKONTO requires VAT correction
+  const requiresVatCorrection = data.differenceReason === 'SKONTO';
+
+  const updated = await prisma.paymentDifference.update({
+    where: { id: matching.paymentDifference.id },
+    data: {
+      differenceReason: data.differenceReason as 'SKONTO' | 'CURRENCY_DIFFERENCE' | 'TIP' | 'PARTIAL_PAYMENT' | 'ROUNDING' | 'OTHER',
+      notes: data.notes ?? null,
+      requiresVatCorrection,
+    },
+  });
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'PaymentDifference',
+    entityId: updated.id,
+    action: 'PAYMENT_DIFFERENCE_UPDATED',
+    newData: { differenceReason: data.differenceReason, requiresVatCorrection },
   });
 
   return updated;

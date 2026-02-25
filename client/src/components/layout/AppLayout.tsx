@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { logoutApi } from '../../api/auth';
+import { getAccessibleTenantsApi } from '../../api/tenant';
 import { BottomTabBar } from '../mobile/BottomTabBar';
 import {
   LayoutDashboard,
@@ -33,11 +34,20 @@ const navItems = [
 ];
 
 export function AppLayout() {
-  const { user, refreshToken, logout } = useAuthStore();
+  const { user, refreshToken, logout, activeTenantId, accessibleTenants, setActiveTenant, setAccessibleTenants } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const isMobile = useIsMobile();
+
+  const isTaxAdvisor = user?.role === 'TAX_ADVISOR';
+
+  // Load accessible tenants for TAX_ADVISOR
+  useEffect(() => {
+    if (isTaxAdvisor) {
+      getAccessibleTenantsApi().then(setAccessibleTenants).catch(() => {});
+    }
+  }, [isTaxAdvisor, setAccessibleTenants]);
 
   // Get current page title for mobile header
   const currentPage = navItems.find((item) =>
@@ -56,6 +66,13 @@ export function AppLayout() {
     navigate('/login');
   };
 
+  const handleTenantSwitch = (tenantId: string) => {
+    setActiveTenant(tenantId === 'own' ? null : tenantId);
+    // Reload data by navigating to dashboard
+    navigate('/');
+    window.location.reload();
+  };
+
   // Reset scroll on route change
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -70,6 +87,21 @@ export function AppLayout() {
           <div className="p-6 border-b border-gray-800">
             <h1 className="text-xl font-bold">Ki2Go</h1>
             <p className="text-xs text-gray-400 mt-1">{user?.tenantName}</p>
+            {/* Tenant switcher for TAX_ADVISOR */}
+            {isTaxAdvisor && accessibleTenants.length > 0 && (
+              <select
+                value={activeTenantId || 'own'}
+                onChange={(e) => handleTenantSwitch(e.target.value)}
+                className="mt-2 w-full bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-700 focus:border-primary-500 focus:outline-none"
+              >
+                <option value="own">Eigener Mandant</option>
+                {accessibleTenants.map((t) => (
+                  <option key={t.tenantId} value={t.tenantId}>
+                    {t.name} ({t.accessLevel === 'READ' ? 'Lesen' : 'Schreiben'})
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Navigation */}
@@ -135,6 +167,19 @@ export function AppLayout() {
         {!isOnline && (
           <div className="bg-yellow-100 border-b border-yellow-300 text-yellow-800 text-center text-sm py-2 px-4">
             Keine Internetverbindung
+          </div>
+        )}
+
+        {/* Tenant context banner when viewing another tenant */}
+        {activeTenantId && (
+          <div className="bg-blue-100 border-b border-blue-300 text-blue-800 text-center text-sm py-2 px-4">
+            Sie sehen Daten von: <strong>{accessibleTenants.find((t) => t.tenantId === activeTenantId)?.name || 'Anderer Mandant'}</strong>
+            <button
+              onClick={() => handleTenantSwitch('own')}
+              className="ml-2 underline hover:text-blue-600"
+            >
+              Zurück
+            </button>
           </div>
         )}
 

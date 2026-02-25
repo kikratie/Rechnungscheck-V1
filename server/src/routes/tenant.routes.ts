@@ -10,9 +10,13 @@ import {
   completeOnboardingSchema,
   createBankAccountSchema,
   updateBankAccountSchema,
+  grantAccessSchema,
+  deleteAccountSchema,
 } from '@buchungsai/shared';
 import type { ApiResponse, TenantProfile } from '@buchungsai/shared';
 import { NotFoundError } from '../utils/errors.js';
+import { grantAccess, revokeAccess, getAccessibleTenants, getAccessList } from '../services/companyAccess.service.js';
+import { deleteAccount, exportUserData } from '../services/gdpr.service.js';
 
 const router = Router();
 
@@ -290,6 +294,94 @@ router.post('/users', requireRole('ADMIN'), async (req, res, next) => {
       },
     });
     res.status(201).json({ success: true, data: user } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================
+// STEUERBERATER-ZUGANG (Multi-Tenant Access)
+// ============================================================
+
+// GET /api/v1/tenant/accessible-tenants — For TAX_ADVISOR: list all accessible tenants
+router.get('/accessible-tenants', async (req, res, next) => {
+  try {
+    const tenants = await getAccessibleTenants(req.userId!);
+    res.json({ success: true, data: tenants } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/tenant/grant-access — Admin grants access to a TAX_ADVISOR
+router.post('/grant-access', requireRole('ADMIN'), validateBody(grantAccessSchema), async (req, res, next) => {
+  try {
+    const access = await grantAccess(
+      req.tenantId!,
+      req.userId!,
+      req.body.email as string,
+      req.body.accessLevel || 'READ',
+    );
+    res.status(201).json({ success: true, data: access } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/v1/tenant/revoke-access/:userId — Admin revokes access
+router.delete('/revoke-access/:userId', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    await revokeAccess(req.tenantId!, req.userId!, req.params.userId as string);
+    res.json({ success: true, data: { message: 'Zugang entzogen' } } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/tenant/access-list — List all users with access to this tenant
+router.get('/access-list', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const list = await getAccessList(req.tenantId!);
+    res.json({ success: true, data: list } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================
+// DSGVO + TERMS
+// ============================================================
+
+// POST /api/v1/tenant/accept-terms — User acknowledges retention obligations
+router.post('/accept-terms', async (req, res, next) => {
+  try {
+    await prisma.user.update({
+      where: { id: req.userId! },
+      data: { termsAcceptedAt: new Date() },
+    });
+    res.json({ success: true, data: { message: 'Aufbewahrungspflichten akzeptiert' } } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/v1/tenant/account — Delete entire account (ADMIN only, requires password)
+router.delete('/account', requireRole('ADMIN'), validateBody(deleteAccountSchema), async (req, res, next) => {
+  try {
+    await deleteAccount(req.userId!, req.tenantId!, req.body.password as string);
+    res.json({ success: true, data: { message: 'Konto und alle Daten gelöscht' } } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/tenant/data-export — GDPR Art. 20 data export
+router.get('/data-export', async (req, res, next) => {
+  try {
+    const data = await exportUserData(req.userId!, req.tenantId!);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename="datenexport.json"');
+    res.json(data);
   } catch (err) {
     next(err);
   }

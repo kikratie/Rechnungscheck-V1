@@ -30,10 +30,10 @@ app.use(
   }),
 );
 
-// Rate Limiting — global (100/15min)
-const globalLimiter = rateLimit({
+// Rate Limiting — Upload-/Invoice-Endpoint großzügiger (1000/15min, da Multi-Upload + Polling)
+const uploadLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
-  max: env.RATE_LIMIT_MAX,
+  max: env.RATE_LIMIT_MAX * 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -45,12 +45,13 @@ const globalLimiter = rateLimit({
   },
 });
 
-// Rate Limiting — Upload-Endpoint großzügiger (200/15min, da Multi-Upload)
-const uploadLimiter = rateLimit({
+// Rate Limiting — global (100/15min), skip routes that have their own limiter
+const globalLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
-  max: env.RATE_LIMIT_MAX * 2,
+  max: env.RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.path.startsWith('/api/v1/invoices'),
   message: {
     success: false,
     error: {

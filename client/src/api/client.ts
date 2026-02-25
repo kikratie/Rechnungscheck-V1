@@ -8,11 +8,15 @@ const apiClient = axios.create({
   },
 });
 
-// Request Interceptor: Token hinzufügen
+// Request Interceptor: Token + Tenant-ID hinzufügen
 apiClient.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().accessToken;
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  const { accessToken, activeTenantId } = useAuthStore.getState();
+  if (accessToken) {
+    config.headers.Authorization = `Bearer ${accessToken}`;
+  }
+  // Steuerberater: send X-Tenant-Id when viewing another tenant
+  if (activeTenantId) {
+    config.headers['X-Tenant-Id'] = activeTenantId;
   }
   return config;
 });

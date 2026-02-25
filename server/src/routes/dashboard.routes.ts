@@ -19,6 +19,7 @@ router.get('/stats', async (req, res, next) => {
       invalidCount,
       pendingCount,
       pendingReview,
+      parkedInvoices,
       matchedInvoices,
       eurAmountResult,
       foreignEurEstimateResult,
@@ -31,6 +32,7 @@ router.get('/stats', async (req, res, next) => {
       prisma.invoice.count({ where: { tenantId, validationStatus: 'INVALID' } }),
       prisma.invoice.count({ where: { tenantId, validationStatus: 'PENDING' } }),
       prisma.invoice.count({ where: { tenantId, processingStatus: 'REVIEW_REQUIRED' } }),
+      prisma.invoice.count({ where: { tenantId, processingStatus: 'PARKED' } }),
       prisma.matching.count({ where: { tenantId, status: 'CONFIRMED' } }),
       prisma.invoice.aggregate({ where: { tenantId, grossAmount: { not: null }, currency: 'EUR' }, _sum: { grossAmount: true } }),
       prisma.invoice.aggregate({ where: { tenantId, estimatedEurGross: { not: null }, currency: { not: 'EUR' } }, _sum: { estimatedEurGross: true } }),
@@ -55,6 +57,7 @@ router.get('/stats', async (req, res, next) => {
       data: {
         totalInvoices,
         pendingReview,
+        parkedInvoices,
         matchedInvoices,
         unmatchedInvoices: totalInvoices - matchedInvoices,
         validationSummary: {
@@ -93,6 +96,9 @@ function formatAuditDescription(log: {
     CONFIRM: 'hat bestätigt',
     LOGIN: 'hat sich angemeldet',
     REGISTER: 'hat sich registriert',
+    PARK: 'hat geparkt',
+    UNPARK: 'hat fortgesetzt',
+    REJECT: 'hat abgelehnt',
     UID_VALIDATION_FAILED: 'UID-Validierung fehlgeschlagen',
   };
   const action = actions[log.action] || log.action;
