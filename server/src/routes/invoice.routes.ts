@@ -5,8 +5,9 @@ import { validateBody } from '../middleware/validate.js';
 import { invoiceUpload } from '../middleware/upload.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
-import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, createEigenbelegSchema, batchApproveSchema, cancelNumberSchema, parkInvoiceSchema, cashPaymentSchema, requestCorrectionSchema } from '@buchungsai/shared';
+import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, createEigenbelegSchema, batchApproveSchema, cancelNumberSchema, parkInvoiceSchema, cashPaymentSchema, requestCorrectionSchema, setRecurringSchema } from '@buchungsai/shared';
 import * as invoiceService from '../services/invoice.service.js';
+import * as recurringService from '../services/recurring.service.js';
 import { cancelArchivalNumber } from '../services/archival.service.js';
 import * as storageService from '../services/storage.service.js';
 
@@ -31,6 +32,13 @@ router.get('/', async (req, res, next) => {
     }
     if (req.query.validationStatus) where.validationStatus = req.query.validationStatus;
     if (req.query.vendorName) where.vendorName = { contains: req.query.vendorName, mode: 'insensitive' };
+    if (req.query.recurring === 'true') where.isRecurring = true;
+    if (req.query.overdue === 'true') {
+      where.dueDate = { lt: new Date() };
+      if (!req.query.processingStatus) {
+        where.processingStatus = { notIn: ['RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'ARCHIVED', 'EXPORTED', 'REJECTED', 'ERROR', 'REPLACED'] };
+      }
+    }
     if (req.query.search) {
       const searchTerm = req.query.search as string;
       const belegNrMatch = searchTerm.match(/^BEL-?(\d+)$/i);
@@ -43,7 +51,7 @@ router.get('/', async (req, res, next) => {
     }
 
     const ALLOWED_SORT_COLUMNS = new Set([
-      'belegNr', 'vendorName', 'invoiceNumber', 'invoiceDate',
+      'belegNr', 'vendorName', 'invoiceNumber', 'invoiceDate', 'dueDate',
       'grossAmount', 'validationStatus', 'processingStatus', 'createdAt',
     ]);
     const requestedSort = req.query.sortBy as string;
@@ -65,6 +73,7 @@ router.get('/', async (req, res, next) => {
           vendorName: true,
           invoiceNumber: true,
           invoiceDate: true,
+          dueDate: true,
           grossAmount: true,
           currency: true,
           estimatedEurGross: true,
@@ -82,6 +91,10 @@ router.get('/', async (req, res, next) => {
           archivedAt: true,
           ingestionChannel: true,
           emailSender: true,
+          isRecurring: true,
+          recurringInterval: true,
+          recurringGroupId: true,
+          recurringNote: true,
           createdAt: true,
         },
       }),
@@ -93,6 +106,16 @@ router.get('/', async (req, res, next) => {
       data: invoices,
       pagination: buildPaginationMeta(total, page, limit),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/invoices/recurring-summary — Recurring costs summary (Dashboard widget)
+router.get('/recurring-summary', async (req, res, next) => {
+  try {
+    const summary = await recurringService.getRecurringCostsSummary(req.tenantId!);
+    res.json({ success: true, data: summary });
   } catch (err) {
     next(err);
   }
@@ -450,6 +473,22 @@ router.post('/revalidate-all', async (req, res, next) => {
   try {
     const result = await invoiceService.revalidateAll(req.tenantId!);
     res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/set-recurring — Mark/unmark invoice as recurring
+router.post('/:id/set-recurring', validateBody(setRecurringSchema), async (req, res, next) => {
+  try {
+    const invoice = await recurringService.setRecurring({
+      tenantId: req.tenantId!,
+      invoiceId: req.params.id as string,
+      isRecurring: req.body.isRecurring as boolean,
+      recurringInterval: req.body.recurringInterval,
+      recurringNote: req.body.recurringNote,
+    });
+    res.json({ success: true, data: invoice });
   } catch (err) {
     next(err);
   }

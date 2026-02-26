@@ -137,6 +137,7 @@ export function sanitizeVendorName(name: string | null): string {
  */
 export function getArchivalPrefix(documentType: string, direction?: string): string {
   if (documentType === 'CREDIT_NOTE') return 'GS';
+  if (documentType === 'ADVANCE_PAYMENT') return 'AZ';
   if (direction === 'OUTGOING') return 'AR';
   return 'RE'; // Rechnung Eingang (INVOICE, RECEIPT, ERSATZBELEG)
 }

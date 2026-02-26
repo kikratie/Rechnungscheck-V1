@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 26. Februar 2026 (Session 16 — Phase 12: E-Mail-Weiterleitung)
+**Letzte Aktualisierung:** 26. Februar 2026 (Session 18 — Phase 14: Sicherheit + Laufende Kosten)
 
 ---
 
@@ -675,3 +675,146 @@ npm run db:migrate
 - ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
 - ✅ Prisma-Migration erstellt und angewandt
 - ✅ TypeScript: tsc --noEmit fehlerfrei (server + client)
+
+---
+
+## Phase 13: Verbleibende Features (ohne Stufe 2) ✅
+
+**26. Februar 2026** — 6 Features implementiert, die für die MVP-Vollständigkeit fehlten.
+
+### Feature 1: §14 UGB Checks (Rechtsform-Prüfung)
+- [x] `LEGAL_FORMS` Konstante: 11 Regex-Patterns für AT/DE-Rechtsformen (GmbH, AG, KG, OG, e.U., etc.) mit `uidRequired` Flag
+- [x] `checkLegalForm()` Validierungsregel: erkennt Rechtsform aus issuerName, warnt wenn juristische Person ohne UID
+- [x] `LEGAL_FORM_CHECK` + `CREDIT_NOTE_CHECK` in VALIDATION_RULES
+
+### Feature 2: Fälligkeitskontrolle (Überfällig-Filter)
+- [x] Backend: `overdue=true` Query-Param auf Invoice-Route (WHERE dueDate < NOW() AND status NOT IN closed)
+- [x] `dueDate` in Invoice-Select und ALLOWED_SORT_COLUMNS
+- [x] Frontend: "Überfällig" Tab (rot) mit Clock-Icon
+- [x] `DueDateCell` Komponente: Überfällig-Badge (rot "Xd"), bald fällig (gelb "in Xd")
+- [x] Mobile: Überfällig-Badge im Card-View
+
+### Feature 3: Gutschrift/Anzahlung (LLM + Validierung + UI)
+- [x] `ADVANCE_PAYMENT` in DOCUMENT_TYPES + `AZ` Archivierungs-Prefix
+- [x] LLM-Prompt: DOKUMENTTYP-ERKENNUNG + originalInvoiceReference
+- [x] Job-Processor: `detectedDocumentType` aus LLM-Antwort extrahieren + speichern
+- [x] `checkCreditNote()` Validierungsregel: warnt bei positiver Gutschrift, prüft Referenz
+- [x] Frontend: `DocumentTypeBadge` (Gutschrift=lila, Anzahlung=teal, Ersatzbeleg=orange)
+- [x] Detail-Boxes für CREDIT_NOTE und ADVANCE_PAYMENT im Invoice-Detail
+
+### Feature 4: Ersatzbeleg UI
+- [x] War bereits vollständig implementiert via `BelegFormDialog.tsx` mit `mode: 'ersatzbeleg'`
+- Keine Änderungen nötig
+
+### Feature 5: Export Templates UI (CRUD + Profilverwaltung)
+- [x] Zod-Schema: `createExportConfigSchema` + `updateExportConfigSchema`
+- [x] Server: CRUD-Service (getExportConfigs, createExportConfig, updateExportConfig, deleteExportConfig)
+- [x] Server: CRUD-Routes (GET/POST/PUT/DELETE /exports/configs) — ersetzt Placeholder
+- [x] Client: API-Funktionen + `ExportConfigItem` Type
+- [x] ExportPage: "Exportprofile" Tabelle mit Create/Edit Dialog
+  - Format (CSV/BMD_CSV/BMD_XML), Trennzeichen, Datumsformat, Dezimaltrennzeichen, Encoding, Kopfzeile
+  - System-Profile (BMD NTCS) sind nicht editierbar, visuell markiert
+  - Default-Stern, Edit/Delete Actions
+
+### Feature 6: User-Einladung (Token-Flow + E-Mail + UI)
+- [x] DB-Migration: `invitationToken` + `invitationExpiresAt` + Index auf User-Tabelle
+- [x] Zod-Schemas: `inviteUserSchema` (email, firstName, lastName, role) + `acceptInviteSchema` (token, password)
+- [x] Server: `POST /tenant/invite` — erstellt User mit isActive=false, generiert Token (48h), sendet E-Mail
+- [x] Server: `POST /auth/accept-invite` — validiert Token, setzt Passwort, aktiviert User
+- [x] `sendInvitationEmail()` in mail.service.ts (deutscher Text mit Aktivierungs-Link)
+- [x] Client: `inviteUserApi()` + `acceptInviteApi()` + `getTenantUsersApi()`
+- [x] AcceptInvitePage: Standalone-Seite für Token-Validierung + Passwort-Eingabe
+- [x] SettingsPage: "Team-Mitglieder" Sektion mit User-Liste + Status-Badges (Aktiv/Eingeladen) + Einladungs-Formular
+
+### Neue Dateien (Phase 13)
+
+| Datei | Zweck |
+|-------|-------|
+| `client/src/pages/AcceptInvitePage.tsx` | Einladung annehmen + Passwort setzen |
+| `prisma/migrations/20260226180000_add_invitation_token/` | DB-Migration |
+
+### Geänderte Dateien (Phase 13)
+
+| Datei | Änderung |
+|-------|----------|
+| `shared/src/constants.ts` | +LEGAL_FORMS, +ADVANCE_PAYMENT, +AZ, +LEGAL_FORM_CHECK, +CREDIT_NOTE_CHECK |
+| `shared/src/types.ts` | +dueDate in InvoiceListItem, +ExportConfigItem, +ExportFormatType |
+| `shared/src/validation.ts` | +inviteUserSchema, +acceptInviteSchema, +createExportConfigSchema, +updateExportConfigSchema |
+| `server/src/services/validation.service.ts` | +checkLegalForm(), +checkCreditNote(), +documentType in ValidationInput |
+| `server/src/services/llm.service.ts` | +DOKUMENTTYP-ERKENNUNG im Extraktions-Prompt |
+| `server/src/services/archival.service.ts` | +ADVANCE_PAYMENT → AZ Prefix |
+| `server/src/services/export.service.ts` | +CRUD für ExportConfig |
+| `server/src/services/mail.service.ts` | +sendInvitationEmail() |
+| `server/src/routes/invoice.routes.ts` | +overdue Filter, +dueDate Select/Sort |
+| `server/src/routes/export.routes.ts` | +CRUD Endpoints für /exports/configs |
+| `server/src/routes/tenant.routes.ts` | +POST /tenant/invite |
+| `server/src/routes/auth.routes.ts` | +POST /auth/accept-invite |
+| `server/src/jobs/invoiceProcessor.job.ts` | +detectedDocumentType Extraktion |
+| `client/src/api/invoices.ts` | +overdue Filter |
+| `client/src/api/exports.ts` | +ExportConfig CRUD API |
+| `client/src/api/auth.ts` | +acceptInviteApi() |
+| `client/src/api/tenant.ts` | +inviteUserApi(), +getTenantUsersApi() |
+| `client/src/pages/InvoicesPage.tsx` | +Überfällig Tab, +DueDateCell, +DocumentTypeBadge |
+| `client/src/pages/ExportPage.tsx` | +Exportprofile Sektion + Create/Edit Dialog |
+| `client/src/pages/SettingsPage.tsx` | +TeamSection (User-Liste + Einladungsformular) |
+| `client/src/App.tsx` | +/accept-invite Route, +AcceptInvitePage Import |
+| `prisma/schema.prisma` | +invitationToken, +invitationExpiresAt, +Index auf User |
+
+### Verifikation (Phase 13)
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+- ✅ Prisma-Migration erstellt und angewandt
+- ✅ Prisma-Client regeneriert
+
+## Phase 14: Sicherheit + Laufende Kosten ✅
+
+### DSGVO / Sicherheit
+
+- [x] **Passwort ändern**: `POST /auth/change-password` + SettingsPage UI (ChangePasswordSection)
+- [x] **Account-Lockout**: 5 fehlgeschlagene Logins → 15 Minuten Sperre (`failedLoginAttempts`, `lockedUntil`)
+- [x] **Passwort zurücksetzen**: `POST /auth/forgot-password` + `POST /auth/reset-password` + ResetPasswordPage
+  - Token: crypto.randomBytes(32), 1h Ablauf, Single-Use
+  - Anti-Enumeration: Immer Erfolg zurückgeben
+  - Rate-Limiting: 5 Requests/15min (authSensitiveLimiter)
+- [x] **Super-Admin**: `isSuperAdmin` Flag auf User, `requireSuperAdmin` Middleware
+  - Admin-Routes: `GET /admin/tenants`, `GET /admin/stats`, `POST /admin/switch-tenant`
+  - CLI-Script: `npm run db:superadmin <email> [password]`
+  - Tenant-Wechsel via `X-Tenant-Id` Header
+
+### Laufende Kosten (Recurring Costs)
+
+- [x] **DB-Schema**: `isRecurring`, `recurringInterval` (MONTHLY/QUARTERLY/HALF_YEARLY/YEARLY), `recurringGroupId`, `recurringNote` auf Invoice
+- [x] **Prisma-Migration**: `20260226210000_add_recurring_costs` + RecurringInterval Enum
+- [x] **recurring.service.ts**: Pattern-Erkennung (2+ ähnliche Rechnungen vom selben Vendor → Auto-Detect), setRecurring(), getRecurringCostsSummary()
+- [x] **API-Endpoints**:
+  - `POST /invoices/:id/set-recurring` — Manuell markieren/demarkieren mit Intervall + Notiz
+  - `GET /invoices/recurring-summary` — Zusammenfassung für Dashboard-Widget
+  - `GET /invoices?recurring=true` — Filter für laufende Kosten
+- [x] **InvoicesPage UI**:
+  - Lila "Laufend" Filter-Tab (neben Überfällig)
+  - Lila "Laufend" Badge in Rechnungsliste (Desktop + Mobile)
+  - Toggle-Switch im Detail-Panel: Laufende Kosten an/aus
+  - Intervall-Dropdown (Monatlich/Vierteljährlich/Halbjährlich/Jährlich)
+  - Notiz-Feld (z.B. "Monatliche Miete Büro")
+- [x] **Dashboard-Widget "Laufende Kosten"**:
+  - Monatliche Gesamtsumme
+  - Tabelle: Lieferant, Betrag, Intervall, nächste Fälligkeit
+  - Überfällig-Warnung wenn erwartete Rechnung ausbleibt (7 Tage Toleranz)
+  - Link "Alle laufenden Kosten anzeigen" → InvoicesPage mit recurring-Filter
+
+### Neue Dateien (Phase 14)
+
+| Datei | Zweck |
+|-------|-------|
+| `server/src/services/recurring.service.ts` | Laufende Kosten Service (CRUD + Pattern-Detection + Summary) |
+| `server/src/routes/admin.routes.ts` | Super-Admin Routes (Tenant-Liste, Stats, Switch) |
+| `server/src/scripts/create-superadmin.ts` | CLI: Super-Admin erstellen/promoten |
+| `client/src/pages/ResetPasswordPage.tsx` | Passwort zurücksetzen (Token aus URL) |
+| `prisma/migrations/20260226200000_add_lockout_password_reset_superadmin/` | Lockout + Reset + SuperAdmin Felder |
+| `prisma/migrations/20260226210000_add_recurring_costs/` | Recurring Cost Felder + Index |
+
+### Verifikation (Phase 14)
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+- ✅ Prisma-Migrationen erstellt und angewandt (2 Migrationen)
+- ✅ Prisma-Client regeneriert

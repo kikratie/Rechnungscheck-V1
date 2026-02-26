@@ -65,6 +65,11 @@ export type BookingTypeValue = 'PRIVATE_WITHDRAWAL' | 'PRIVATE_DEPOSIT';
 export type AccountingTypeValue = 'EA' | 'ACCRUAL';
 
 export type InvoiceDirection = 'INCOMING' | 'OUTGOING';
+export type RecurringIntervalType = 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY' | 'YEARLY';
+
+// Feature Visibility
+export type FeatureModuleKey = 'inbox' | 'invoiceCheck' | 'paymentCheck' | 'vendors' | 'customers' | 'accounts' | 'export' | 'auditLog' | 'uvaReport';
+export type FeatureVisibility = Record<FeatureModuleKey, boolean>;
 
 export interface UserProfile {
   id: string;
@@ -76,6 +81,8 @@ export interface UserProfile {
   tenantName: string;
   onboardingComplete: boolean;
   accountingType: AccountingTypeValue;
+  featureVisibility: FeatureVisibility;
+  isSuperAdmin?: boolean;
 }
 
 export type BankAccountType = 'CHECKING' | 'SAVINGS' | 'CREDIT_CARD' | 'PAYPAL' | 'OTHER';
@@ -157,6 +164,7 @@ export interface InvoiceListItem {
   vendorName: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
+  dueDate: string | null;
   grossAmount: string | null;
   currency: string;
   estimatedEurGross: string | null;
@@ -174,13 +182,16 @@ export interface InvoiceListItem {
   archivedAt: string | null;
   ingestionChannel: string;
   emailSender: string | null;
+  isRecurring: boolean;
+  recurringInterval: RecurringIntervalType | null;
+  recurringGroupId: string | null;
+  recurringNote: string | null;
   createdAt: string;
 }
 
 export interface InvoiceDetail extends InvoiceListItem {
   vendorUid: string | null;
   vendorAddress: Record<string, string> | null;
-  dueDate: string | null;
   netAmount: string | null;
   vatAmount: string | null;
   vatRate: string | null;
@@ -692,4 +703,48 @@ export interface TestEmailConnectorRequest {
   secure?: boolean;
   username: string;
   password: string;
+}
+
+// ============================================================
+// Recurring Costs Types (Laufende Kosten)
+// ============================================================
+
+export interface RecurringCostItem {
+  vendorName: string;
+  recurringGroupId: string;
+  recurringInterval: RecurringIntervalType;
+  recurringNote: string | null;
+  lastGrossAmount: string;
+  lastInvoiceDate: string | null;
+  nextExpectedDate: string | null;
+  invoiceCount: number;
+  isOverdue: boolean;
+}
+
+export interface RecurringCostsSummary {
+  monthlyTotal: string;
+  items: RecurringCostItem[];
+}
+
+// ============================================================
+// Export Config Types
+// ============================================================
+
+export type ExportFormatType = 'CSV_GENERIC' | 'BMD_CSV' | 'BMD_XML';
+
+export interface ExportConfigItem {
+  id: string;
+  tenantId: string;
+  name: string;
+  format: ExportFormatType;
+  delimiter: string;
+  dateFormat: string;
+  decimalSeparator: string;
+  encoding: string;
+  includeHeader: boolean;
+  columnMapping: Record<string, string>;
+  isDefault: boolean;
+  isSystem: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

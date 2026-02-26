@@ -17,17 +17,19 @@ import {
   markCashPaymentApi,
   undoCashPaymentApi,
   requestCorrectionApi,
+  setRecurringApi,
 } from '../api/invoices';
 import { generateCorrectionEmailApi } from '../api/mail';
 import { exportOcrCheckApi, downloadBlob } from '../api/exports';
 import type { InvoiceFilters } from '../api/invoices';
-import type { ValidationCheck, TrafficLightStatus } from '@buchungsai/shared';
+import type { ValidationCheck, TrafficLightStatus, RecurringIntervalType } from '@buchungsai/shared';
+import { RECURRING_INTERVALS } from '@buchungsai/shared';
 import {
   FileText, Upload, Search, X, ChevronLeft, ChevronRight, Loader2,
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
   ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight, MinusCircle,
   ArrowUp, ArrowDown, ArrowUpDown, Lock, Archive, Mail, SlidersHorizontal,
-  PauseCircle, Play, Banknote,
+  PauseCircle, Play, Banknote, Repeat,
 } from 'lucide-react';
 import { AccountSelector } from '../components/AccountSelector';
 import { SendEmailDialog } from '../components/SendEmailDialog';
@@ -93,6 +95,14 @@ export function InvoicesPage() {
     onSuccess: () => {
       setSelectedIds(new Set());
       setShowBatchApproveDialog(false);
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      if (selectedId) queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+    },
+  });
+
+  const setRecurringMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { isRecurring: boolean; recurringInterval?: RecurringIntervalType | null; recurringNote?: string | null } }) => setRecurringApi(id, data),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       if (selectedId) queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
     },
@@ -333,9 +343,9 @@ Mit freundlichen Grüßen`;
             ]).map((tab) => (
               <button
                 key={tab.label}
-                onClick={() => setFilters((f) => ({ ...f, direction: tab.value, page: 1 }))}
+                onClick={() => setFilters((f) => ({ ...f, direction: tab.value, overdue: undefined, recurring: undefined, page: 1 }))}
                 className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap ${
-                  filters.direction === tab.value
+                  !filters.overdue && !filters.recurring && filters.direction === tab.value
                     ? 'bg-primary-100 text-primary-700'
                     : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
                 }`}
@@ -343,6 +353,28 @@ Mit freundlichen Grüßen`;
                 {tab.label}
               </button>
             ))}
+            <button
+              onClick={() => setFilters((f) => ({ ...f, overdue: true, recurring: undefined, direction: undefined, sortBy: 'dueDate', sortOrder: 'asc', page: 1 }))}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                filters.overdue
+                  ? 'bg-red-100 text-red-700'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <Clock size={14} />
+              Überfällig
+            </button>
+            <button
+              onClick={() => setFilters((f) => ({ ...f, recurring: true, overdue: undefined, direction: undefined, page: 1 }))}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                filters.recurring
+                  ? 'bg-purple-100 text-purple-700'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <Repeat size={14} />
+              Laufend
+            </button>
           </div>
 
           {/* Mobile: search + filter icon */}
@@ -562,13 +594,26 @@ Mit freundlichen Grüßen`;
                           {inv.grossAmount ? formatCurrency(String(inv.grossAmount), inv.currency) : '—'}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 mt-2">
+                      <div className="flex items-center flex-wrap gap-2 mt-2">
                         <ProcessingBadge status={inv.processingStatus} />
+                        {inv.dueDate && (() => {
+                          const due = new Date(inv.dueDate);
+                          const now = new Date(); now.setHours(0,0,0,0);
+                          const diff = Math.floor((now.getTime() - due.getTime()) / 86400000);
+                          if (diff > 0 && !CLOSED_STATUSES.has(inv.processingStatus)) {
+                            return <span className="text-[10px] font-semibold bg-red-100 text-red-700 px-1 py-0.5 rounded">{diff}d überfällig</span>;
+                          }
+                          return null;
+                        })()}
                         {inv.direction === 'OUTGOING' && (
                           <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1 py-0.5 rounded">Ausgang</span>
                         )}
-                        {inv.documentType === 'ERSATZBELEG' && (
-                          <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>
+                        <DocumentTypeBadge type={inv.documentType} />
+                        {inv.isRecurring && (
+                          <span className="text-[10px] font-semibold bg-purple-100 text-purple-700 px-1 py-0.5 rounded flex items-center gap-0.5">
+                            <Repeat size={9} />
+                            {RECURRING_INTERVALS[inv.recurringInterval as keyof typeof RECURRING_INTERVALS]?.label ?? 'Laufend'}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -594,6 +639,7 @@ Mit freundlichen Grüßen`;
                     <SortHeader label="Lieferant" column="vendorName" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} />
                     <SortHeader label="Rechnungsnr." column="invoiceNumber" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} />
                     <SortHeader label="Datum" column="invoiceDate" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} />
+                    <SortHeader label="Fällig" column="dueDate" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} />
                     <SortHeader label="Betrag" column="grossAmount" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} align="right" />
                     <SortHeader label="Validierung" column="validationStatus" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} align="center" />
                     <SortHeader label="Status" column="processingStatus" currentSort={filters.sortBy} currentOrder={filters.sortOrder} onSort={handleSort} align="center" />
@@ -652,9 +698,8 @@ Mit freundlichen Grüßen`;
                               {inv.direction === 'OUTGOING' && (
                                 <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1 py-0.5 rounded">Ausgang</span>
                               )}
-                              {inv.documentType === 'ERSATZBELEG' && (
-                                <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>
-                              )}
+                              <DocumentTypeBadge type={inv.documentType} />
+                              {inv.isRecurring && <span className="text-[10px] font-semibold bg-purple-100 text-purple-700 px-1 py-0.5 rounded">Laufend</span>}
                             </div>
                           </>
                         ) : (
@@ -665,15 +710,17 @@ Mit freundlichen Grüßen`;
                               {inv.direction === 'OUTGOING' && (
                                 <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1 py-0.5 rounded">Ausgang</span>
                               )}
-                              {inv.documentType === 'ERSATZBELEG' && (
-                                <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>
-                              )}
+                              <DocumentTypeBadge type={inv.documentType} />
+                              {inv.isRecurring && <span className="text-[10px] font-semibold bg-purple-100 text-purple-700 px-1 py-0.5 rounded">Laufend</span>}
                             </div>
                           </>
                         )}
                       </td>
                       <td className="px-4 py-3 text-gray-600">{inv.invoiceNumber || '—'}</td>
                       <td className="px-4 py-3 text-gray-600">{inv.invoiceDate ? formatDate(inv.invoiceDate) : '—'}</td>
+                      <td className="px-4 py-3">
+                        <DueDateCell dueDate={inv.dueDate} processingStatus={inv.processingStatus} />
+                      </td>
                       <td className="px-4 py-3 text-right font-medium">
                         {inv.grossAmount ? (
                           inv.currency !== 'EUR' ? (
@@ -770,6 +817,7 @@ Mit freundlichen Grüßen`;
               correctionNote={correctionNote}
               setCorrectionNote={setCorrectionNote}
               correctionMutation={correctionMutation}
+              setRecurringMutation={setRecurringMutation}
             />}
           </div>
         </FullScreenPanel>
@@ -811,6 +859,7 @@ Mit freundlichen Grüßen`;
               correctionNote={correctionNote}
               setCorrectionNote={setCorrectionNote}
               correctionMutation={correctionMutation}
+              setRecurringMutation={setRecurringMutation}
             />
           </div>
         </div>
@@ -843,6 +892,7 @@ function InvoiceDetailContent({
   startEdit, navigate, queryClient,
   showCashDialog, setShowCashDialog, cashDate, setCashDate, cashPaymentMutation, undoCashMutation,
   showCorrectionDialog, setShowCorrectionDialog, correctionNote, setCorrectionNote, correctionMutation,
+  setRecurringMutation,
 }: {
   selectedId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -879,6 +929,8 @@ function InvoiceDetailContent({
   setCorrectionNote: (v: string) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   correctionMutation: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setRecurringMutation: any;
 }) {
   if (detailLoading) {
     return (
@@ -938,6 +990,28 @@ function InvoiceDetailContent({
       )}
 
       {/* Ersatzbeleg reference */}
+      {detail.documentType === 'CREDIT_NOTE' && (
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-purple-800">
+            <MinusCircle size={16} />
+            Gutschrift / Stornorechnung
+          </div>
+          <p className="text-xs text-purple-600 mt-1">
+            Wird als GS archiviert. Betrag wird bei Matching als Rückerstattung behandelt.
+          </p>
+        </div>
+      )}
+      {detail.documentType === 'ADVANCE_PAYMENT' && (
+        <div className="bg-teal-50 border border-teal-200 rounded-lg p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-teal-800">
+            <Banknote size={16} />
+            Anzahlungsrechnung
+          </div>
+          <p className="text-xs text-teal-600 mt-1">
+            Wird als AZ archiviert. Teilzahlung — Restbetrag folgt mit Schlussrechnung.
+          </p>
+        </div>
+      )}
       {detail.documentType === 'ERSATZBELEG' && (
         <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
           <div className="flex items-center gap-2 text-sm font-medium text-orange-800">
@@ -1310,6 +1384,67 @@ function InvoiceDetailContent({
               </div>
             </div>
           )}
+
+          {/* Recurring toggle */}
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Repeat size={16} className={detail.isRecurring ? 'text-purple-600' : 'text-gray-400'} />
+                <span className="text-sm font-medium">Laufende Kosten</span>
+              </div>
+              <button
+                onClick={() => setRecurringMutation.mutate({
+                  id: detail.id,
+                  data: {
+                    isRecurring: !detail.isRecurring,
+                    recurringInterval: !detail.isRecurring ? 'MONTHLY' : null,
+                  },
+                })}
+                disabled={setRecurringMutation.isPending}
+                className={`relative w-11 h-6 rounded-full transition-colors ${detail.isRecurring ? 'bg-purple-600' : 'bg-gray-300'}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${detail.isRecurring ? 'translate-x-5' : ''}`} />
+              </button>
+            </div>
+            {detail.isRecurring && (
+              <div className="mt-3 space-y-2">
+                <select
+                  value={detail.recurringInterval ?? 'MONTHLY'}
+                  onChange={(e) => setRecurringMutation.mutate({
+                    id: detail.id,
+                    data: {
+                      isRecurring: true,
+                      recurringInterval: e.target.value as RecurringIntervalType,
+                      recurringNote: detail.recurringNote,
+                    },
+                  })}
+                  className="input-field text-sm w-full"
+                >
+                  {Object.entries(RECURRING_INTERVALS).map(([key, val]) => (
+                    <option key={key} value={key}>{val.label}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  placeholder="Notiz (z.B. Monatliche Miete)"
+                  defaultValue={detail.recurringNote ?? ''}
+                  onBlur={(e) => {
+                    if (e.target.value !== (detail.recurringNote ?? '')) {
+                      setRecurringMutation.mutate({
+                        id: detail.id,
+                        data: {
+                          isRecurring: true,
+                          recurringInterval: detail.recurringInterval as RecurringIntervalType,
+                          recurringNote: e.target.value || null,
+                        },
+                      });
+                    }
+                  }}
+                  className="input-field text-sm w-full"
+                />
+              </div>
+            )}
+          </div>
 
           {/* Park / Unpark */}
           {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && (
@@ -1980,6 +2115,54 @@ function ProcessingBadge({ status }: { status: string }) {
       {c.label}
     </span>
   );
+}
+
+const CLOSED_STATUSES = new Set(['RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'ARCHIVED', 'EXPORTED', 'REJECTED', 'ERROR', 'REPLACED']);
+
+function DocumentTypeBadge({ type }: { type: string }) {
+  switch (type) {
+    case 'CREDIT_NOTE':
+      return <span className="text-[10px] font-semibold bg-purple-100 text-purple-700 px-1 py-0.5 rounded">Gutschrift</span>;
+    case 'ADVANCE_PAYMENT':
+      return <span className="text-[10px] font-semibold bg-teal-100 text-teal-700 px-1 py-0.5 rounded">Anzahlung</span>;
+    case 'ERSATZBELEG':
+      return <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">Ersatzbeleg</span>;
+    default:
+      return null;
+  }
+}
+
+function DueDateCell({ dueDate, processingStatus }: { dueDate: string | null; processingStatus: string }) {
+  if (!dueDate) return <span className="text-gray-300">—</span>;
+  const due = new Date(dueDate);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const diffDays = Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+  const isClosed = CLOSED_STATUSES.has(processingStatus);
+
+  if (diffDays > 0 && !isClosed) {
+    return (
+      <div>
+        <div className="text-gray-600 text-sm">{formatDate(dueDate)}</div>
+        <span className="text-[10px] font-semibold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">
+          {diffDays}d überfällig
+        </span>
+      </div>
+    );
+  }
+
+  if (diffDays <= 0 && diffDays >= -3 && !isClosed) {
+    return (
+      <div>
+        <div className="text-gray-600 text-sm">{formatDate(dueDate)}</div>
+        <span className="text-[10px] font-semibold bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full">
+          {diffDays === 0 ? 'Heute fällig' : `in ${Math.abs(diffDays)}d`}
+        </span>
+      </div>
+    );
+  }
+
+  return <span className="text-gray-600 text-sm">{formatDate(dueDate)}</span>;
 }
 
 function formatDate(dateStr: string): string {

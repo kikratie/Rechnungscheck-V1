@@ -2,17 +2,19 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/authStore';
 import { getDashboardStatsApi } from '../api/dashboard';
+import { getRecurringSummaryApi } from '../api/invoices';
 import {
   TrendingUp, TrendingDown, Wallet, Landmark,
   FileText, Building2, ArrowLeftRight,
-  CheckCircle, XCircle, Clock, Loader2,
+  CheckCircle, XCircle, Clock, Loader2, Repeat, AlertTriangle,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts';
-import type { DashboardStats, DashboardPeriod, OpenInvoiceItem } from '@buchungsai/shared';
+import type { DashboardStats, DashboardPeriod, OpenInvoiceItem, RecurringCostsSummary } from '@buchungsai/shared';
+import { RECURRING_INTERVALS } from '@buchungsai/shared';
 
 const PERIOD_OPTIONS: Array<{ value: DashboardPeriod; label: string }> = [
   { value: 'currentMonth', label: 'Aktueller Monat' },
@@ -32,6 +34,12 @@ export function DashboardPage() {
   });
 
   const stats: DashboardStats | undefined = data?.data;
+
+  const { data: recurringData } = useQuery({
+    queryKey: ['recurring-summary'],
+    queryFn: () => getRecurringSummaryApi(),
+  });
+  const recurringSummary: RecurringCostsSummary | undefined = recurringData?.data;
 
   return (
     <div>
@@ -145,6 +153,77 @@ export function DashboardPage() {
               emptyMessage="Keine offenen Verbindlichkeiten"
             />
           </div>
+
+          {/* Recurring Costs Widget (Laufende Kosten) */}
+          {recurringSummary && recurringSummary.items.length > 0 && (
+            <div className="card p-4 md:p-6 mb-6 md:mb-8">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Repeat size={20} className="text-purple-600" />
+                  <h2 className="text-lg font-semibold">Laufende Kosten</h2>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-gray-500">Monatlich gesamt</p>
+                  <p className="text-lg font-bold text-purple-600">{formatCurrency(recurringSummary.monthlyTotal)}</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b border-gray-100">
+                      <th className="pb-2 font-medium">Lieferant</th>
+                      <th className="pb-2 font-medium text-right">Betrag</th>
+                      <th className="pb-2 font-medium text-center hidden sm:table-cell">Intervall</th>
+                      <th className="pb-2 font-medium text-right hidden md:table-cell">Nächste Fälligkeit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recurringSummary.items.map((item) => (
+                      <tr key={item.recurringGroupId} className="border-b border-gray-50">
+                        <td className="py-2.5 pr-3">
+                          <div className="flex items-center gap-2">
+                            <div className="truncate max-w-[180px] font-medium">{item.vendorName}</div>
+                            {item.isOverdue && (
+                              <AlertTriangle size={14} className="text-amber-500 shrink-0" />
+                            )}
+                          </div>
+                          {item.recurringNote && (
+                            <div className="text-xs text-gray-400 truncate max-w-[200px]">{item.recurringNote}</div>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-right font-medium whitespace-nowrap">
+                          {formatCurrency(item.lastGrossAmount)}
+                        </td>
+                        <td className="py-2.5 text-center hidden sm:table-cell">
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
+                            {RECURRING_INTERVALS[item.recurringInterval as keyof typeof RECURRING_INTERVALS]?.label ?? item.recurringInterval}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-right hidden md:table-cell">
+                          {item.nextExpectedDate ? (
+                            <span className={item.isOverdue ? 'text-amber-600 font-medium' : 'text-gray-500'}>
+                              {formatDateDE(item.nextExpectedDate)}
+                              {item.isOverdue && ' (überfällig)'}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-3 text-center">
+                <Link
+                  to="/invoices?recurring=true"
+                  className="text-sm text-purple-600 hover:text-purple-700 font-medium"
+                >
+                  Alle laufenden Kosten anzeigen
+                </Link>
+              </div>
+            </div>
+          )}
 
           {/* Secondary Stats (compact) */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">

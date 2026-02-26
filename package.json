@@ -18,6 +18,7 @@
     "db:clean": "docker exec buchungsai-postgres psql -U buchungsai -d buchungsai -c \"DELETE FROM matchings; DELETE FROM validation_results; DELETE FROM extracted_data; DELETE FROM audit_logs; DELETE FROM invoices; DELETE FROM vendors; DELETE FROM bank_statements; DELETE FROM bank_transactions; SELECT 'Alles gelöscht — bereit für frische Tests.' AS status;\"",
     "db:studio": "npm run db:studio -w server",
     "screenshot": "powershell -ExecutionPolicy Bypass -File screenshots/save-clip.ps1",
+    "db:superadmin": "npx tsx server/src/scripts/create-superadmin.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "lint": "concurrently \"npm run lint -w server\" \"npm run lint -w client\"",

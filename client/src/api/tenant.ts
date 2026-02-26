@@ -78,6 +78,37 @@ export async function getAccessListApi() {
   return response.data.data!;
 }
 
+// User Invitation
+export async function inviteUserApi(data: {
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+}) {
+  const response = await apiClient.post<ApiResponse<unknown>>('/tenant/invite', data);
+  return response.data;
+}
+
+export async function getTenantUsersApi() {
+  const response = await apiClient.get<ApiResponse<Array<{
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    isActive: boolean;
+    lastLoginAt: string | null;
+    createdAt: string;
+  }>>>('/tenant/users');
+  return response.data.data!;
+}
+
+// Feature Visibility
+export async function updateFeatureVisibilityApi(featureVisibility: Record<string, boolean>) {
+  const response = await apiClient.put<ApiResponse<{ featureVisibility: Record<string, boolean> }>>('/tenant/feature-visibility', { featureVisibility });
+  return response.data.data!;
+}
+
 // DSGVO / Terms
 export async function acceptTermsApi() {
   const response = await apiClient.post<ApiResponse<{ message: string }>>('/tenant/accept-terms');

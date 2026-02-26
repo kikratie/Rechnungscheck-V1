@@ -179,6 +179,15 @@ BEWIRTUNGSBELEG-ERKENNUNG:
 - hospitalityGuests: Bei Bewirtungsbeleg: Anzahl/Namen der bewirteten Personen (falls auf dem Beleg erkennbar, sonst null)
 - hospitalityReason: Bei Bewirtungsbeleg: Geschäftsanlass der Bewirtung (falls auf dem Beleg erkennbar, sonst null)
 
+DOKUMENTTYP-ERKENNUNG:
+- documentType: Art des Belegs. Werte: "INVOICE" (Standard-Rechnung), "CREDIT_NOTE" (Gutschrift/Stornorechnung), "ADVANCE_PAYMENT" (Anzahlungsrechnung).
+  Hinweise zur Erkennung:
+  - CREDIT_NOTE: Dokument enthält "Gutschrift", "Stornorechnung", "Korrekturfaktura", "Credit Note", "Storno", "Gutschein" (im Sinne einer Rechnungskorrektur).
+    Betrag ist oft negativ oder es gibt einen Verweis auf eine Original-Rechnungsnummer.
+  - ADVANCE_PAYMENT: Dokument enthält "Anzahlung", "Anzahlungsrechnung", "Abschlagszahlung", "Vorauszahlung", "Vorschuss", "Akontorechnung", "Teilrechnung".
+  - INVOICE: Standard-Rechnung (Default wenn nichts anderes erkennbar).
+- originalInvoiceReference: Bei CREDIT_NOTE: Referenz auf die Original-Rechnungsnummer (falls angegeben, z.B. "zu Rechnung Nr. 2024-0042"). Sonst null.
+
 SONSTIGES:
 - isReverseCharge: true wenn Reverse Charge Vermerk
 - accountNumber: Sachkonto/Aufwandskonto (falls angegeben)

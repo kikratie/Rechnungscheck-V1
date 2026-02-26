@@ -1,3 +1,4 @@
+import type { ApiResponse, ExportConfigItem } from '@buchungsai/shared';
 import { apiClient } from './client';
 
 export async function exportBmdCsvApi(dateFrom: string, dateTo: string) {
@@ -26,6 +27,47 @@ export async function exportOcrCheckApi(dateFrom?: string, dateTo?: string) {
     responseType: 'blob',
   });
   return response.data as Blob;
+}
+
+// ============================================================
+// Export Config CRUD
+// ============================================================
+
+export async function getExportConfigsApi() {
+  const response = await apiClient.get<ApiResponse<ExportConfigItem[]>>('/exports/configs');
+  return response.data;
+}
+
+export async function createExportConfigApi(data: {
+  name: string;
+  format: string;
+  delimiter?: string;
+  dateFormat?: string;
+  decimalSeparator?: string;
+  encoding?: string;
+  includeHeader?: boolean;
+}) {
+  const response = await apiClient.post<ApiResponse<ExportConfigItem>>('/exports/configs', data);
+  return response.data;
+}
+
+export async function updateExportConfigApi(id: string, data: {
+  name?: string;
+  format?: string;
+  delimiter?: string;
+  dateFormat?: string;
+  decimalSeparator?: string;
+  encoding?: string;
+  includeHeader?: boolean;
+  isDefault?: boolean;
+}) {
+  const response = await apiClient.put<ApiResponse<ExportConfigItem>>(`/exports/configs/${id}`, data);
+  return response.data;
+}
+
+export async function deleteExportConfigApi(id: string) {
+  const response = await apiClient.delete<ApiResponse<null>>(`/exports/configs/${id}`);
+  return response.data;
 }
 
 /** Helper: trigger download of a Blob */

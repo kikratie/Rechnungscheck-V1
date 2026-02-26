@@ -2,17 +2,52 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireTenant } from '../middleware/tenantContext.js';
 import { validateBody } from '../middleware/validate.js';
-import { exportGenerateSchema, monthlyReportSchema, fullExportSchema, ocrCheckExportSchema } from '@buchungsai/shared';
-import { generateBmdCsv, generateFullExport, generateOcrCheckCsv } from '../services/export.service.js';
+import { exportGenerateSchema, monthlyReportSchema, fullExportSchema, ocrCheckExportSchema, createExportConfigSchema, updateExportConfigSchema } from '@buchungsai/shared';
+import { generateBmdCsv, generateFullExport, generateOcrCheckCsv, getExportConfigs, createExportConfig, updateExportConfig, deleteExportConfig } from '../services/export.service.js';
 import { generateMonthlyReport } from '../services/report.service.js';
 
 const router = Router();
 
 router.use(authenticate, requireTenant);
 
-// GET /api/v1/exports/configs — Placeholder for export configs
-router.get('/configs', async (_req, res) => {
-  res.json({ success: true, data: [] });
+// GET /api/v1/exports/configs — List all export configs for tenant
+router.get('/configs', async (req, res, next) => {
+  try {
+    const configs = await getExportConfigs(req.tenantId!);
+    res.json({ success: true, data: configs });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/exports/configs — Create new export config
+router.post('/configs', validateBody(createExportConfigSchema), async (req, res, next) => {
+  try {
+    const config = await createExportConfig(req.tenantId!, req.body);
+    res.status(201).json({ success: true, data: config });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/v1/exports/configs/:id — Update export config
+router.put('/configs/:id', validateBody(updateExportConfigSchema), async (req, res, next) => {
+  try {
+    const config = await updateExportConfig(req.tenantId!, req.params.id as string, req.body);
+    res.json({ success: true, data: config });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/v1/exports/configs/:id — Delete export config
+router.delete('/configs/:id', async (req, res, next) => {
+  try {
+    await deleteExportConfig(req.tenantId!, req.params.id as string);
+    res.json({ success: true, data: null });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // POST /api/v1/exports/bmd-csv — Generate BMD CSV export

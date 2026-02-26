@@ -1,4 +1,4 @@
-import type { ApiResponse, InvoiceListItem, InvoiceDetailExtended, ExtractedDataItem } from '@buchungsai/shared';
+import type { ApiResponse, InvoiceListItem, InvoiceDetailExtended, ExtractedDataItem, RecurringCostsSummary, RecurringIntervalType } from '@buchungsai/shared';
 import { apiClient } from './client';
 
 export interface InvoiceFilters {
@@ -8,6 +8,8 @@ export interface InvoiceFilters {
   direction?: 'INCOMING' | 'OUTGOING';
   processingStatus?: string;
   validationStatus?: string;
+  overdue?: boolean;
+  recurring?: boolean;
   sortBy?: string;
   sortOrder?: string;
 }
@@ -121,5 +123,15 @@ export async function undoCashPaymentApi(id: string) {
 
 export async function requestCorrectionApi(id: string, note: string) {
   const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/request-correction`, { note });
+  return response.data;
+}
+
+export async function setRecurringApi(id: string, data: { isRecurring: boolean; recurringInterval?: RecurringIntervalType | null; recurringNote?: string | null }) {
+  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/set-recurring`, data);
+  return response.data;
+}
+
+export async function getRecurringSummaryApi() {
+  const response = await apiClient.get<ApiResponse<RecurringCostsSummary>>('/invoices/recurring-summary');
   return response.data;
 }

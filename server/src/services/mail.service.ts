@@ -91,6 +91,43 @@ export async function sendMail(input: SendMailInput): Promise<{ messageId: strin
 }
 
 /**
+ * Sends an invitation email to a new team member.
+ */
+export async function sendInvitationEmail(input: {
+  tenantId: string;
+  userId: string;
+  toEmail: string;
+  toFirstName: string;
+  tenantName: string;
+  inviteUrl: string;
+}): Promise<{ messageId: string }> {
+  const body = `Hallo ${input.toFirstName},
+
+Sie wurden zum Team von „${input.tenantName}" auf Ki2Go Accounting eingeladen.
+
+Bitte klicken Sie auf den folgenden Link, um Ihr Konto zu aktivieren und ein Passwort festzulegen:
+
+${input.inviteUrl}
+
+Dieser Link ist 48 Stunden gültig.
+
+Falls Sie diese Einladung nicht erwartet haben, können Sie diese E-Mail ignorieren.
+
+Mit freundlichen Grüßen
+Das Ki2Go Accounting Team`;
+
+  return sendMail({
+    tenantId: input.tenantId,
+    userId: input.userId,
+    to: input.toEmail,
+    subject: `Einladung zu ${input.tenantName} — Ki2Go Accounting`,
+    body,
+    entityType: 'User',
+    entityId: input.toEmail,
+  });
+}
+
+/**
  * Generates a professional correction email text using LLM based on validation results.
  * Used when the user wants to request a corrected invoice from a vendor.
  */

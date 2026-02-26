@@ -15,8 +15,10 @@ import {
   ClipboardList,
   Settings,
   LogOut,
+  Shield,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
+import { useFeatureFilter } from '../../hooks/useFeatureVisible';
 import { BottomSheet } from './BottomSheet';
 
 interface TabItem {
@@ -25,31 +27,39 @@ interface TabItem {
   label: string;
   end?: boolean;
   isCenter?: boolean;
+  featureKey?: string;
 }
 
-const mainTabs: TabItem[] = [
+const allMainTabs: TabItem[] = [
   { to: '/', icon: LayoutDashboard, label: 'Home', end: true },
-  { to: '/inbox', icon: Inbox, label: 'Eingang' },
+  { to: '/inbox', icon: Inbox, label: 'Eingang', featureKey: 'inbox' },
   { to: '/scan', icon: Camera, label: 'Scannen', isCenter: true },
-  { to: '/invoices', icon: FileSearch, label: 'Prüfung' },
+  { to: '/invoices', icon: FileSearch, label: 'Prüfung', featureKey: 'invoiceCheck' },
   { to: '__more__', icon: MoreHorizontal, label: 'Mehr' },
 ];
 
-const moreItems = [
-  { to: '/matching', icon: ArrowLeftRight, label: 'Zahlungs-Check' },
-  { to: '/vendors', icon: Users, label: 'Lieferanten' },
-  { to: '/customers', icon: UserCheck, label: 'Kunden' },
+const allMoreItems = [
+  { to: '/matching', icon: ArrowLeftRight, label: 'Zahlungs-Check', featureKey: 'paymentCheck' },
+  { to: '/vendors', icon: Users, label: 'Lieferanten', featureKey: 'vendors' },
+  { to: '/customers', icon: UserCheck, label: 'Kunden', featureKey: 'customers' },
   { to: '/bank-statements', icon: Landmark, label: 'Kontoauszüge' },
-  { to: '/accounts', icon: BookOpen, label: 'Kontenplan' },
-  { to: '/export', icon: Download, label: 'Export' },
-  { to: '/audit-log', icon: ClipboardList, label: 'Audit-Log' },
+  { to: '/accounts', icon: BookOpen, label: 'Kontenplan', featureKey: 'accounts' },
+  { to: '/export', icon: Download, label: 'Export', featureKey: 'export' },
+  { to: '/audit-log', icon: ClipboardList, label: 'Audit-Log', featureKey: 'auditLog' },
   { to: '/settings', icon: Settings, label: 'Einstellungen' },
 ];
 
 export function BottomTabBar() {
   const [moreOpen, setMoreOpen] = useState(false);
   const navigate = useNavigate();
-  const { logout } = useAuthStore();
+  const { user, logout } = useAuthStore();
+  const isFeatureVisible = useFeatureFilter();
+
+  const mainTabs = allMainTabs.filter(tab => isFeatureVisible(tab.featureKey));
+  const moreItems = [
+    ...allMoreItems.filter(item => isFeatureVisible(item.featureKey)),
+    ...(user?.isSuperAdmin ? [{ to: '/admin', icon: Shield, label: 'Super-Admin' }] : []),
+  ];
 
   return (
     <>

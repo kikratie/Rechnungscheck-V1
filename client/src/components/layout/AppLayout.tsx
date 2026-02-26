@@ -5,8 +5,10 @@ import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { logoutApi } from '../../api/auth';
 import { getAccessibleTenantsApi } from '../../api/tenant';
+import { getAdminTenantsApi } from '../../api/admin';
 import { BottomTabBar } from '../mobile/BottomTabBar';
 import { useAccountingType } from '../../hooks/useAccountingType';
+import { useFeatureFilter } from '../../hooks/useFeatureVisible';
 import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard,
@@ -22,11 +24,19 @@ import {
   LogOut,
   BookOpen,
   Receipt,
+  Shield,
 } from 'lucide-react';
+
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  featureKey?: string;
+}
 
 interface NavGroup {
   label: string;
-  items: Array<{ to: string; label: string; icon: LucideIcon }>;
+  items: NavItem[];
 }
 
 export function AppLayout() {
@@ -38,52 +48,72 @@ export function AppLayout() {
   const accountingType = useAccountingType();
 
   const isTaxAdvisor = user?.role === 'TAX_ADVISOR';
+  const isSuperAdmin = !!user?.isSuperAdmin;
+  const isFeatureVisible = useFeatureFilter();
 
-  // Build navigation groups based on accountingType
+  // Build navigation groups based on accountingType, filtered by feature visibility
   const navGroups: NavGroup[] = [
     {
       label: 'Hauptprozess',
       items: [
-        { to: '/inbox', label: 'A: Rechnungseingang', icon: Inbox },
-        { to: '/invoices', label: 'B: Rechnungs-Check', icon: FileSearch },
-        { to: '/matching', label: 'C: Zahlungs-Check', icon: ArrowLeftRight },
+        { to: '/inbox', label: 'A: Rechnungseingang', icon: Inbox, featureKey: 'inbox' },
+        { to: '/invoices', label: 'B: Rechnungs-Check', icon: FileSearch, featureKey: 'invoiceCheck' },
+        { to: '/matching', label: 'C: Zahlungs-Check', icon: ArrowLeftRight, featureKey: 'paymentCheck' },
       ],
     },
     {
       label: 'Stammdaten',
       items: [
-        { to: '/vendors', label: 'Lieferanten', icon: Users },
-        { to: '/customers', label: 'Kunden', icon: UserCheck },
+        { to: '/vendors', label: 'Lieferanten', icon: Users, featureKey: 'vendors' },
+        { to: '/customers', label: 'Kunden', icon: UserCheck, featureKey: 'customers' },
         { to: '/bank-statements', label: 'Kontoauszüge', icon: Building2 },
-        { to: '/accounts', label: 'Kontenplan', icon: BookOpen },
+        { to: '/accounts', label: 'Kontenplan', icon: BookOpen, featureKey: 'accounts' },
       ],
     },
     {
       label: 'Berichte & Export',
       items: [
-        { to: '/export', label: 'Export', icon: Download },
+        { to: '/export', label: 'Export', icon: Download, featureKey: 'export' },
         ...(accountingType === 'EA'
-          ? [{ to: '/tax/uva', label: 'UVA-Bericht', icon: Receipt }]
+          ? [{ to: '/tax/uva', label: 'UVA-Bericht', icon: Receipt, featureKey: 'uvaReport' }]
           : []),
       ],
     },
     {
       label: 'System',
       items: [
-        { to: '/audit-log', label: 'Audit-Log', icon: ScrollText },
+        { to: '/audit-log', label: 'Audit-Log', icon: ScrollText, featureKey: 'auditLog' },
         { to: '/settings', label: 'Einstellungen', icon: Settings },
       ],
     },
-  ];
+    ...(isSuperAdmin ? [{
+      label: 'Super-Admin',
+      items: [
+        { to: '/admin', label: 'Mandanten', icon: Shield },
+      ],
+    }] : []),
+  ].map(group => ({
+    ...group,
+    items: group.items.filter(item => isFeatureVisible(item.featureKey)),
+  })).filter(group => group.items.length > 0);
 
   const allNavItems = navGroups.flatMap((g) => g.items);
 
-  // Load accessible tenants for TAX_ADVISOR
+  // Load accessible tenants for Super-Admin or TAX_ADVISOR
   useEffect(() => {
-    if (isTaxAdvisor) {
+    if (isSuperAdmin) {
+      getAdminTenantsApi().then((tenants) => {
+        setAccessibleTenants(tenants.map((t) => ({
+          tenantId: t.id,
+          name: t.name,
+          slug: t.slug,
+          accessLevel: 'ADMIN',
+        })));
+      }).catch(() => {});
+    } else if (isTaxAdvisor) {
       getAccessibleTenantsApi().then(setAccessibleTenants).catch(() => {});
     }
-  }, [isTaxAdvisor, setAccessibleTenants]);
+  }, [isSuperAdmin, isTaxAdvisor, setAccessibleTenants]);
 
   // Get current page title for mobile header
   const currentPage = allNavItems.find((item) =>
@@ -123,8 +153,8 @@ export function AppLayout() {
           <div className="p-6 border-b border-gray-800">
             <h1 className="text-xl font-bold">Ki2Go</h1>
             <p className="text-xs text-gray-400 mt-1">{user?.tenantName}</p>
-            {/* Tenant switcher for TAX_ADVISOR */}
-            {isTaxAdvisor && accessibleTenants.length > 0 && (
+            {/* Tenant switcher for Super-Admin or TAX_ADVISOR */}
+            {(isSuperAdmin || isTaxAdvisor) && accessibleTenants.length > 0 && (
               <select
                 value={activeTenantId || 'own'}
                 onChange={(e) => handleTenantSwitch(e.target.value)}
@@ -133,7 +163,7 @@ export function AppLayout() {
                 <option value="own">Eigener Mandant</option>
                 {accessibleTenants.map((t) => (
                   <option key={t.tenantId} value={t.tenantId}>
-                    {t.name} ({t.accessLevel === 'READ' ? 'Lesen' : 'Schreiben'})
+                    {t.name}{!isSuperAdmin ? ` (${t.accessLevel === 'READ' ? 'Lesen' : 'Schreiben'})` : ''}
                   </option>
                 ))}
               </select>

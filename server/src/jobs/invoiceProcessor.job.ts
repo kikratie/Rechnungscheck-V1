@@ -121,6 +121,11 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
     const validServiceTypes = ['DELIVERY', 'SERVICE', 'BOTH'];
     const serviceType = serviceTypeRaw && validServiceTypes.includes(serviceTypeRaw) ? serviceTypeRaw : null;
 
+    // Determine documentType from LLM response
+    const documentTypeRaw = (fields.documentType as string) || null;
+    const validDocumentTypes = ['INVOICE', 'CREDIT_NOTE', 'ADVANCE_PAYMENT'];
+    const detectedDocumentType = documentTypeRaw && validDocumentTypes.includes(documentTypeRaw) ? documentTypeRaw : 'INVOICE';
+
     // Hospitality detection (Bewirtungsbeleg)
     const isHospitality = (fields.isHospitality as boolean) || false;
     const hospitalityGuests = isHospitality ? ((fields.hospitalityGuests as string) || null) : null;
@@ -221,6 +226,7 @@ export async function processInvoiceJob(job: Job<InvoiceJobData>): Promise<void>
       where: { id: invoiceId },
       data: {
         processingStatus,
+        documentType: detectedDocumentType,
         vendorId: vendorId || undefined,
         customerId: customerId || undefined,
         customerName: direction === 'OUTGOING' ? extractedData.recipientName : undefined,

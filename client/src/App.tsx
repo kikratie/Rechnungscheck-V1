@@ -20,6 +20,9 @@ import { PrivacyPage } from './pages/PrivacyPage';
 import { AccountsPage } from './pages/AccountsPage';
 import { InboxPage } from './pages/InboxPage';
 import { UvaReportPage } from './pages/UvaReportPage';
+import { AcceptInvitePage } from './pages/AcceptInvitePage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { SuperAdminPage } from './pages/SuperAdminPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useAuthStore();
@@ -80,6 +83,12 @@ export default function App() {
       {/* Share Target — standalone page (no AppLayout, handles auth internally) */}
       <Route path="/share-target" element={<ShareTargetPage />} />
 
+      {/* Accept invite — public, standalone page */}
+      <Route path="/accept-invite" element={<AcceptInvitePage />} />
+
+      {/* Password reset — public, standalone page */}
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+
       {/* Legal pages (public, no auth required) */}
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
@@ -105,6 +114,7 @@ export default function App() {
         <Route path="tax/uva" element={<UvaReportPage />} />
         <Route path="audit-log" element={<AuditLogPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="admin" element={<SuperAdminPage />} />
       </Route>
 
       {/* Catch-all */}

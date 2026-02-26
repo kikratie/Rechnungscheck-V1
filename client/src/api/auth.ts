@@ -25,3 +25,33 @@ export async function getMeApi() {
 export async function logoutApi(refreshToken: string) {
   await apiClient.post('/auth/logout', { refreshToken });
 }
+
+export async function acceptInviteApi(token: string, password: string) {
+  const response = await apiClient.post<ApiResponse<{
+    message: string;
+    email: string;
+    tenantName: string;
+  }>>('/auth/accept-invite', { token, password });
+  return response.data;
+}
+
+export async function changePasswordApi(currentPassword: string, newPassword: string) {
+  const response = await apiClient.post<ApiResponse<{ message: string }>>('/auth/change-password', {
+    currentPassword,
+    newPassword,
+  });
+  return response.data;
+}
+
+export async function forgotPasswordApi(email: string) {
+  const response = await apiClient.post<ApiResponse<{ message: string }>>('/auth/forgot-password', { email });
+  return response.data;
+}
+
+export async function resetPasswordApi(token: string, password: string) {
+  const response = await apiClient.post<ApiResponse<{ message: string; email: string }>>('/auth/reset-password', {
+    token,
+    password,
+  });
+  return response.data;
+}

@@ -39,6 +39,7 @@ export const ARCHIVAL_PREFIXES = {
   INCOMING: 'RE',   // Rechnung Eingang
   OUTGOING: 'AR',   // Ausgangsrechnung
   CREDIT_NOTE: 'GS', // Gutschrift
+  ADVANCE_PAYMENT: 'AZ', // Anzahlung
 } as const;
 
 // Validierungsstatus
@@ -97,6 +98,7 @@ export const PAGINATION = {
 export const DOCUMENT_TYPES = {
   INVOICE: 'INVOICE',
   CREDIT_NOTE: 'CREDIT_NOTE',
+  ADVANCE_PAYMENT: 'ADVANCE_PAYMENT',
   RECEIPT: 'RECEIPT',
   ERSATZBELEG: 'ERSATZBELEG',
 } as const;
@@ -156,6 +158,35 @@ export const VALIDATION_RULES = {
   PLZ_UID_CHECK: { id: 'PLZ_UID_CHECK', label: 'PLZ-UID Plausibilität', legalBasis: '§11 Abs 1 Z 1–2 UStG', requiredFor: ['STANDARD', 'LARGE'] },
   CURRENCY_INFO: { id: 'CURRENCY_INFO', label: 'Fremdwährungs-Info', legalBasis: '§20 Abs 2 UStG', requiredFor: [] },
   HOSPITALITY_CHECK: { id: 'HOSPITALITY_CHECK', label: 'Bewirtungsbeleg-Prüfung', legalBasis: '§20 Abs 1 Z 3 EStG', requiredFor: ['SMALL', 'STANDARD', 'LARGE'] },
+  LEGAL_FORM_CHECK: { id: 'LEGAL_FORM_CHECK', label: 'Rechtsform-Prüfung (§14 UGB)', legalBasis: '§14 UGB', requiredFor: ['STANDARD', 'LARGE'] },
+  CREDIT_NOTE_CHECK: { id: 'CREDIT_NOTE_CHECK', label: 'Gutschrift-Prüfung', legalBasis: '§11 Abs 1 UStG', requiredFor: ['SMALL', 'STANDARD', 'LARGE'] },
+} as const;
+
+// Österreichische Rechtsformen (§14 UGB)
+export const LEGAL_FORMS = {
+  // Juristische Personen (UID PFLICHT)
+  GMBH: { pattern: /\bGmbH\b/i, label: 'GmbH', uidRequired: true },
+  AG: { pattern: /\bAG\b/, label: 'AG', uidRequired: true },
+  SE: { pattern: /\bSE\b/, label: 'SE (Europäische Gesellschaft)', uidRequired: true },
+  GENOSSENSCHAFT: { pattern: /\beGen\b|\bGenossenschaft\b/i, label: 'Genossenschaft', uidRequired: true },
+  VEREIN: { pattern: /\bVerein\b/i, label: 'Verein', uidRequired: false },
+  STIFTUNG: { pattern: /\bStiftung\b|\bPrivatstiftung\b/i, label: 'Stiftung', uidRequired: true },
+  // Personengesellschaften (UID empfohlen)
+  OG: { pattern: /\bOG\b|\bOHG\b/, label: 'OG', uidRequired: false },
+  KG: { pattern: /\bKG\b|\bGmbH\s*&\s*Co\.?\s*KG\b/i, label: 'KG', uidRequired: false },
+  // Einzelunternehmer
+  EU: { pattern: /\be\.?\s?U\.?\b/i, label: 'Einzelunternehmen (e.U.)', uidRequired: false },
+  // Deutsche Rechtsformen (häufig auf AT-Rechnungen)
+  DE_GMBH: { pattern: /\bGesellschaft\s+mit\s+beschränkter\s+Haftung\b/i, label: 'GmbH (ausgeschrieben)', uidRequired: true },
+  DE_UG: { pattern: /\bUG\s*\(haftungsbeschränkt\)\b/i, label: 'UG (haftungsbeschränkt)', uidRequired: true },
+} as const;
+
+// Wiederkehrende Kosten — Intervalle
+export const RECURRING_INTERVALS = {
+  MONTHLY: { label: 'Monatlich', months: 1 },
+  QUARTERLY: { label: 'Vierteljährlich', months: 3 },
+  HALF_YEARLY: { label: 'Halbjährlich', months: 6 },
+  YEARLY: { label: 'Jährlich', months: 12 },
 } as const;
 
 // Zahlungsdifferenz-Gründe (Labels)
@@ -263,3 +294,22 @@ export const ALLOWED_EMAIL_ATTACHMENT_MIMES = [
   'image/tiff',
   'image/webp',
 ] as const;
+
+// ============================================================
+// Feature-Module — togglebar pro Mandant
+// ============================================================
+
+export const FEATURE_MODULES = {
+  inbox:        { label: 'Rechnungseingang', description: 'Eingangskorb & E-Mail-Import' },
+  invoiceCheck: { label: 'Rechnungs-Check', description: 'Prüfung & Validierung' },
+  paymentCheck: { label: 'Zahlungs-Check', description: 'Matching & Monatsabstimmung' },
+  vendors:      { label: 'Lieferanten', description: 'Lieferanten-Verwaltung' },
+  customers:    { label: 'Kunden', description: 'Kunden-Verwaltung' },
+  accounts:     { label: 'Kontenplan', description: 'Kontenplan-Verwaltung' },
+  export:       { label: 'Export', description: 'BMD-Export & Exportprofile' },
+  auditLog:     { label: 'Audit-Log', description: 'Änderungsprotokoll' },
+  uvaReport:    { label: 'UVA-Bericht', description: 'Umsatzsteuer-Voranmeldung' },
+} as const;
+
+export const DEFAULT_FEATURE_VISIBILITY: Record<string, boolean> =
+  Object.fromEntries(Object.keys(FEATURE_MODULES).map(k => [k, true]));

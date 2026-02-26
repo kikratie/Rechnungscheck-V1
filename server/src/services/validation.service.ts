@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/database.js';
-import { AMOUNT_CLASS_THRESHOLDS, VAT_RATE_VALUES, VALIDATION_RULES } from '@buchungsai/shared';
+import { AMOUNT_CLASS_THRESHOLDS, VAT_RATE_VALUES, VALIDATION_RULES, LEGAL_FORMS } from '@buchungsai/shared';
 import type { TrafficLightStatus, AmountClass, ValidationCheck, ViesValidationInfo } from '@buchungsai/shared';
 import { validateUid, compareCompanyNames } from './vies.service.js';
 
@@ -30,6 +30,7 @@ interface ValidationInput {
   tenantId: string;
   invoiceId: string;
   direction?: 'INCOMING' | 'OUTGOING';
+  documentType?: string;
   estimatedEurGross?: number | null;
   exchangeRate?: number | null;
   exchangeRateDate?: string | null;
@@ -1306,8 +1307,109 @@ function checkHospitality(
   };
 }
 
+function checkCreditNote(fields: ExtractedFields, documentType: string): ValidationCheck {
+  const rule = VALIDATION_RULES.CREDIT_NOTE_CHECK;
+
+  if (documentType !== 'CREDIT_NOTE' && documentType !== 'ADVANCE_PAYMENT') {
+    return {
+      rule: rule.id,
+      status: 'GREEN',
+      message: 'Standardrechnung — Gutschrift-Prüfung nicht erforderlich',
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  if (documentType === 'CREDIT_NOTE') {
+    const gross = toNum(fields.grossAmount);
+    const warnings: string[] = [];
+
+    if (gross !== null && gross > 0) {
+      warnings.push('Bruttobetrag ist positiv — bei einer Gutschrift ist der Betrag üblicherweise negativ');
+    }
+
+    if (warnings.length > 0) {
+      return {
+        rule: rule.id,
+        status: 'YELLOW',
+        message: `Gutschrift erkannt: ${warnings.join('. ')}. Bitte prüfen.`,
+        legalBasis: rule.legalBasis,
+      };
+    }
+
+    return {
+      rule: rule.id,
+      status: 'GREEN',
+      message: 'Gutschrift erkannt — Betrag korrekt als negativ/Gutschrift',
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  // ADVANCE_PAYMENT
+  return {
+    rule: rule.id,
+    status: 'GREEN',
+    message: 'Anzahlungsrechnung erkannt — wird als AZ archiviert',
+    legalBasis: rule.legalBasis,
+  };
+}
+
+function checkLegalForm(fields: ExtractedFields, amountClass: AmountClass): ValidationCheck {
+  const rule = VALIDATION_RULES.LEGAL_FORM_CHECK;
+  const required = isRequiredFor(rule.id, amountClass);
+
+  const issuerName = fields.issuerName?.trim();
+  if (!issuerName) {
+    return {
+      rule: rule.id,
+      status: required ? 'YELLOW' : 'GREEN',
+      message: required
+        ? 'Rechtsform nicht prüfbar — Ausstellername fehlt'
+        : 'Rechtsform-Prüfung übersprungen (Kleinbetrag)',
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  // Detect legal form from issuer name
+  let detectedForm: { label: string; uidRequired: boolean } | null = null;
+  for (const form of Object.values(LEGAL_FORMS)) {
+    if (form.pattern.test(issuerName)) {
+      detectedForm = { label: form.label, uidRequired: form.uidRequired };
+      break;
+    }
+  }
+
+  if (!detectedForm) {
+    // No legal form detected — INFO only, no penalty
+    return {
+      rule: rule.id,
+      status: 'GREEN',
+      message: `Keine explizite Rechtsform im Firmennamen erkannt ("${issuerName}"). Möglicherweise Einzelunternehmer ohne Firmenbuch-Eintrag.`,
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  // Legal form detected — check if UID is required and present
+  if (detectedForm.uidRequired && !fields.issuerUid) {
+    return {
+      rule: rule.id,
+      status: 'YELLOW',
+      message: `Rechtsform "${detectedForm.label}" erkannt — juristische Person, aber UID-Nummer fehlt auf der Rechnung. Gemäß §14 UGB sollte die UID angegeben sein.`,
+      legalBasis: rule.legalBasis,
+    };
+  }
+
+  return {
+    rule: rule.id,
+    status: 'GREEN',
+    message: detectedForm.uidRequired
+      ? `Rechtsform "${detectedForm.label}" erkannt — UID vorhanden ✓`
+      : `Rechtsform "${detectedForm.label}" erkannt — UID-Nummer nicht zwingend erforderlich`,
+    legalBasis: rule.legalBasis,
+  };
+}
+
 export async function validateInvoice(input: ValidationInput): Promise<ValidationOutput> {
-  const { extractedFields: fields, tenantId, invoiceId, direction = 'INCOMING', estimatedEurGross, exchangeRate, exchangeRateDate } = input;
+  const { extractedFields: fields, tenantId, invoiceId, direction = 'INCOMING', documentType = 'INVOICE', estimatedEurGross, exchangeRate, exchangeRateDate } = input;
   const gross = toNum(fields.grossAmount);
   const currency = fields.currency || 'EUR';
   const amountClass = determineAmountClass(gross, currency, estimatedEurGross);
@@ -1353,6 +1455,8 @@ export async function validateInvoice(input: ValidationInput): Promise<Validatio
     checkPlzUidConsistency(fields, amountClass),
     checkCurrencyInfo(fields, estimatedEurGross, exchangeRate, exchangeRateDate),
     checkHospitality(fields, input.hospitalityGuests, input.hospitalityReason, input.isHospitality),
+    checkLegalForm(fields, amountClass),
+    checkCreditNote(fields, documentType),
   ];
 
   // Async checks
@@ -1415,5 +1519,7 @@ export const _testing = {
   checkUidVies,
   checkCurrencyInfo,
   checkHospitality,
+  checkLegalForm,
+  checkCreditNote,
   EU_UID_PREFIXES,
 };

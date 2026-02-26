@@ -57,8 +57,15 @@ model User {
   lastName    String
   role        UserRole  @default(ACCOUNTANT)
   isActive        Boolean   @default(true)
+  isSuperAdmin    Boolean   @default(false)
   lastLoginAt     DateTime?
   termsAcceptedAt DateTime?
+  invitationToken     String?
+  invitationExpiresAt DateTime?
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  passwordResetToken      String?
+  passwordResetExpiresAt  DateTime?
   createdAt       DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -70,6 +77,8 @@ model User {
 
   @@unique([tenantId, email])
   @@index([tenantId])
+  @@index([invitationToken])
+  @@index([passwordResetToken])
   @@map("users")
 }
 
@@ -214,6 +223,12 @@ model Invoice {
   // Privatanteil (0-100%, null = 100% betrieblich)
   privatePercent Int?
 
+  // Wiederkehrende Kosten (Laufende Kosten / Recurring Costs)
+  isRecurring       Boolean          @default(false)
+  recurringInterval RecurringInterval?
+  recurringGroupId  String?          // Gruppen-ID für zusammengehörige wiederkehrende Rechnungen
+  recurringNote     String?          // Benutzer-Notiz (z.B. "Monatliche Miete Büro")
+
   // Korrekturanfrage (PENDING_CORRECTION workflow)
   correctionRequestedAt DateTime?
   correctionNote        String?
@@ -266,6 +281,7 @@ model Invoice {
   @@index([vendorId])
   @@index([customerId])
   @@index([tenantId, emailMessageId])
+  @@index([tenantId, isRecurring])
   @@map("invoices")
 }
 
@@ -834,6 +850,13 @@ enum AccountType {
 enum PaymentMethod {
   BANK
   CASH
+}
+
+enum RecurringInterval {
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
 }
 
 // ============================================================

@@ -121,6 +121,44 @@ export const updateUserSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+export const inviteUserSchema = z.object({
+  email: z.string().email('Ungültige E-Mail-Adresse'),
+  firstName: z.string().min(1, 'Vorname ist erforderlich').max(50),
+  lastName: z.string().min(1, 'Nachname ist erforderlich').max(50),
+  role: z.enum(['ADMIN', 'ACCOUNTANT', 'TAX_ADVISOR']),
+});
+
+export const acceptInviteSchema = z.object({
+  token: z.string().min(1, 'Token ist erforderlich'),
+  password: z
+    .string()
+    .min(8, 'Passwort muss mindestens 8 Zeichen lang sein')
+    .regex(/[A-Z]/, 'Passwort muss mindestens einen Großbuchstaben enthalten')
+    .regex(/[0-9]/, 'Passwort muss mindestens eine Zahl enthalten'),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Aktuelles Passwort ist erforderlich'),
+  newPassword: z
+    .string()
+    .min(8, 'Passwort muss mindestens 8 Zeichen lang sein')
+    .regex(/[A-Z]/, 'Passwort muss mindestens einen Großbuchstaben enthalten')
+    .regex(/[0-9]/, 'Passwort muss mindestens eine Zahl enthalten'),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email('Ungültige E-Mail-Adresse'),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1, 'Token ist erforderlich'),
+  password: z
+    .string()
+    .min(8, 'Passwort muss mindestens 8 Zeichen lang sein')
+    .regex(/[A-Z]/, 'Passwort muss mindestens einen Großbuchstaben enthalten')
+    .regex(/[0-9]/, 'Passwort muss mindestens eine Zahl enthalten'),
+});
+
 // ============================================================
 // Invoice Schemas
 // ============================================================
@@ -425,6 +463,29 @@ export const grantAccessSchema = z.object({
 // Export Schemas (erweitert)
 // ============================================================
 
+export const createExportConfigSchema = z.object({
+  name: z.string().min(1, 'Name ist erforderlich').max(100),
+  format: z.enum(['CSV_GENERIC', 'BMD_CSV', 'BMD_XML']),
+  delimiter: z.string().max(5).default(';'),
+  dateFormat: z.string().max(20).default('dd.MM.yyyy'),
+  decimalSeparator: z.string().max(5).default(','),
+  encoding: z.string().max(20).default('UTF-8'),
+  includeHeader: z.boolean().default(true),
+  columnMapping: z.record(z.string()).optional().default({}),
+});
+
+export const updateExportConfigSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  format: z.enum(['CSV_GENERIC', 'BMD_CSV', 'BMD_XML']).optional(),
+  delimiter: z.string().max(5).optional(),
+  dateFormat: z.string().max(20).optional(),
+  decimalSeparator: z.string().max(5).optional(),
+  encoding: z.string().max(20).optional(),
+  includeHeader: z.boolean().optional(),
+  columnMapping: z.record(z.string()).optional(),
+  isDefault: z.boolean().optional(),
+});
+
 export const monthlyReportSchema = z.object({
   year: z.coerce.number().int().min(2020).max(2100),
   month: z.coerce.number().int().min(1).max(12),
@@ -475,4 +536,41 @@ export const testEmailConnectorSchema = z.object({
   secure: z.boolean().default(true),
   username: z.string().min(1, 'Benutzername ist erforderlich').max(255),
   password: z.string().min(1, 'Passwort ist erforderlich').max(500),
+});
+
+// ============================================================
+// Recurring Costs Schemas (Laufende Kosten)
+// ============================================================
+
+export const setRecurringSchema = z.object({
+  isRecurring: z.boolean(),
+  recurringInterval: z.enum(['MONTHLY', 'QUARTERLY', 'HALF_YEARLY', 'YEARLY']).nullable().optional(),
+  recurringNote: z.string().max(200).nullable().optional(),
+});
+
+// ============================================================
+// Feature Visibility Schema
+// ============================================================
+
+export const updateFeatureVisibilitySchema = z.object({
+  featureVisibility: z.record(z.string(), z.boolean()),
+});
+
+// ============================================================
+// Super-Admin Schemas (Mandanten-Verwaltung)
+// ============================================================
+
+export const adminCreateTenantSchema = z.object({
+  tenantName: z.string().min(2, 'Firmenname muss mindestens 2 Zeichen lang sein').max(100),
+  tenantSlug: z.string().regex(/^[a-z0-9-]+$/, 'Slug darf nur Kleinbuchstaben, Zahlen und Bindestriche enthalten').min(2).max(50).optional(),
+  adminEmail: z.string().email('Ungültige E-Mail-Adresse'),
+  adminFirstName: z.string().min(1, 'Vorname ist erforderlich').max(50),
+  adminLastName: z.string().min(1, 'Nachname ist erforderlich').max(50),
+  adminPassword: z.string().min(8, 'Passwort muss mindestens 8 Zeichen lang sein'),
+  accountingType: z.enum(['EA', 'ACCRUAL']).optional(),
+});
+
+export const adminUpdateTenantSchema = z.object({
+  name: z.string().min(2).max(100).optional(),
+  isActive: z.boolean().optional(),
 });

@@ -364,6 +364,84 @@ export async function generateOcrCheckCsv(options: OcrCheckExportOptions): Promi
 }
 
 // ============================================================
+// Export Config CRUD
+// ============================================================
+
+export async function getExportConfigs(tenantId: string) {
+  return prisma.exportConfig.findMany({
+    where: { tenantId },
+    orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
+  });
+}
+
+export async function createExportConfig(tenantId: string, data: {
+  name: string;
+  format: 'CSV_GENERIC' | 'BMD_CSV' | 'BMD_XML';
+  delimiter?: string;
+  dateFormat?: string;
+  decimalSeparator?: string;
+  encoding?: string;
+  includeHeader?: boolean;
+  columnMapping?: Record<string, string>;
+}) {
+  return prisma.exportConfig.create({
+    data: {
+      tenantId,
+      name: data.name,
+      format: data.format,
+      delimiter: data.delimiter ?? ';',
+      dateFormat: data.dateFormat ?? 'dd.MM.yyyy',
+      decimalSeparator: data.decimalSeparator ?? ',',
+      encoding: data.encoding ?? 'UTF-8',
+      includeHeader: data.includeHeader ?? true,
+      columnMapping: data.columnMapping ?? {},
+    },
+  });
+}
+
+export async function updateExportConfig(tenantId: string, configId: string, data: {
+  name?: string;
+  format?: 'CSV_GENERIC' | 'BMD_CSV' | 'BMD_XML';
+  delimiter?: string;
+  dateFormat?: string;
+  decimalSeparator?: string;
+  encoding?: string;
+  includeHeader?: boolean;
+  columnMapping?: Record<string, string>;
+  isDefault?: boolean;
+}) {
+  // Verify ownership + not system
+  const config = await prisma.exportConfig.findFirst({
+    where: { id: configId, tenantId },
+  });
+  if (!config) throw new Error('Export-Profil nicht gefunden');
+  if (config.isSystem) throw new Error('System-Profile können nicht bearbeitet werden');
+
+  // If setting as default, unset other defaults
+  if (data.isDefault) {
+    await prisma.exportConfig.updateMany({
+      where: { tenantId, isDefault: true },
+      data: { isDefault: false },
+    });
+  }
+
+  return prisma.exportConfig.update({
+    where: { id: configId },
+    data,
+  });
+}
+
+export async function deleteExportConfig(tenantId: string, configId: string) {
+  const config = await prisma.exportConfig.findFirst({
+    where: { id: configId, tenantId },
+  });
+  if (!config) throw new Error('Export-Profil nicht gefunden');
+  if (config.isSystem) throw new Error('System-Profile können nicht gelöscht werden');
+
+  return prisma.exportConfig.delete({ where: { id: configId } });
+}
+
+// ============================================================
 // Helpers
 // ============================================================
 

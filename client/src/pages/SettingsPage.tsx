@@ -12,11 +12,16 @@ import {
   getAccessListApi,
   deleteAccountApi,
   exportUserDataApi,
+  inviteUserApi,
+  getTenantUsersApi,
+  updateFeatureVisibilityApi,
 } from '../api/tenant';
+import { changePasswordApi } from '../api/auth';
 import { downloadBlob } from '../api/exports';
 import { getMailStatusApi } from '../api/mail';
-import type { TenantProfile, BankAccountItem, BankAccountType } from '@buchungsai/shared';
-import { Mail, CheckCircle, AlertTriangle, Shield, Trash2, Download, UserPlus, X, Loader2, RefreshCw, Play, Pause, Plug, Plus } from 'lucide-react';
+import type { TenantProfile, BankAccountItem, BankAccountType, UserRoleType, FeatureVisibility } from '@buchungsai/shared';
+import { FEATURE_MODULES, DEFAULT_FEATURE_VISIBILITY } from '@buchungsai/shared';
+import { Mail, CheckCircle, AlertTriangle, Shield, Trash2, Download, UserPlus, X, Loader2, RefreshCw, Play, Pause, Plug, Plus, Users, KeyRound, ToggleLeft, ToggleRight } from 'lucide-react';
 import {
   listEmailConnectorsApi,
   createEmailConnectorApi,
@@ -257,6 +262,11 @@ export function SettingsPage() {
             <span className="font-medium">{user?.role === 'ADMIN' ? 'Administrator' : user?.role === 'ACCOUNTANT' ? 'Buchhalter' : 'Steuerberater'}</span>
           </div>
         </div>
+      </div>
+
+      {/* Passwort ändern */}
+      <div className="card p-6 mb-6">
+        <ChangePasswordSection />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -536,6 +546,34 @@ export function SettingsPage() {
           </div>
         </div>
 
+        {/* Team-Mitglieder (only Admin) */}
+        {user?.role === 'ADMIN' && (
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Users size={20} className="text-indigo-600" />
+              Team-Mitglieder
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Laden Sie Mitarbeiter per E-Mail ein. Die eingeladene Person erhält einen Aktivierungs-Link.
+            </p>
+            <TeamSection />
+          </div>
+        )}
+
+        {/* Plattform-Module (only Admin) */}
+        {user?.role === 'ADMIN' && (
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <ToggleRight size={20} className="text-primary-600" />
+              Plattform-Module
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Steuern Sie, welche Funktionen Ihrem Team angezeigt werden. Deaktivierte Module werden in der Navigation ausgeblendet.
+            </p>
+            <FeatureVisibilitySection />
+          </div>
+        )}
+
         {/* Steuerberater-Zugang (only Admin) */}
         {user?.role === 'ADMIN' && (
           <div className="card p-6">
@@ -602,6 +640,63 @@ const emptyConnectorForm: ConnectorFormData = {
   folder: 'INBOX',
   pollIntervalMinutes: 5,
 };
+
+// ============================================================
+// Feature Visibility Section
+// ============================================================
+
+function FeatureVisibilitySection() {
+  const { user, setUser } = useAuthStore();
+  const queryClient = useQueryClient();
+
+  const fv = user?.featureVisibility ?? (DEFAULT_FEATURE_VISIBILITY as FeatureVisibility);
+
+  const mutation = useMutation({
+    mutationFn: (data: Record<string, boolean>) => updateFeatureVisibilityApi(data),
+    onSuccess: (result) => {
+      // Update the user in auth store so nav reflects changes immediately
+      if (user) {
+        setUser({ ...user, featureVisibility: { ...DEFAULT_FEATURE_VISIBILITY, ...result.featureVisibility } as FeatureVisibility });
+      }
+      queryClient.invalidateQueries({ queryKey: ['tenant'] });
+    },
+  });
+
+  const handleToggle = (key: string, currentValue: boolean) => {
+    mutation.mutate({ [key]: !currentValue });
+  };
+
+  return (
+    <div className="space-y-2">
+      {Object.entries(FEATURE_MODULES).map(([key, mod]) => {
+        const enabled = fv[key as keyof FeatureVisibility] ?? true;
+        return (
+          <div
+            key={key}
+            className="flex items-center justify-between py-3 px-4 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
+          >
+            <div>
+              <p className="text-sm font-medium text-gray-900">{mod.label}</p>
+              <p className="text-xs text-gray-500">{mod.description}</p>
+            </div>
+            <button
+              onClick={() => handleToggle(key, enabled)}
+              disabled={mutation.isPending}
+              className="shrink-0 ml-4"
+              title={enabled ? 'Deaktivieren' : 'Aktivieren'}
+            >
+              {enabled ? (
+                <ToggleRight size={28} className="text-primary-600" />
+              ) : (
+                <ToggleLeft size={28} className="text-gray-300" />
+              )}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function EmailConnectorsSection() {
   const queryClient = useQueryClient();
@@ -913,6 +1008,274 @@ function EmailConnectorsSection() {
         >
           <Plus size={14} /> E-Mail-Konto verbinden
         </button>
+      )}
+    </div>
+  );
+}
+
+function ChangePasswordSection() {
+  const [showForm, setShowForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setError('Passwörter stimmen nicht überein');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      await changePasswordApi(currentPassword, newPassword);
+      setSuccess(true);
+      setShowForm(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setSuccess(false), 5000);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
+      setError(msg || 'Fehler beim Ändern des Passworts');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <KeyRound size={20} className="text-gray-600" />
+        Passwort ändern
+      </h2>
+
+      {success && (
+        <div className="bg-green-50 text-green-700 text-sm px-4 py-3 rounded-lg mb-4 flex items-center gap-2">
+          <CheckCircle size={14} /> Passwort erfolgreich geändert
+        </div>
+      )}
+
+      {!showForm ? (
+        <button
+          className="btn-secondary text-sm flex items-center gap-1.5"
+          onClick={() => setShowForm(true)}
+        >
+          <KeyRound size={14} /> Passwort ändern
+        </button>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-3 max-w-sm">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Aktuelles Passwort</label>
+            <input
+              type="password"
+              className="input-field text-sm"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Neues Passwort</label>
+            <input
+              type="password"
+              className="input-field text-sm"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Mind. 8 Zeichen, 1 Großbuchstabe, 1 Zahl"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Neues Passwort bestätigen</label>
+            <input
+              type="password"
+              className="input-field text-sm"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+            />
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              className="btn-primary text-sm flex items-center gap-1"
+              disabled={loading || !currentPassword || !newPassword || !confirmPassword}
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+              Passwort ändern
+            </button>
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              onClick={() => { setShowForm(false); setError(''); }}
+            >
+              Abbrechen
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: 'Administrator',
+  ACCOUNTANT: 'Buchhalter',
+  TAX_ADVISOR: 'Steuerberater',
+};
+
+function TeamSection() {
+  const queryClient = useQueryClient();
+  const { data: users, isLoading } = useQuery({
+    queryKey: ['tenant-users'],
+    queryFn: getTenantUsersApi,
+  });
+
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteFirstName, setInviteFirstName] = useState('');
+  const [inviteLastName, setInviteLastName] = useState('');
+  const [inviteRole, setInviteRole] = useState<UserRoleType>('ACCOUNTANT');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSuccess, setInviteSuccess] = useState('');
+
+  const handleInvite = async () => {
+    if (!inviteEmail || !inviteFirstName || !inviteLastName) return;
+    setInviteLoading(true);
+    setInviteError('');
+    setInviteSuccess('');
+    try {
+      await inviteUserApi({
+        email: inviteEmail,
+        firstName: inviteFirstName,
+        lastName: inviteLastName,
+        role: inviteRole,
+      });
+      setInviteSuccess(`Einladung an ${inviteEmail} gesendet`);
+      setInviteEmail('');
+      setInviteFirstName('');
+      setInviteLastName('');
+      setShowInviteForm(false);
+      queryClient.invalidateQueries({ queryKey: ['tenant-users'] });
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
+      setInviteError(msg || 'Fehler beim Einladen');
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* User list */}
+      {isLoading ? (
+        <div className="flex justify-center py-4"><Loader2 className="animate-spin text-gray-400" size={20} /></div>
+      ) : users && users.length > 0 ? (
+        <div className="space-y-2">
+          {users.map((u) => (
+            <div key={u.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium">{u.firstName} {u.lastName}</p>
+                  {u.isActive ? (
+                    <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Aktiv</span>
+                  ) : (
+                    <span className="text-xs px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700">Eingeladen</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">{u.email} · {ROLE_LABELS[u.role] || u.role}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-gray-400">Keine Benutzer gefunden.</p>
+      )}
+
+      {/* Invite form toggle */}
+      {inviteSuccess && (
+        <div className="text-sm text-green-600 bg-green-50 px-3 py-2 rounded flex items-center gap-2">
+          <CheckCircle size={14} /> {inviteSuccess}
+        </div>
+      )}
+
+      {!showInviteForm ? (
+        <button
+          className="btn-secondary text-sm flex items-center gap-1"
+          onClick={() => setShowInviteForm(true)}
+        >
+          <UserPlus size={14} /> Mitglied einladen
+        </button>
+      ) : (
+        <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Vorname</label>
+              <input
+                type="text"
+                value={inviteFirstName}
+                onChange={(e) => setInviteFirstName(e.target.value)}
+                className="input-field text-sm"
+                placeholder="Max"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Nachname</label>
+              <input
+                type="text"
+                value={inviteLastName}
+                onChange={(e) => setInviteLastName(e.target.value)}
+                className="input-field text-sm"
+                placeholder="Mustermann"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">E-Mail</label>
+            <input
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              className="input-field text-sm"
+              placeholder="mitarbeiter@firma.at"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Rolle</label>
+            <select
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as UserRoleType)}
+              className="input-field text-sm"
+            >
+              <option value="ACCOUNTANT">Buchhalter</option>
+              <option value="ADMIN">Administrator</option>
+              <option value="TAX_ADVISOR">Steuerberater</option>
+            </select>
+          </div>
+          {inviteError && <p className="text-sm text-red-600">{inviteError}</p>}
+          <div className="flex gap-2">
+            <button
+              className="btn-primary text-sm flex items-center gap-1"
+              onClick={handleInvite}
+              disabled={inviteLoading || !inviteEmail || !inviteFirstName || !inviteLastName}
+            >
+              {inviteLoading ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+              Einladung senden
+            </button>
+            <button
+              className="btn-secondary text-sm"
+              onClick={() => { setShowInviteForm(false); setInviteError(''); }}
+            >
+              Abbrechen
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

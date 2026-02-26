@@ -12,11 +12,17 @@ import {
   updateBankAccountSchema,
   grantAccessSchema,
   deleteAccountSchema,
+  inviteUserSchema,
+  updateFeatureVisibilitySchema,
+  DEFAULT_FEATURE_VISIBILITY,
 } from '@buchungsai/shared';
 import type { ApiResponse, TenantProfile } from '@buchungsai/shared';
-import { NotFoundError } from '../utils/errors.js';
+import crypto from 'node:crypto';
+import { NotFoundError, ConflictError } from '../utils/errors.js';
 import { grantAccess, revokeAccess, getAccessibleTenants, getAccessList } from '../services/companyAccess.service.js';
 import { deleteAccount, exportUserData } from '../services/gdpr.service.js';
+import { isMailConfigured, sendInvitationEmail } from '../services/mail.service.js';
+import { env } from '../config/env.js';
 
 const router = Router();
 
@@ -299,6 +305,81 @@ router.post('/users', requireRole('ADMIN'), async (req, res, next) => {
   }
 });
 
+// POST /api/v1/tenant/invite — Invite a new user via email (Admin only)
+router.post('/invite', requireRole('ADMIN'), validateBody(inviteUserSchema), async (req, res, next) => {
+  try {
+    const { email, firstName, lastName, role } = req.body;
+    const tenantId = req.tenantId!;
+
+    // Check if user already exists in this tenant
+    const existing = await prisma.user.findFirst({
+      where: { tenantId, email },
+    });
+    if (existing) {
+      throw new ConflictError('Ein Benutzer mit dieser E-Mail existiert bereits in diesem Mandanten');
+    }
+
+    // Generate invitation token (48h validity)
+    const invitationToken = crypto.randomBytes(32).toString('hex');
+    const invitationExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+    // Create user with isActive=false and no password
+    const user = await prisma.user.create({
+      data: {
+        tenantId,
+        email,
+        passwordHash: '', // Will be set on accept
+        firstName,
+        lastName,
+        role,
+        isActive: false,
+        invitationToken,
+        invitationExpiresAt,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    // Send invitation email if SMTP is configured
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { name: true },
+    });
+
+    if (isMailConfigured()) {
+      const inviteUrl = `${env.FRONTEND_URL}/accept-invite?token=${invitationToken}`;
+      await sendInvitationEmail({
+        tenantId,
+        userId: req.userId!,
+        toEmail: email,
+        toFirstName: firstName,
+        tenantName: tenant?.name || 'Ki2Go Accounting',
+        inviteUrl,
+      });
+    }
+
+    await writeAuditLog({
+      tenantId,
+      userId: req.userId!,
+      entityType: 'User',
+      entityId: user.id,
+      action: 'INVITE',
+      newData: { email, firstName, lastName, role },
+    });
+
+    res.status(201).json({ success: true, data: { ...user, invitationSent: isMailConfigured() } } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ============================================================
 // STEUERBERATER-ZUGANG (Multi-Tenant Access)
 // ============================================================
@@ -343,6 +424,49 @@ router.get('/access-list', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const list = await getAccessList(req.tenantId!);
     res.json({ success: true, data: list } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================
+// FEATURE VISIBILITY (Plattform-Module pro Mandant)
+// ============================================================
+
+// PUT /api/v1/tenant/feature-visibility — Admin toggles feature modules
+router.put('/feature-visibility', requireRole('ADMIN'), validateBody(updateFeatureVisibilitySchema), async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const { featureVisibility } = req.body;
+
+    // Read current settings and merge
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { settings: true },
+    });
+    const currentSettings = (tenant?.settings as Record<string, unknown>) || {};
+    const currentFv = (currentSettings.featureVisibility as Record<string, boolean>) || {};
+
+    const mergedFv = { ...DEFAULT_FEATURE_VISIBILITY, ...currentFv, ...featureVisibility };
+
+    await prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        settings: { ...currentSettings, featureVisibility: mergedFv },
+      },
+    });
+
+    await writeAuditLog({
+      tenantId,
+      userId: req.userId!,
+      entityType: 'Tenant',
+      entityId: tenantId,
+      action: 'UPDATE_FEATURE_VISIBILITY',
+      previousData: { featureVisibility: currentFv },
+      newData: { featureVisibility: mergedFv },
+    });
+
+    res.json({ success: true, data: { featureVisibility: mergedFv } } satisfies ApiResponse);
   } catch (err) {
     next(err);
   }

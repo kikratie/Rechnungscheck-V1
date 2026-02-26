@@ -1,13 +1,44 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listInvoicesApi } from '../api/invoices';
-import { exportBmdCsvApi, exportMonthlyReportApi, exportFullApi, downloadBlob } from '../api/exports';
-import type { InvoiceListItem } from '@buchungsai/shared';
-import { Download, FileText, CheckCircle, Loader2, FileArchive, BarChart3 } from 'lucide-react';
+import {
+  exportBmdCsvApi, exportMonthlyReportApi, exportFullApi, downloadBlob,
+  getExportConfigsApi, createExportConfigApi, updateExportConfigApi, deleteExportConfigApi,
+} from '../api/exports';
+import type { InvoiceListItem, ExportConfigItem, ExportFormatType } from '@buchungsai/shared';
+import {
+  Download, FileText, CheckCircle, Loader2, FileArchive, BarChart3,
+  Settings2, Plus, Pencil, Trash2, X, Star,
+} from 'lucide-react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAccountingType } from '../hooks/useAccountingType';
 
+const FORMAT_LABELS: Record<ExportFormatType, string> = {
+  CSV_GENERIC: 'CSV (Allgemein)',
+  BMD_CSV: 'BMD CSV',
+  BMD_XML: 'BMD XML',
+};
+
+const DELIMITER_OPTIONS = [
+  { value: ';', label: 'Semikolon (;)' },
+  { value: ',', label: 'Komma (,)' },
+  { value: '\t', label: 'Tab' },
+];
+
+const DATE_FORMAT_OPTIONS = [
+  { value: 'dd.MM.yyyy', label: 'dd.MM.yyyy' },
+  { value: 'yyyy-MM-dd', label: 'yyyy-MM-dd (ISO)' },
+  { value: 'MM/dd/yyyy', label: 'MM/dd/yyyy' },
+];
+
+const ENCODING_OPTIONS = ['UTF-8', 'ISO-8859-1'];
+const DECIMAL_OPTIONS = [
+  { value: ',', label: 'Komma (,)' },
+  { value: '.', label: 'Punkt (.)' },
+];
+
 export function ExportPage() {
+  const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ['invoices-exportable'],
     queryFn: () => listInvoicesApi({ processingStatus: 'ARCHIVED', limit: 100 }),
@@ -21,6 +52,13 @@ export function ExportPage() {
     queryFn: () => listInvoicesApi({ processingStatus: 'EXPORTED', limit: 100 }),
   });
   const exported = (exportedQuery.data?.data ?? []) as InvoiceListItem[];
+
+  // Export configs
+  const configsQuery = useQuery({
+    queryKey: ['export-configs'],
+    queryFn: () => getExportConfigsApi(),
+  });
+  const configs = (configsQuery.data?.data ?? []) as ExportConfigItem[];
 
   // BMD CSV state
   const [bmdFrom, setBmdFrom] = useState('');
@@ -36,6 +74,10 @@ export function ExportPage() {
   // Full export state
   const [fullYear, setFullYear] = useState(now.getFullYear());
   const [fullLoading, setFullLoading] = useState(false);
+
+  // Config dialog state
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
+  const [editingConfig, setEditingConfig] = useState<ExportConfigItem | null>(null);
 
   const handleBmdExport = async () => {
     if (!bmdFrom || !bmdTo) return;
@@ -74,6 +116,11 @@ export function ExportPage() {
       setFullLoading(false);
     }
   };
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteExportConfigApi(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['export-configs'] }),
+  });
 
   const months = [
     'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni',
@@ -230,6 +277,110 @@ export function ExportPage() {
         </div>
       </div>
 
+      {/* Export Profiles */}
+      <div className="card p-6 mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Settings2 className="text-gray-600" size={20} />
+            <h2 className="text-lg font-semibold">Exportprofile</h2>
+          </div>
+          <button
+            className="btn-secondary text-sm flex items-center gap-1"
+            onClick={() => { setEditingConfig(null); setConfigDialogOpen(true); }}
+          >
+            <Plus size={14} />
+            Neues Profil
+          </button>
+        </div>
+
+        {configsQuery.isLoading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="animate-spin text-gray-400" size={24} />
+          </div>
+        ) : configs.length === 0 ? (
+          <p className="text-gray-400 text-sm py-4 text-center">Noch keine Exportprofile erstellt.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-100">
+                  <th className="pb-2 font-medium">Name</th>
+                  <th className="pb-2 font-medium">Format</th>
+                  <th className="pb-2 font-medium hidden sm:table-cell">Trennzeichen</th>
+                  <th className="pb-2 font-medium hidden md:table-cell">Encoding</th>
+                  <th className="pb-2 font-medium hidden md:table-cell">Datumsformat</th>
+                  <th className="pb-2 font-medium text-right">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {configs.map((cfg) => (
+                  <tr key={cfg.id} className="border-b border-gray-50">
+                    <td className="py-2.5 pr-3">
+                      <div className="flex items-center gap-1.5">
+                        {cfg.isDefault && <Star size={12} className="text-yellow-500 fill-yellow-500" />}
+                        <span className={cfg.isSystem ? 'text-gray-400' : ''}>{cfg.name}</span>
+                        {cfg.isSystem && (
+                          <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">System</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2.5">
+                      <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-medium">
+                        {FORMAT_LABELS[cfg.format] ?? cfg.format}
+                      </span>
+                    </td>
+                    <td className="py-2.5 hidden sm:table-cell text-gray-500">
+                      {cfg.delimiter === '\t' ? 'Tab' : cfg.delimiter === ';' ? 'Semikolon' : cfg.delimiter === ',' ? 'Komma' : cfg.delimiter}
+                    </td>
+                    <td className="py-2.5 hidden md:table-cell text-gray-500">{cfg.encoding}</td>
+                    <td className="py-2.5 hidden md:table-cell text-gray-500">{cfg.dateFormat}</td>
+                    <td className="py-2.5 text-right">
+                      {!cfg.isSystem ? (
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+                            title="Bearbeiten"
+                            onClick={() => { setEditingConfig(cfg); setConfigDialogOpen(true); }}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                            title="Löschen"
+                            onClick={() => {
+                              if (confirm(`Profil "${cfg.name}" wirklich löschen?`)) {
+                                deleteMutation.mutate(cfg.id);
+                              }
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-300">Nicht editierbar</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Config Dialog */}
+      {configDialogOpen && (
+        <ExportConfigDialog
+          config={editingConfig}
+          onClose={() => { setConfigDialogOpen(false); setEditingConfig(null); }}
+          onSaved={() => {
+            setConfigDialogOpen(false);
+            setEditingConfig(null);
+            queryClient.invalidateQueries({ queryKey: ['export-configs'] });
+          }}
+        />
+      )}
+
       {/* Exportable invoices list */}
       {exportable.length > 0 && (
         <>
@@ -243,11 +394,11 @@ export function ExportPage() {
                       <FileText size={14} className="text-gray-400 shrink-0" />
                       <div className="min-w-0">
                         <p className="font-medium text-sm truncate">{(inv.vendorName as string) || (inv.originalFileName as string)}</p>
-                        <p className="text-xs text-gray-500">{(inv.invoiceNumber as string) || '—'} · {inv.invoiceDate ? new Date(inv.invoiceDate as string).toLocaleDateString('de-AT') : '—'}</p>
+                        <p className="text-xs text-gray-500">{(inv.invoiceNumber as string) || '\u2014'} · {inv.invoiceDate ? new Date(inv.invoiceDate as string).toLocaleDateString('de-AT') : '\u2014'}</p>
                       </div>
                     </div>
                     <span className="font-semibold text-sm shrink-0 ml-2">
-                      {inv.grossAmount ? parseFloat(inv.grossAmount as string).toLocaleString('de-AT', { style: 'currency', currency: 'EUR' }) : '—'}
+                      {inv.grossAmount ? parseFloat(inv.grossAmount as string).toLocaleString('de-AT', { style: 'currency', currency: 'EUR' }) : '\u2014'}
                     </span>
                   </div>
                 </div>
@@ -273,12 +424,12 @@ export function ExportPage() {
                           <span className="font-medium">{(inv.vendorName as string) || (inv.originalFileName as string)}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{(inv.invoiceNumber as string) || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">{(inv.invoiceNumber as string) || '\u2014'}</td>
                       <td className="px-4 py-3 text-gray-600">
-                        {inv.invoiceDate ? new Date(inv.invoiceDate as string).toLocaleDateString('de-AT') : '—'}
+                        {inv.invoiceDate ? new Date(inv.invoiceDate as string).toLocaleDateString('de-AT') : '\u2014'}
                       </td>
                       <td className="px-4 py-3 text-right font-medium">
-                        {inv.grossAmount ? parseFloat(inv.grossAmount as string).toLocaleString('de-AT', { style: 'currency', currency: 'EUR' }) : '—'}
+                        {inv.grossAmount ? parseFloat(inv.grossAmount as string).toLocaleString('de-AT', { style: 'currency', currency: 'EUR' }) : '\u2014'}
                       </td>
                     </tr>
                   ))}
@@ -288,6 +439,169 @@ export function ExportPage() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// Export Config Dialog
+// ============================================================
+
+function ExportConfigDialog({ config, onClose, onSaved }: {
+  config: ExportConfigItem | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isEditing = !!config;
+  const [name, setName] = useState(config?.name ?? '');
+  const [format, setFormat] = useState<ExportFormatType>(config?.format ?? 'CSV_GENERIC');
+  const [delimiter, setDelimiter] = useState(config?.delimiter ?? ';');
+  const [dateFormat, setDateFormat] = useState(config?.dateFormat ?? 'dd.MM.yyyy');
+  const [decimalSeparator, setDecimalSeparator] = useState(config?.decimalSeparator ?? ',');
+  const [encoding, setEncoding] = useState(config?.encoding ?? 'UTF-8');
+  const [includeHeader, setIncludeHeader] = useState(config?.includeHeader ?? true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) { setError('Name ist erforderlich'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      if (isEditing) {
+        await updateExportConfigApi(config!.id, {
+          name, format, delimiter, dateFormat, decimalSeparator, encoding, includeHeader,
+        });
+      } else {
+        await createExportConfigApi({
+          name, format, delimiter, dateFormat, decimalSeparator, encoding, includeHeader,
+        });
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Fehler beim Speichern');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-5 border-b">
+          <h3 className="text-lg font-semibold">
+            {isEditing ? 'Exportprofil bearbeiten' : 'Neues Exportprofil'}
+          </h3>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {error && (
+            <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded">{error}</div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="input-field"
+              placeholder="z.B. Mein BMD Profil"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Format</label>
+            <select
+              value={format}
+              onChange={(e) => setFormat(e.target.value as ExportFormatType)}
+              className="input-field"
+            >
+              <option value="CSV_GENERIC">CSV (Allgemein)</option>
+              <option value="BMD_CSV">BMD CSV</option>
+              <option value="BMD_XML">BMD XML</option>
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Trennzeichen</label>
+              <select
+                value={delimiter}
+                onChange={(e) => setDelimiter(e.target.value)}
+                className="input-field"
+              >
+                {DELIMITER_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Dezimaltrennzeichen</label>
+              <select
+                value={decimalSeparator}
+                onChange={(e) => setDecimalSeparator(e.target.value)}
+                className="input-field"
+              >
+                {DECIMAL_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Datumsformat</label>
+              <select
+                value={dateFormat}
+                onChange={(e) => setDateFormat(e.target.value)}
+                className="input-field"
+              >
+                {DATE_FORMAT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Encoding</label>
+              <select
+                value={encoding}
+                onChange={(e) => setEncoding(e.target.value)}
+                className="input-field"
+              >
+                {ENCODING_OPTIONS.map((enc) => (
+                  <option key={enc} value={enc}>{enc}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={includeHeader}
+              onChange={(e) => setIncludeHeader(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            <span className="text-sm text-gray-700">Kopfzeile einschließen</span>
+          </label>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="btn-secondary text-sm">
+              Abbrechen
+            </button>
+            <button type="submit" disabled={saving} className="btn-primary text-sm flex items-center gap-1">
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              {isEditing ? 'Speichern' : 'Erstellen'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
