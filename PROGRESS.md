@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 26. Februar 2026 (Session 18 — Phase 14: Sicherheit + Laufende Kosten)
+**Letzte Aktualisierung:** 27. Februar 2026 (Session 19 — Phase 15: Inbox Triage + Split-View)
 
 ---
 
@@ -818,3 +818,76 @@ npm run db:migrate
 - ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
 - ✅ Prisma-Migrationen erstellt und angewandt (2 Migrationen)
 - ✅ Prisma-Client regeneriert
+
+---
+
+## Phase 15: Inbox Triage + Split-View (Session 19 — 27.02.2026)
+
+### Übersicht
+
+Inbox wurde von einfacher Liste zur **Triage-Station** umgebaut. Belege werden im Split-Screen angezeigt, geprüft ob es tatsächlich Rechnungen sind, und dann gezielt "zur Prüfung gesendet" oder gelöscht. InvoicesPage (Check) zeigt nur bereits triagierte Belege.
+
+### Architektur-Entscheidung: `inboxCleared` Boolean
+
+Neues Boolean-Feld `inboxCleared` (default `false`) auf Invoice statt neuem Status-Enum:
+- **InboxPage** zeigt `inboxCleared = false` (neue, ungesichtete Belege)
+- **InvoicesPage (Check)** zeigt `inboxCleared = true` (triagierte + archivierte Belege)
+- OCR-Pipeline (`processingStatus`) bleibt komplett unberührt
+
+### Split-View Infrastruktur
+
+- [x] **DocumentViewer**: PDF/Bild-Viewer mit zoom, rotate, fullscreen
+- [x] **InvoiceSplitView**: 60/40 Layout (Dokument links, Daten rechts) mit resize handle
+- [x] **ValidatedField**: Feld-Label mit Validierungs-Ampel (grün/gelb/rot) aus Prüfergebnis
+
+### Inbox Triage Workflow
+
+- [x] **DB-Schema**: `inboxCleared Boolean @default(false)`, `inboxClearedAt DateTime?`, Index `[tenantId, inboxCleared]`
+- [x] **Prisma-Migration**: `20260227100000_add_inbox_cleared` + Data-Migration (bestehende archivierte → `inboxCleared = true`)
+- [x] **API-Endpoints**:
+  - `POST /invoices/:id/triage` — Einzelnen Beleg zur Prüfung senden (setzt `inboxCleared = true`)
+  - `POST /invoices/batch-triage` — Batch-Triage für Mehrfachauswahl
+  - `GET /invoices?inboxCleared=false` — Inbox-Filter
+  - `GET /invoices?inboxCleared=true` — Check-Filter (Default in InvoicesPage)
+- [x] **Auto-Clear bei Archivierung**: `archiveInvoiceInTransaction()` setzt automatisch `inboxCleared = true`
+- [x] **Direct Upload Bypass**: Upload in InvoicesPage setzt `inboxCleared = true` via FormData-Parameter → überspringt Inbox
+
+### InboxPage (Rewrite)
+
+- [x] Split-View mit InvoiceSplitView (Desktop) — Dokument links, InboxTriagePanel rechts
+- [x] FullScreenPanel für Mobile
+- [x] Batch-Selektion mit Checkboxen + "Alle auswählen"
+- [x] Batch-Toolbar: "X ausgewählt → Zur Prüfung senden"
+- [x] Auto-Refresh bei Processing-Status (refetchInterval: 5s)
+- [x] Leerer State wenn Inbox leer ("Alles gesichtet!")
+
+### InboxTriagePanel (Neu)
+
+- [x] Vereinfachte Detail-Ansicht: Lieferant/Kunde, Rechnungsdaten, Beträge
+- [x] ValidatedField für alle Kernfelder mit Ampel-Status
+- [x] Issues-Summary (RED/YELLOW Prüfungen, max 5)
+- [x] Sticky Action-Buttons: "Zur Prüfung senden" (grün) + "Kein Beleg / Löschen" (rot)
+- [x] Processing-Indicator für UPLOADED/PROCESSING Belege
+
+### InvoicesPage Anpassungen
+
+- [x] Default-Filter: `inboxCleared: true` (zeigt nur triagierte Belege)
+- [x] Upload-Dialog mit `inboxCleared` Prop → Direkt-Upload überspringt Inbox
+- [x] URL-Parameter `?id=` für Deep-Links zu bestimmten Rechnungen
+
+### Neue Dateien (Phase 15)
+
+| Datei | Zweck |
+|-------|-------|
+| `client/src/components/DocumentViewer.tsx` | PDF/Bild-Viewer mit Zoom, Rotation, Fullscreen |
+| `client/src/components/InvoiceSplitView.tsx` | 60/40 Split-Layout für Dokument + Daten |
+| `client/src/components/ValidatedField.tsx` | Feld mit Validierungs-Ampel |
+| `client/src/components/InboxTriagePanel.tsx` | Triage-Panel für Inbox (vereinfachte Detail-Ansicht + Aktionen) |
+| `prisma/migrations/20260227100000_add_inbox_cleared/` | inboxCleared Feld + Index + Data-Migration |
+
+### Verifikation (Phase 15)
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+- ✅ Prisma-Migration erstellt und angewandt
+- ✅ API-Endpunkte getestet: Login, Inbox-Filter (0 Items), Check-Filter (8 Items)
+- ✅ Server-Health: DB, Redis, LLM alle OK
