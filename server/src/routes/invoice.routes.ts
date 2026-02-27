@@ -5,10 +5,10 @@ import { validateBody } from '../middleware/validate.js';
 import { invoiceUpload } from '../middleware/upload.js';
 import { prisma } from '../config/database.js';
 import { getSkipTake, buildPaginationMeta } from '../utils/pagination.js';
-import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, createEigenbelegSchema, batchApproveSchema, cancelNumberSchema, parkInvoiceSchema, cashPaymentSchema, requestCorrectionSchema, setRecurringSchema } from '@buchungsai/shared';
+import { updateExtractedDataSchema, approveInvoiceSchema, rejectInvoiceSchema, createErsatzbelegSchema, createEigenbelegSchema, batchApproveSchema, archiveInvoiceSchema, batchArchiveSchema, cancelNumberSchema, parkInvoiceSchema, cashPaymentSchema, requestCorrectionSchema, setRecurringSchema } from '@buchungsai/shared';
 import * as invoiceService from '../services/invoice.service.js';
 import * as recurringService from '../services/recurring.service.js';
-import { cancelArchivalNumber } from '../services/archival.service.js';
+import { cancelArchivalNumber, archiveInvoice as archiveInvoiceSvc, batchArchiveInvoices as batchArchiveInvoicesSvc } from '../services/archival.service.js';
 import * as storageService from '../services/storage.service.js';
 
 const router = Router();
@@ -135,6 +135,7 @@ router.get('/:id', async (req, res, next) => {
         lineItems: { orderBy: { position: 'asc' } },
         vendor: { select: { id: true, name: true, uid: true } },
         customer: { select: { id: true, name: true, uid: true } },
+        approvalRule: { select: { id: true, name: true, inputTaxPercent: true, expensePercent: true } },
       },
     });
 
@@ -284,6 +285,8 @@ router.post('/:id/approve', validateBody(approveInvoiceSchema), async (req, res,
       req.userId!,
       req.params.id as string,
       req.body.comment as string | undefined,
+      req.body.ruleId as string | undefined,
+      req.body.note as string | undefined,
     );
     res.json({ success: true, data: invoice });
   } catch (err) {
@@ -429,6 +432,38 @@ router.post('/batch-approve', validateBody(batchApproveSchema), async (req, res,
       req.tenantId!,
       req.userId!,
       req.body.invoiceIds as string[],
+      req.body.comment as string | undefined,
+      req.body.ruleId as string | undefined,
+      req.body.note as string | undefined,
+    );
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/batch-archive — Archive multiple approved invoices at once
+router.post('/batch-archive', validateBody(batchArchiveSchema), async (req, res, next) => {
+  try {
+    const result = await batchArchiveInvoicesSvc(
+      req.tenantId!,
+      req.userId!,
+      req.body.invoiceIds as string[],
+      req.body.comment as string | undefined,
+    );
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/archive — Archive a single approved invoice (number + stamp + lock)
+router.post('/:id/archive', validateBody(archiveInvoiceSchema), async (req, res, next) => {
+  try {
+    const result = await archiveInvoiceSvc(
+      req.tenantId!,
+      req.userId!,
+      req.params.id as string,
       req.body.comment as string | undefined,
     );
     res.json({ success: true, data: result });

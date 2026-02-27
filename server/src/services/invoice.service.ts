@@ -4,10 +4,10 @@ import { invoiceQueue } from '../jobs/queue.js';
 import * as storageService from './storage.service.js';
 import { validateInvoice } from './validation.service.js';
 import { toEurEstimate } from './exchangeRate.service.js';
-import { archiveInvoice, batchArchiveInvoices } from './archival.service.js';
 import { writeAuditLog } from '../middleware/auditLogger.js';
 import { ConflictError, NotFoundError } from '../utils/errors.js';
 import { Prisma } from '@prisma/client';
+import { createTransaction as createShareholderTransaction } from './shareholderTransaction.service.js';
 
 interface UploadParams {
   tenantId: string;
@@ -253,7 +253,7 @@ export async function revalidateAll(tenantId: string): Promise<{ total: number; 
   const invoices = await prisma.invoice.findMany({
     where: {
       tenantId,
-      processingStatus: { in: ['PROCESSED', 'REVIEW_REQUIRED', 'ARCHIVED', 'RECONCILED', 'EXPORTED'] },
+      processingStatus: { in: ['PROCESSED', 'REVIEW_REQUIRED', 'APPROVED', 'ARCHIVED', 'RECONCILED', 'EXPORTED'] },
     },
     select: { id: true, belegNr: true, direction: true },
   });
@@ -288,13 +288,99 @@ export async function revalidateAll(tenantId: string): Promise<{ total: number; 
   return { total: invoices.length, updated, errors };
 }
 
-export async function approveInvoice(tenantId: string, userId: string, invoiceId: string, comment?: string | null) {
-  // Approval now triggers full archival workflow:
-  // sequential number → stamp PDF → move to archive/ → lock
-  await archiveInvoice(tenantId, userId, invoiceId, comment);
+export async function approveInvoice(
+  tenantId: string,
+  userId: string,
+  invoiceId: string,
+  comment?: string | null,
+  ruleId?: string | null,
+  note?: string | null,
+) {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, tenantId },
+  });
+  if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
 
-  // Return the updated invoice for the API response
-  return prisma.invoice.findFirst({ where: { id: invoiceId, tenantId } });
+  // Only PROCESSED or REVIEW_REQUIRED invoices can be approved
+  const approvableStatuses = ['PROCESSED', 'REVIEW_REQUIRED'];
+  if (!approvableStatuses.includes(invoice.processingStatus)) {
+    throw new ConflictError(
+      `Rechnung mit Status "${invoice.processingStatus}" kann nicht genehmigt werden.`,
+    );
+  }
+
+  // Validate rule belongs to tenant if provided
+  let rule: { id: string; ruleType: string; createsReceivable: boolean } | null = null;
+  if (ruleId) {
+    rule = await prisma.deductibilityRule.findFirst({
+      where: { id: ruleId, tenantId, isActive: true },
+      select: { id: true, ruleType: true, createsReceivable: true },
+    });
+    if (!rule) throw new NotFoundError('Abzugsregel', ruleId);
+  }
+
+  // Approval sets rule + note + status → APPROVED (no archival, no lock, no number)
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      processingStatus: 'APPROVED',
+      approvalComment: comment || null,
+      approvalRuleId: ruleId || null,
+      approvalNote: note || null,
+    },
+  });
+
+  // ruleType-based side effects: create shareholder transactions for GmbH
+  if (rule && rule.ruleType !== 'standard') {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { accountingType: true },
+    });
+
+    if (rule.ruleType === 'private_withdrawal' && tenant?.accountingType === 'ACCRUAL' && rule.createsReceivable) {
+      // GmbH: Private expense via company account → receivable from shareholder
+      const amount = invoice.grossAmount ? Number(invoice.grossAmount) : 0;
+      if (amount > 0) {
+        await createShareholderTransaction(tenantId, {
+          userId,
+          invoiceId,
+          transactionType: 'RECEIVABLE',
+          amount,
+          description: `Privatentnahme: BEL-${String(invoice.belegNr).padStart(3, '0')}`,
+        });
+      }
+    }
+
+    if (rule.ruleType === 'private_deposit' && tenant?.accountingType === 'ACCRUAL') {
+      // GmbH: Business expense paid from private account → payable to shareholder
+      const amount = invoice.grossAmount ? Number(invoice.grossAmount) : 0;
+      if (amount > 0) {
+        await createShareholderTransaction(tenantId, {
+          userId,
+          invoiceId,
+          transactionType: 'PAYABLE',
+          amount,
+          description: `Privateinlage: BEL-${String(invoice.belegNr).padStart(3, '0')}`,
+        });
+      }
+    }
+  }
+
+  writeAuditLog({
+    tenantId,
+    userId,
+    entityType: 'Invoice',
+    entityId: invoiceId,
+    action: 'APPROVE',
+    newData: {
+      approvalComment: comment || undefined,
+      approvalRuleId: ruleId || undefined,
+      approvalNote: note || undefined,
+      ruleType: rule?.ruleType,
+    },
+  });
+
+  return updated;
 }
 
 export async function rejectInvoice(tenantId: string, userId: string, invoiceId: string, reason: string) {
@@ -712,10 +798,64 @@ export async function batchApproveInvoices(
   userId: string,
   invoiceIds: string[],
   comment?: string | null,
+  ruleId?: string | null,
+  note?: string | null,
 ) {
-  // Batch approval now triggers full archival workflow for all invoices
-  // (sequential numbering, PDF stamp, archive move, lock — in one transaction)
-  return batchArchiveInvoices(tenantId, userId, invoiceIds, comment);
+  // Validate rule belongs to tenant if provided
+  if (ruleId) {
+    const rule = await prisma.deductibilityRule.findFirst({
+      where: { id: ruleId, tenantId, isActive: true },
+    });
+    if (!rule) throw new NotFoundError('Abzugsregel', ruleId);
+  }
+
+  const invoices = await prisma.invoice.findMany({
+    where: { id: { in: invoiceIds }, tenantId },
+    select: { id: true, belegNr: true, processingStatus: true },
+  });
+
+  const approvableStatuses = ['PROCESSED', 'REVIEW_REQUIRED'];
+  const skipped: string[] = [];
+  const toApprove: string[] = [];
+
+  for (const inv of invoices) {
+    if (!approvableStatuses.includes(inv.processingStatus)) {
+      skipped.push(`BEL-${String(inv.belegNr).padStart(3, '0')} (${inv.processingStatus})`);
+    } else {
+      toApprove.push(inv.id);
+    }
+  }
+
+  // Also track IDs that weren't found
+  const foundIds = new Set(invoices.map(i => i.id));
+  for (const id of invoiceIds) {
+    if (!foundIds.has(id)) skipped.push(id);
+  }
+
+  if (toApprove.length > 0) {
+    await prisma.invoice.updateMany({
+      where: { id: { in: toApprove } },
+      data: {
+        processingStatus: 'APPROVED',
+        approvalComment: comment || null,
+        approvalRuleId: ruleId || null,
+        approvalNote: note || null,
+      },
+    });
+
+    for (const id of toApprove) {
+      writeAuditLog({
+        tenantId,
+        userId,
+        entityType: 'Invoice',
+        entityId: id,
+        action: 'APPROVE',
+        metadata: { trigger: 'BATCH', batchSize: toApprove.length },
+      });
+    }
+  }
+
+  return { approved: toApprove.length, skipped };
 }
 
 export async function getInvoiceVersions(tenantId: string, invoiceId: string) {
@@ -735,7 +875,7 @@ export async function getInvoiceVersions(tenantId: string, invoiceId: string) {
 // Barzahlung (Cash Payment)
 // ============================================================
 
-const CASH_PAYABLE_STATUSES = ['PROCESSED', 'REVIEW_REQUIRED', 'ARCHIVED'] as const;
+const CASH_PAYABLE_STATUSES = ['PROCESSED', 'REVIEW_REQUIRED', 'APPROVED', 'ARCHIVED'] as const;
 
 export async function markCashPayment(
   tenantId: string,
@@ -794,8 +934,8 @@ export async function undoCashPayment(
     throw new ConflictError('Rechnung ist nicht als bar bezahlt markiert.');
   }
 
-  // Determine restore status: if archived → ARCHIVED, else → PROCESSED
-  const restoredStatus = invoice.isLocked ? 'ARCHIVED' : 'PROCESSED';
+  // Determine restore status: if archived → ARCHIVED, if approved → APPROVED, else → PROCESSED
+  const restoredStatus = invoice.isLocked ? 'ARCHIVED' : invoice.approvalRuleId ? 'APPROVED' : 'PROCESSED';
 
   const updated = await prisma.invoice.update({
     where: { id: invoiceId },
@@ -819,7 +959,7 @@ export async function undoCashPayment(
   return updated;
 }
 
-const NON_DELETABLE_STATUSES = ['ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED'] as const;
+const NON_DELETABLE_STATUSES = ['APPROVED', 'ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED'] as const;
 
 export async function deleteInvoice(tenantId: string, userId: string, invoiceId: string) {
   const invoice = await prisma.invoice.findFirst({
@@ -1056,11 +1196,11 @@ export async function runValidationAndSync(params: {
     },
   });
 
-  // 4c. Auto-approve for TRUSTED vendors: enqueue archival job
+  // 4c. Auto-approve for TRUSTED vendors: set status to APPROVED (not ARCHIVED)
   if (autoApprove) {
-    invoiceQueue.add('archive-invoice', { invoiceId, tenantId }, {
-      attempts: 2,
-      backoff: { type: 'exponential', delay: 5000 },
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { processingStatus: 'APPROVED' },
     });
     writeAuditLog({
       tenantId,

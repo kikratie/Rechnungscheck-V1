@@ -28,7 +28,7 @@ export async function generateBmdCsv(options: BmdExportOptions): Promise<Buffer>
 
   const where: Record<string, unknown> = {
     tenantId,
-    processingStatus: { in: ['ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED'] },
+    processingStatus: { in: ['APPROVED', 'ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED'] },
     archivalNumber: { not: null },
   };
 
@@ -48,6 +48,9 @@ export async function generateBmdCsv(options: BmdExportOptions): Promise<Buffer>
       },
       customer: {
         select: { uid: true },
+      },
+      approvalRule: {
+        select: { name: true, inputTaxPercent: true, expensePercent: true, ruleType: true },
       },
     },
   });
@@ -71,6 +74,7 @@ export async function generateBmdCsv(options: BmdExportOptions): Promise<Buffer>
   const headers = [
     'Belegart', 'Belegnummer', 'Datum', 'Konto', 'Gegenkonto',
     'Betrag', 'Steuercode', 'Text', 'Lieferant', 'UID', 'Leistungsart', 'Privatanteil',
+    'Abzugsregel', 'Buchungsart', 'VSt-Abzug %', 'BA-Abzug %', 'VSt-Betrag', 'BA-Betrag', 'Anmerkung',
   ];
 
   const rows: string[][] = [headers];
@@ -79,22 +83,11 @@ export async function generateBmdCsv(options: BmdExportOptions): Promise<Buffer>
     const ed = inv.extractedData[0];
     const invoiceDate = inv.invoiceDate ? formatDateBmd(inv.invoiceDate) : '';
 
-    // Privatanteil: businessFraction = (100 - privatePercent) / 100
-    const privatePercent = inv.privatePercent ?? 0;
-    const businessFraction = privatePercent > 0 ? (100 - privatePercent) / 100 : 1;
-
     const rawGross = inv.grossAmount ? new Decimal(inv.grossAmount).toNumber() : 0;
-    const exportGross = rawGross * businessFraction;
-    const grossAmount = formatDecimalBmd(new Decimal(exportGross));
-
+    const rawVat = inv.vatAmount ? new Decimal(inv.vatAmount).toNumber() : 0;
     const vatRate = inv.vatRate ? new Decimal(inv.vatRate).toNumber() : 20;
-    const taxCode = BMD_TAX_CODES[vatRate] || 'V20';
     const direction = inv.direction === 'INCOMING' ? 'ER' : 'AR';
     const serviceType = ed?.serviceType || '';
-
-    // Gegenkonto: CASH → 2700 (Kassa), BANK → 2800 (Bank)
-    const paymentMethod = (inv.paymentMethod || 'BANK') as keyof typeof PAYMENT_METHODS;
-    const gegenkonto = PAYMENT_METHODS[paymentMethod]?.gegenkontoDefault || '2800';
 
     // For OUTGOING: use customer info; for INCOMING: use vendor info
     const partnerName = inv.direction === 'OUTGOING'
@@ -104,19 +97,82 @@ export async function generateBmdCsv(options: BmdExportOptions): Promise<Buffer>
       ? (inv.customer?.uid || '')
       : (inv.vendorUid || '');
 
+    const rule = inv.approvalRule;
+    const ruleType = rule?.ruleType || 'standard';
+
+    // Gegenkonto: CASH → 2700 (Kassa), BANK → 2800 (Bank)
+    const paymentMethod = (inv.paymentMethod || 'BANK') as keyof typeof PAYMENT_METHODS;
+    const defaultGegenkonto = PAYMENT_METHODS[paymentMethod]?.gegenkontoDefault || '2800';
+
+    // Privatanteil: businessFraction = (100 - privatePercent) / 100
+    const privatePercent = inv.privatePercent ?? 0;
+    const businessFraction = privatePercent > 0 ? (100 - privatePercent) / 100 : 1;
+
+    let konto: string;
+    let gegenkonto: string;
+    let exportGross: number;
+    let taxCode: string;
+    let vstBetrag: number;
+    let baBetrag: number;
+    let buchungsart: string;
+
+    if (ruleType === 'private_withdrawal') {
+      // Privatentnahme: Konto 9600, kein VSt, kein BA
+      // privatePercent wird ignoriert — gesamter Betrag ist privat
+      konto = '9600';
+      gegenkonto = defaultGegenkonto;
+      exportGross = rawGross;
+      taxCode = '';        // Kein Steuercode bei Privatentnahme
+      vstBetrag = 0;
+      baBetrag = 0;
+      buchungsart = 'Privatentnahme';
+    } else if (ruleType === 'private_deposit') {
+      // Privateinlage: Normale Betriebsausgabe, aber Gegenkonto 9610
+      konto = inv.accountNumber || '7000';
+      gegenkonto = '9610';  // Privateinlage statt Bank/Kassa
+      exportGross = rawGross * businessFraction;
+      taxCode = BMD_TAX_CODES[vatRate] || 'V20';
+      const inputTaxPct = rule ? new Decimal(rule.inputTaxPercent).toNumber() : 100;
+      const expensePct = rule ? new Decimal(rule.expensePercent).toNumber() : 100;
+      vstBetrag = rawVat * (inputTaxPct / 100) * businessFraction;
+      baBetrag = rawGross * (expensePct / 100) * businessFraction;
+      buchungsart = 'Privateinlage';
+    } else {
+      // Standard: Wie bisher
+      konto = inv.accountNumber || '';
+      gegenkonto = defaultGegenkonto;
+      exportGross = rawGross * businessFraction;
+      taxCode = BMD_TAX_CODES[vatRate] || 'V20';
+      const inputTaxPct = rule ? new Decimal(rule.inputTaxPercent).toNumber() : 100;
+      const expensePct = rule ? new Decimal(rule.expensePercent).toNumber() : 100;
+      vstBetrag = rawVat * (inputTaxPct / 100) * businessFraction;
+      baBetrag = rawGross * (expensePct / 100) * businessFraction;
+      buchungsart = 'Standard';
+    }
+
+    const inputTaxPctDisplay = rule ? new Decimal(rule.inputTaxPercent).toNumber() : 100;
+    const expensePctDisplay = rule ? new Decimal(rule.expensePercent).toNumber() : 100;
+
     rows.push([
       direction,
       inv.archivalNumber || '',
       invoiceDate,
-      inv.accountNumber || '',
+      konto,
       gegenkonto,
-      grossAmount,
+      formatDecimalBmd(new Decimal(exportGross)),
       taxCode,
       partnerName,
       partnerName,
       partnerUid,
       serviceType,
       privatePercent > 0 ? `${privatePercent}%` : '',
+      rule?.name || '',
+      buchungsart,
+      rule ? `${inputTaxPctDisplay}` : '',
+      rule ? `${expensePctDisplay}` : '',
+      formatDecimalBmd(new Decimal(vstBetrag)),
+      formatDecimalBmd(new Decimal(baBetrag)),
+      inv.approvalNote || '',
     ]);
   }
 
@@ -142,6 +198,7 @@ export async function generateBmdCsv(options: BmdExportOptions): Promise<Buffer>
       '',
       '',
       '',
+      '', '', '', '', '', '', // Abzugsregel Spalten
     ]);
   }
 

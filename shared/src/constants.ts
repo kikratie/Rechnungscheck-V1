@@ -26,6 +26,7 @@ export const PROCESSING_STATUS = {
   PENDING_CORRECTION: 'PENDING_CORRECTION',
   REJECTED: 'REJECTED',
   PARKED: 'PARKED',
+  APPROVED: 'APPROVED',
   ARCHIVED: 'ARCHIVED',
   RECONCILED: 'RECONCILED',
   RECONCILED_WITH_DIFFERENCE: 'RECONCILED_WITH_DIFFERENCE',
@@ -246,6 +247,8 @@ export const DEFAULT_ACCOUNTS = [
   { number: '7800', name: 'Sonstige Aufwendungen', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 410 },
   { number: '7810', name: 'Bankspesen', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V00', sortOrder: 420 },
   { number: '7900', name: 'Software / Lizenzen', type: 'EXPENSE' as const, category: 'Betriebliche Aufwendungen', taxCode: 'V20', sortOrder: 430 },
+  // Forderungen / Verrechnungskonten
+  { number: '3500', name: 'Verrechnungskonto Gesellschafter', type: 'ASSET' as const, category: 'Forderungen', taxCode: null, sortOrder: 800 },
   // Eigenkapital / Privat
   { number: '9600', name: 'Privatentnahme', type: 'EQUITY' as const, category: 'Privat', taxCode: null, sortOrder: 900 },
   { number: '9610', name: 'Privateinlage', type: 'EQUITY' as const, category: 'Privat', taxCode: null, sortOrder: 910 },
@@ -346,3 +349,44 @@ export const CHECK_TO_FIELDS: Record<string, string[]> = {
   LEGAL_FORM_CHECK: ['issuerName'],
   CREDIT_NOTE_CHECK: ['grossAmount'],
 };
+
+// Regel-Typen für Genehmigungs-Regeln
+export const RULE_TYPES = {
+  STANDARD: 'standard',
+  PRIVATE_WITHDRAWAL: 'private_withdrawal',
+  PRIVATE_DEPOSIT: 'private_deposit',
+} as const;
+
+export const RULE_TYPE_LABELS = {
+  standard: 'Standard',
+  private_withdrawal: 'Privatentnahme',
+  private_deposit: 'Privateinlage',
+} as const;
+
+// Gesellschafter-Transaktionen
+export const SHAREHOLDER_TRANSACTION_TYPES = {
+  RECEIVABLE: { label: 'Forderung', description: 'Forderung an Gesellschafter' },
+  PAYABLE: { label: 'Verbindlichkeit', description: 'Verbindlichkeit gegenüber Gesellschafter' },
+} as const;
+
+export const SHAREHOLDER_TRANSACTION_STATUSES = {
+  OPEN: { label: 'Offen' },
+  PAID: { label: 'Bezahlt' },
+} as const;
+
+// Standard-Abzugsregeln (Genehmigungs-Regeln)
+export const DEFAULT_DEDUCTIBILITY_RULES = [
+  { name: 'Voll abzugsfähig', description: 'Standardfall: voller Vorsteuer- und Betriebsausgabenabzug', inputTaxPercent: 100, expensePercent: 100, ruleType: 'standard' as const, createsReceivable: false, sortOrder: 1 },
+  { name: 'Bewirtung (Werbezweck)', description: 'Geschäftsessen mit Kunden — 100% VSt, 50% BA (§20 EStG)', inputTaxPercent: 100, expensePercent: 50, ruleType: 'standard' as const, createsReceivable: false, sortOrder: 2 },
+  { name: 'PKW / Kombi / Motorrad', description: 'Kein Vorsteuerabzug für PKW, Kombi, Motorrad (§12 UStG)', inputTaxPercent: 0, expensePercent: 100, ruleType: 'standard' as const, createsReceivable: false, sortOrder: 3 },
+  { name: 'E-Fahrzeug (bis 40k €)', description: 'Volle Abzugsfähigkeit für E-Autos ohne Luxustangente', inputTaxPercent: 100, expensePercent: 100, ruleType: 'standard' as const, createsReceivable: false, sortOrder: 4 },
+  { name: 'E-Fahrzeug (Luxustangente)', description: 'E-Auto zwischen 40.000 und 80.000 € — VSt anteilig', inputTaxPercent: 100, expensePercent: 100, ruleType: 'standard' as const, createsReceivable: false, sortOrder: 5 },
+  { name: 'Privatanteil', description: 'Gemischt genutztes Wirtschaftsgut — Prozent anpassen', inputTaxPercent: 100, expensePercent: 100, ruleType: 'standard' as const, createsReceivable: false, sortOrder: 6 },
+  { name: 'Repräsentation / Geschenk', description: 'Geschenk an Kunden ohne Werbewert — kein Abzug', inputTaxPercent: 0, expensePercent: 0, ruleType: 'standard' as const, createsReceivable: false, sortOrder: 7 },
+  { name: 'Nicht betrieblich (privat)', description: 'Private Ausgabe irrtümlich mit Firmenkarte bezahlt', inputTaxPercent: 0, expensePercent: 0, ruleType: 'private_withdrawal' as const, createsReceivable: false, sortOrder: 8 },
+  { name: 'Beleg mangelhaft', description: 'Fehlende Pflichtangaben — kein VSt-Abzug, BA geltend machen', inputTaxPercent: 0, expensePercent: 100, ruleType: 'standard' as const, createsReceivable: false, sortOrder: 9 },
+  { name: 'Sonstiger Grund (Freitext)', description: 'Nur Freitext-Anmerkung, keine automatische Auswirkung', inputTaxPercent: 100, expensePercent: 100, ruleType: 'standard' as const, createsReceivable: false, sortOrder: 10 },
+  { name: 'Privatentnahme (E/A)', description: 'Private Ausgabe über Firmenkonto — kein VSt/BA-Abzug, Konto 9600', inputTaxPercent: 0, expensePercent: 0, ruleType: 'private_withdrawal' as const, createsReceivable: false, sortOrder: 11 },
+  { name: 'Forderung Gesellschafter (GmbH)', description: 'Private Ausgabe über Firmenkonto — erzeugt Forderung an Gesellschafter', inputTaxPercent: 0, expensePercent: 0, ruleType: 'private_withdrawal' as const, createsReceivable: true, sortOrder: 12 },
+  { name: 'Privateinlage (Betriebsausgabe)', description: 'Betriebliche Rechnung vom Privatkonto bezahlt — voller Abzug, Gegenkonto 9610', inputTaxPercent: 100, expensePercent: 100, ruleType: 'private_deposit' as const, createsReceivable: false, sortOrder: 13 },
+] as const;

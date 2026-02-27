@@ -41,8 +41,17 @@ export async function updateInvoiceApi(id: string, data: Record<string, unknown>
   return response.data;
 }
 
-export async function approveInvoiceApi(id: string, comment?: string | null) {
-  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/approve`, { comment: comment || undefined });
+export async function approveInvoiceApi(
+  id: string,
+  comment?: string | null,
+  ruleId?: string | null,
+  note?: string | null,
+) {
+  const response = await apiClient.post<ApiResponse<InvoiceListItem>>(`/invoices/${id}/approve`, {
+    comment: comment || undefined,
+    ruleId: ruleId || undefined,
+    note: note || undefined,
+  });
   return response.data;
 }
 
@@ -77,8 +86,33 @@ export async function createEigenbelegApi(data: {
   return response.data;
 }
 
-export async function batchApproveInvoicesApi(invoiceIds: string[], comment?: string | null) {
-  const response = await apiClient.post<ApiResponse<{ archived: number; skipped: string[]; results: Array<{ invoiceId: string; archivalNumber: string }> }>>('/invoices/batch-approve', { invoiceIds, comment: comment || undefined });
+export async function batchApproveInvoicesApi(
+  invoiceIds: string[],
+  comment?: string | null,
+  ruleId?: string | null,
+  note?: string | null,
+) {
+  const response = await apiClient.post<ApiResponse<{ approved: number; skipped: string[] }>>('/invoices/batch-approve', {
+    invoiceIds,
+    comment: comment || undefined,
+    ruleId: ruleId || undefined,
+    note: note || undefined,
+  });
+  return response.data;
+}
+
+export async function archiveInvoiceApi(id: string, comment?: string | null) {
+  const response = await apiClient.post<ApiResponse<{ archivalNumber: string; archivedStoragePath: string; archivedFileName: string; archivedAt: string }>>(`/invoices/${id}/archive`, {
+    comment: comment || undefined,
+  });
+  return response.data;
+}
+
+export async function batchArchiveInvoicesApi(invoiceIds: string[], comment?: string | null) {
+  const response = await apiClient.post<ApiResponse<{ archived: number; skipped: string[]; results: Array<{ invoiceId: string; archivalNumber: string }> }>>('/invoices/batch-archive', {
+    invoiceIds,
+    comment: comment || undefined,
+  });
   return response.data;
 }
 

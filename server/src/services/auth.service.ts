@@ -18,6 +18,7 @@ import type {
 import { DEFAULT_FEATURE_VISIBILITY } from '@buchungsai/shared';
 import { writeAuditLog } from '../middleware/auditLogger.js';
 import { seedAccountsForTenant } from './account.service.js';
+import { seedRulesForTenant } from './deductibilityRule.service.js';
 
 const SALT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -94,8 +95,9 @@ export async function register(data: RegisterRequest): Promise<{ user: UserProfi
     return { tenant, user };
   });
 
-  // Standard-Kontenplan für neuen Mandanten seeden
+  // Standard-Kontenplan + Genehmigungs-Regeln für neuen Mandanten seeden
   await seedAccountsForTenant(result.tenant.id);
+  await seedRulesForTenant(result.tenant.id);
 
   // BMD NTCS System-Exportprofil erstellen
   await prisma.exportConfig.create({

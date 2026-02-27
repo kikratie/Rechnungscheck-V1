@@ -12,6 +12,8 @@ import {
 
   getInvoiceDownloadUrl,
   batchApproveInvoicesApi,
+  archiveInvoiceApi,
+  batchArchiveInvoicesApi,
   parkInvoiceApi,
   unparkInvoiceApi,
   markCashPaymentApi,
@@ -22,8 +24,9 @@ import {
 import { generateCorrectionEmailApi } from '../api/mail';
 import { exportOcrCheckApi, downloadBlob } from '../api/exports';
 import type { InvoiceFilters } from '../api/invoices';
-import type { ValidationCheck, TrafficLightStatus, RecurringIntervalType } from '@buchungsai/shared';
+import type { ValidationCheck, TrafficLightStatus, RecurringIntervalType, DeductibilityRuleItem } from '@buchungsai/shared';
 import { RECURRING_INTERVALS } from '@buchungsai/shared';
+import { listRulesApi } from '../api/deductibilityRules';
 import {
   FileText, Upload, Search, ChevronLeft, ChevronRight, Loader2,
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
@@ -39,6 +42,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { FullScreenPanel } from '../components/mobile/FullScreenPanel';
 import { BottomSheet } from '../components/mobile/BottomSheet';
 import { InvoiceSplitView } from '../components/InvoiceSplitView';
+import { useAccountingType } from '../hooks/useAccountingType';
 import { DocumentViewer } from '../components/DocumentViewer';
 import { ValidatedField } from '../components/ValidatedField';
 
@@ -56,6 +60,7 @@ export function InvoicesPage() {
   const [showErsatzbelegDialog, setShowErsatzbelegDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchApproveDialog, setShowBatchApproveDialog] = useState(false);
+  const [showBatchArchiveDialog, setShowBatchArchiveDialog] = useState(false);
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [emailPrefill, setEmailPrefill] = useState<{ to?: string; subject?: string; body?: string } | undefined>(undefined);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
@@ -108,10 +113,20 @@ export function InvoicesPage() {
   });
 
   const batchApproveMutation = useMutation({
-    mutationFn: ({ ids, comment }: { ids: string[]; comment?: string | null }) => batchApproveInvoicesApi(ids, comment),
+    mutationFn: ({ ids, comment, ruleId, note }: { ids: string[]; comment?: string | null; ruleId?: string | null; note?: string | null }) => batchApproveInvoicesApi(ids, comment, ruleId, note),
     onSuccess: () => {
       setSelectedIds(new Set());
       setShowBatchApproveDialog(false);
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      if (selectedId) queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+    },
+  });
+
+  const batchArchiveMutation = useMutation({
+    mutationFn: ({ ids }: { ids: string[] }) => batchArchiveInvoicesApi(ids),
+    onSuccess: () => {
+      setSelectedIds(new Set());
+      setShowBatchArchiveDialog(false);
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       if (selectedId) queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
     },
@@ -613,6 +628,7 @@ Mit freundlichen Grüßen`;
                 <option value="PROCESSING">In Verarbeitung</option>
                 <option value="PROCESSED">Verarbeitet</option>
                 <option value="REVIEW_REQUIRED">Review nötig</option>
+                <option value="APPROVED">Genehmigt</option>
                 <option value="REJECTED">Abgelehnt</option>
                 <option value="ARCHIVED">Archiviert</option>
                 <option value="RECONCILED">Abgeglichen</option>
@@ -653,6 +669,7 @@ Mit freundlichen Grüßen`;
                   <option value="PROCESSING">In Verarbeitung</option>
                   <option value="PROCESSED">Verarbeitet</option>
                   <option value="REVIEW_REQUIRED">Review nötig</option>
+                  <option value="APPROVED">Genehmigt</option>
                   <option value="REJECTED">Abgelehnt</option>
                   <option value="ARCHIVED">Archiviert</option>
                   <option value="RECONCILED">Abgeglichen</option>
@@ -680,17 +697,34 @@ Mit freundlichen Grüßen`;
               {selectedIds.size} ausgewählt
             </span>
             {(() => {
-              const hasWarnings = invoices.some((inv) => selectedIds.has(inv.id) && (inv.validationStatus === 'WARNING' || inv.validationStatus === 'INVALID'));
+              const selectedInvs = invoices.filter((inv) => selectedIds.has(inv.id));
+              const approvable = selectedInvs.filter((inv) => inv.processingStatus === 'PROCESSED' || inv.processingStatus === 'REVIEW_REQUIRED');
+              const archivable = selectedInvs.filter((inv) => inv.processingStatus === 'APPROVED');
+              const hasWarnings = approvable.some((inv) => inv.validationStatus === 'WARNING' || inv.validationStatus === 'INVALID');
               return (
-                <button
-                  onClick={() => hasWarnings ? setShowBatchApproveDialog(true) : batchApproveMutation.mutate({ ids: Array.from(selectedIds) })}
-                  disabled={batchApproveMutation.isPending}
-                  className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-4 bg-green-600 hover:bg-green-700"
-                >
-                  {batchApproveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
-                  Genehmigen & Archivieren
-                  {hasWarnings && <AlertTriangle size={12} className="text-yellow-200" />}
-                </button>
+                <>
+                  {approvable.length > 0 && (
+                    <button
+                      onClick={() => hasWarnings ? setShowBatchApproveDialog(true) : batchApproveMutation.mutate({ ids: approvable.map(i => i.id) })}
+                      disabled={batchApproveMutation.isPending}
+                      className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-4 bg-green-600 hover:bg-green-700"
+                    >
+                      {batchApproveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
+                      Genehmigen ({approvable.length})
+                      {hasWarnings && <AlertTriangle size={12} className="text-yellow-200" />}
+                    </button>
+                  )}
+                  {archivable.length > 0 && (
+                    <button
+                      onClick={() => batchArchiveMutation.mutate({ ids: archivable.map(i => i.id) })}
+                      disabled={batchArchiveMutation.isPending}
+                      className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-4 bg-blue-600 hover:bg-blue-700"
+                    >
+                      {batchArchiveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+                      Archivieren ({archivable.length})
+                    </button>
+                  )}
+                </>
               );
             })()}
             <button
@@ -701,19 +735,24 @@ Mit freundlichen Grüßen`;
             </button>
             {batchApproveMutation.isSuccess && batchApproveMutation.data?.data && (
               <span className="text-xs text-green-700">
-                {batchApproveMutation.data.data.archived} archiviert
+                {batchApproveMutation.data.data.approved} genehmigt
                 {batchApproveMutation.data.data.skipped?.length > 0 && `, ${batchApproveMutation.data.data.skipped.length} übersprungen`}
+              </span>
+            )}
+            {batchArchiveMutation.isSuccess && batchArchiveMutation.data?.data && (
+              <span className="text-xs text-blue-700">
+                {batchArchiveMutation.data.data.archived} archiviert
               </span>
             )}
           </div>
         )}
         {showBatchApproveDialog && (
           <BatchApproveDialog
-            count={selectedIds.size}
+            count={invoices.filter((inv) => selectedIds.has(inv.id) && (inv.processingStatus === 'PROCESSED' || inv.processingStatus === 'REVIEW_REQUIRED')).length}
             hasWarnings={invoices.some((inv) => selectedIds.has(inv.id) && inv.validationStatus === 'WARNING')}
             hasInvalid={invoices.some((inv) => selectedIds.has(inv.id) && inv.validationStatus === 'INVALID')}
             isPending={batchApproveMutation.isPending}
-            onConfirm={(comment) => batchApproveMutation.mutate({ ids: Array.from(selectedIds), comment })}
+            onConfirm={(params) => batchApproveMutation.mutate({ ids: invoices.filter((inv) => selectedIds.has(inv.id) && (inv.processingStatus === 'PROCESSED' || inv.processingStatus === 'REVIEW_REQUIRED')).map(i => i.id), ...params })}
             onClose={() => setShowBatchApproveDialog(false)}
           />
         )}
@@ -1237,9 +1276,20 @@ function InvoiceDetailContent({
               <p>Archiviert am: {new Date(detail.archivedAt).toLocaleString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
             )}
           </div>
-          {detail.approvalComment && (
-            <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded p-2 text-xs text-yellow-800">
-              <span className="font-medium">Anmerkung:</span> {detail.approvalComment}
+          {(detail.approvalComment || detail.approvalNote || detail.approvalRule) && (
+            <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded p-2 text-xs text-yellow-800 space-y-1">
+              {detail.approvalRule && (
+                <p>
+                  <span className="font-medium">Regel:</span> {detail.approvalRule.name}
+                  {' '}(VSt {detail.approvalRule.inputTaxPercent}% / BA {detail.approvalRule.expensePercent}%)
+                </p>
+              )}
+              {detail.approvalNote && (
+                <p><span className="font-medium">Anmerkung:</span> {detail.approvalNote}</p>
+              )}
+              {detail.approvalComment && !detail.approvalNote && (
+                <p><span className="font-medium">Anmerkung:</span> {detail.approvalComment}</p>
+              )}
             </div>
           )}
           <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1533,8 +1583,8 @@ function InvoiceDetailContent({
             </div>
           )}
 
-          {/* Action buttons */}
-          {detail.processingStatus !== 'ARCHIVED' && detail.processingStatus !== 'RECONCILED' && detail.processingStatus !== 'EXPORTED' && detail.processingStatus !== 'UPLOADED' && detail.processingStatus !== 'PROCESSING' && detail.processingStatus !== 'REPLACED' && detail.processingStatus !== 'REJECTED' && detail.processingStatus !== 'PARKED' && detail.processingStatus !== 'PENDING_CORRECTION' && (
+          {/* Action buttons — Approve (PROCESSED/REVIEW_REQUIRED) */}
+          {(detail.processingStatus === 'PROCESSED' || detail.processingStatus === 'REVIEW_REQUIRED') && (
             <div className="border-t pt-4 flex gap-2">
               <ApproveButton
                 invoiceId={selectedId}
@@ -1551,6 +1601,19 @@ function InvoiceDetailContent({
                 <ThumbsDown size={14} />
                 Ablehnen
               </button>
+            </div>
+          )}
+
+          {/* Action buttons — Archive (APPROVED) */}
+          {detail.processingStatus === 'APPROVED' && (
+            <div className="border-t pt-4 flex gap-2">
+              <ArchiveButton
+                invoiceId={selectedId}
+                onSuccess={() => {
+                  queryClient.invalidateQueries({ queryKey: ['invoices'] });
+                  queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+                }}
+              />
             </div>
           )}
 
@@ -1940,7 +2003,8 @@ function ApproveButton({ invoiceId, validationStatus, onSuccess }: { invoiceId: 
   const needsComment = validationStatus === 'WARNING' || validationStatus === 'INVALID';
 
   const mutation = useMutation({
-    mutationFn: (comment?: string | null) => approveInvoiceApi(invoiceId, comment),
+    mutationFn: (params?: { comment?: string | null; ruleId?: string | null; note?: string | null }) =>
+      approveInvoiceApi(invoiceId, params?.comment, params?.ruleId, params?.note),
     onSuccess: () => {
       setDone(true);
       setShowDialog(false);
@@ -1953,7 +2017,7 @@ function ApproveButton({ invoiceId, validationStatus, onSuccess }: { invoiceId: 
     return (
       <div className="flex items-center gap-1.5 text-sm flex-1 justify-center py-2 bg-green-100 text-green-700 rounded-lg font-medium">
         <CheckCircle size={14} />
-        Archiviert!
+        Genehmigt!
       </div>
     );
   }
@@ -1965,15 +2029,15 @@ function ApproveButton({ invoiceId, validationStatus, onSuccess }: { invoiceId: 
         disabled={mutation.isPending}
         className="btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center bg-green-600 hover:bg-green-700"
       >
-        {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
-        Genehmigen & Archivieren
+        {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
+        Genehmigen
       </button>
       {showDialog && (
         <ApproveDialog
           validationStatus={validationStatus}
           isPending={mutation.isPending}
-          error={mutation.isError ? 'Fehler beim Archivieren' : null}
-          onConfirm={(comment) => mutation.mutate(comment)}
+          error={mutation.isError ? 'Fehler beim Genehmigen' : null}
+          onConfirm={(params) => mutation.mutate(params)}
           onClose={() => setShowDialog(false)}
         />
       )}
@@ -1981,19 +2045,63 @@ function ApproveButton({ invoiceId, validationStatus, onSuccess }: { invoiceId: 
   );
 }
 
+function ArchiveButton({ invoiceId, onSuccess }: { invoiceId: string; onSuccess: () => void }) {
+  const [done, setDone] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: () => archiveInvoiceApi(invoiceId),
+    onSuccess: () => {
+      setDone(true);
+      onSuccess();
+      setTimeout(() => setDone(false), 2000);
+    },
+  });
+
+  if (done) {
+    return (
+      <div className="flex items-center gap-1.5 text-sm flex-1 justify-center py-2 bg-blue-100 text-blue-700 rounded-lg font-medium">
+        <CheckCircle size={14} />
+        Archiviert!
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+      className="btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center bg-blue-600 hover:bg-blue-700"
+    >
+      {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+      Archivieren
+    </button>
+  );
+}
+
 function ApproveDialog({
   validationStatus, isPending, error, onConfirm, onClose,
 }: {
   validationStatus: string; isPending: boolean; error: string | null;
-  onConfirm: (comment?: string | null) => void; onClose: () => void;
+  onConfirm: (params?: { comment?: string | null; ruleId?: string | null; note?: string | null }) => void;
+  onClose: () => void;
 }) {
-  const [comment, setComment] = useState('');
+  const [selectedRuleId, setSelectedRuleId] = useState<string>('');
+  const [note, setNote] = useState('');
   const isInvalid = validationStatus === 'INVALID';
-  const canConfirm = isInvalid ? comment.trim().length > 0 : true;
+  const accountingType = useAccountingType();
+
+  const { data: rules = [] } = useQuery({
+    queryKey: ['deductibility-rules'],
+    queryFn: () => listRulesApi(),
+    staleTime: 60_000,
+  });
+
+  const selectedRule = rules.find((r) => r.id === selectedRuleId);
+  const canConfirm = isInvalid ? (selectedRuleId || note.trim().length > 0) : true;
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-4">
           <AlertTriangle size={20} className={isInvalid ? 'text-red-500' : 'text-yellow-500'} />
           <h2 className="text-lg font-semibold">
@@ -2003,23 +2111,77 @@ function ApproveDialog({
 
         <div className={`rounded-lg p-3 mb-4 text-sm ${isInvalid ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
           {isInvalid
-            ? 'Diese Rechnung hat Validierungsfehler. Bitte begründen Sie, warum sie trotzdem genehmigt werden soll.'
-            : 'Diese Rechnung hat Warnungen. Sie können optional eine Anmerkung hinzufügen.'}
+            ? 'Diese Rechnung hat Validierungsfehler. Bitte wählen Sie einen Grund und/oder geben Sie eine Begründung ein.'
+            : 'Diese Rechnung hat Warnungen. Wählen Sie optional eine Abzugsregel oder fügen Sie eine Anmerkung hinzu.'}
         </div>
 
+        {/* Regel-Dropdown */}
+        <div className="mb-3">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Abzugsregel</label>
+          <select
+            value={selectedRuleId}
+            onChange={(e) => setSelectedRuleId(e.target.value)}
+            className="input-field text-sm"
+          >
+            <option value="">-- Keine Regel auswählen --</option>
+            {rules.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name} (VSt {r.inputTaxPercent}% / BA {r.expensePercent}%)
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* VSt/BA Vorschau */}
+        {selectedRule && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 text-sm">
+            <p className="font-medium text-blue-800 mb-1">{selectedRule.name}</p>
+            {selectedRule.description && (
+              <p className="text-blue-600 text-xs mb-2">{selectedRule.description}</p>
+            )}
+            <div className="flex gap-4 text-xs text-blue-700">
+              <span>Vorsteuer-Abzug: <strong>{selectedRule.inputTaxPercent}%</strong></span>
+              <span>Betriebsausgabe: <strong>{selectedRule.expensePercent}%</strong></span>
+            </div>
+          </div>
+        )}
+
+        {/* ruleType Info-Box */}
+        {selectedRule?.ruleType === 'private_withdrawal' && (
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3 text-sm">
+            <p className="font-semibold text-orange-800 mb-1">⚠ Privatentnahme</p>
+            <p className="text-orange-700 text-xs">
+              {accountingType === 'ACCRUAL'
+                ? 'Diese Ausgabe erzeugt eine Forderung an den Gesellschafter. Wird nicht zurückgezahlt, droht eine verdeckte Gewinnausschüttung.'
+                : 'Diese Ausgabe wird als Privatentnahme verbucht (Konto 9600). Kein Vorsteuerabzug, keine Betriebsausgabe.'}
+            </p>
+          </div>
+        )}
+        {selectedRule?.ruleType === 'private_deposit' && (
+          <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 mb-3 text-sm">
+            <p className="font-semibold text-teal-800 mb-1">↗ Privateinlage</p>
+            <p className="text-teal-700 text-xs">
+              {accountingType === 'ACCRUAL'
+                ? 'Diese Rechnung wurde vom Privatkonto bezahlt. Es wird eine Verbindlichkeit gegenüber dem Gesellschafter erstellt.'
+                : 'Diese Rechnung wurde vom Privatkonto bezahlt. Sie wird als Betriebsausgabe mit Privateinlage verbucht (Gegenkonto 9610).'}
+            </p>
+          </div>
+        )}
+
+        {/* Freitext-Anmerkung */}
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Anmerkung {isInvalid ? '*' : '(optional)'}
+            Anmerkung {isInvalid && !selectedRuleId ? '*' : '(optional)'}
           </label>
           <textarea
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
             placeholder={isInvalid ? 'Begründung eingeben...' : 'z.B. Betrag geringfügig abweichend, manuell geprüft'}
-            className="input-field min-h-[80px] text-sm"
+            className="input-field min-h-[60px] text-sm"
             maxLength={2000}
           />
-          {comment.length > 0 && (
-            <p className="text-xs text-gray-400 mt-1">{comment.length}/2000</p>
+          {note.length > 0 && (
+            <p className="text-xs text-gray-400 mt-1">{note.length}/2000</p>
           )}
         </div>
 
@@ -2027,11 +2189,15 @@ function ApproveDialog({
 
         <div className="flex gap-2">
           <button
-            onClick={() => onConfirm(comment.trim() || null)}
+            onClick={() => onConfirm({
+              comment: note.trim() || null,
+              ruleId: selectedRuleId || null,
+              note: note.trim() || null,
+            })}
             disabled={!canConfirm || isPending}
             className={`btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center ${isInvalid ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}`}
           >
-            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
             Trotzdem genehmigen
           </button>
           <button onClick={onClose} className="btn-secondary text-sm px-4">Abbrechen</button>
@@ -2045,13 +2211,24 @@ function BatchApproveDialog({
   count, hasWarnings, hasInvalid, isPending, onConfirm, onClose,
 }: {
   count: number; hasWarnings: boolean; hasInvalid: boolean; isPending: boolean;
-  onConfirm: (comment?: string | null) => void; onClose: () => void;
+  onConfirm: (params?: { comment?: string | null; ruleId?: string | null; note?: string | null }) => void;
+  onClose: () => void;
 }) {
-  const [comment, setComment] = useState('');
+  const [selectedRuleId, setSelectedRuleId] = useState<string>('');
+  const [note, setNote] = useState('');
+  const accountingType = useAccountingType();
+
+  const { data: rules = [] } = useQuery({
+    queryKey: ['deductibility-rules'],
+    queryFn: () => listRulesApi(),
+    staleTime: 60_000,
+  });
+
+  const selectedRule = rules.find((r) => r.id === selectedRuleId);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-4">
           <AlertTriangle size={20} className={hasInvalid ? 'text-red-500' : 'text-yellow-500'} />
           <h2 className="text-lg font-semibold">{count} Rechnungen genehmigen</h2>
@@ -2064,26 +2241,82 @@ function BatchApproveDialog({
             : ' Sie können optional eine Anmerkung hinzufügen.'}
         </div>
 
+        {/* Regel-Dropdown */}
+        <div className="mb-3">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Abzugsregel (für alle)</label>
+          <select
+            value={selectedRuleId}
+            onChange={(e) => setSelectedRuleId(e.target.value)}
+            className="input-field text-sm"
+          >
+            <option value="">-- Keine Regel auswählen --</option>
+            {rules.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name} (VSt {r.inputTaxPercent}% / BA {r.expensePercent}%)
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {selectedRule && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 text-sm">
+            <p className="font-medium text-blue-800">{selectedRule.name}</p>
+            {selectedRule.description && (
+              <p className="text-blue-600 text-xs mb-1">{selectedRule.description}</p>
+            )}
+            <div className="flex gap-4 text-xs text-blue-700">
+              <span>VSt: <strong>{selectedRule.inputTaxPercent}%</strong></span>
+              <span>BA: <strong>{selectedRule.expensePercent}%</strong></span>
+            </div>
+          </div>
+        )}
+
+        {/* ruleType Info-Box */}
+        {selectedRule?.ruleType === 'private_withdrawal' && (
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3 text-sm">
+            <p className="font-semibold text-orange-800 mb-1">⚠ Privatentnahme</p>
+            <p className="text-orange-700 text-xs">
+              {accountingType === 'ACCRUAL'
+                ? 'Alle Rechnungen erzeugen eine Forderung an den Gesellschafter.'
+                : 'Alle Rechnungen werden als Privatentnahme verbucht (Konto 9600).'}
+            </p>
+          </div>
+        )}
+        {selectedRule?.ruleType === 'private_deposit' && (
+          <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 mb-3 text-sm">
+            <p className="font-semibold text-teal-800 mb-1">↗ Privateinlage</p>
+            <p className="text-teal-700 text-xs">
+              {accountingType === 'ACCRUAL'
+                ? 'Alle Rechnungen erzeugen eine Verbindlichkeit gegenüber dem Gesellschafter.'
+                : 'Alle Rechnungen werden als Betriebsausgabe mit Privateinlage verbucht.'}
+            </p>
+          </div>
+        )}
+
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Anmerkung {hasInvalid ? '*' : '(optional)'}
+            Anmerkung {hasInvalid && !selectedRuleId ? '*' : '(optional)'}
           </label>
           <textarea
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
             placeholder="Begründung für die Sammelgenehmigung..."
-            className="input-field min-h-[80px] text-sm"
+            className="input-field min-h-[60px] text-sm"
             maxLength={2000}
           />
         </div>
 
         <div className="flex gap-2">
           <button
-            onClick={() => onConfirm(comment.trim() || null)}
-            disabled={isPending || (hasInvalid && !comment.trim())}
+            onClick={() => onConfirm({
+              comment: note.trim() || null,
+              ruleId: selectedRuleId || null,
+              note: note.trim() || null,
+            })}
+            disabled={isPending || (hasInvalid && !selectedRuleId && !note.trim())}
             className={`btn-primary flex items-center gap-1.5 text-sm flex-1 justify-center ${hasInvalid ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}`}
           >
-            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
             {count} Rechnungen genehmigen
           </button>
           <button onClick={onClose} className="btn-secondary text-sm px-4">Abbrechen</button>
@@ -2385,6 +2618,7 @@ function ProcessingBadge({ status }: { status: string }) {
     INBOX: { bg: 'bg-blue-50', text: 'text-blue-600', label: 'Eingang' },
     PENDING_CORRECTION: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Wartet auf Korrektur' },
     PARKED: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Geparkt' },
+    APPROVED: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Genehmigt' },
     ARCHIVED: { bg: 'bg-green-100', text: 'text-green-700', label: 'Archiviert' },
     RECONCILED: { bg: 'bg-teal-100', text: 'text-teal-700', label: 'Abgeglichen' },
     RECONCILED_WITH_DIFFERENCE: { bg: 'bg-teal-100', text: 'text-teal-700', label: 'Abgeglichen (Differenz)' },

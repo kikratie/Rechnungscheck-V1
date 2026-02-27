@@ -15,6 +15,8 @@ import {
 } from 'recharts';
 import type { DashboardStats, DashboardPeriod, OpenInvoiceItem, RecurringCostsSummary } from '@buchungsai/shared';
 import { RECURRING_INTERVALS } from '@buchungsai/shared';
+import { useAccountingType } from '../hooks/useAccountingType';
+import { getShareholderBalanceApi } from '../api/shareholderTransactions';
 
 const PERIOD_OPTIONS: Array<{ value: DashboardPeriod; label: string }> = [
   { value: 'currentMonth', label: 'Aktueller Monat' },
@@ -26,6 +28,7 @@ const PERIOD_OPTIONS: Array<{ value: DashboardPeriod; label: string }> = [
 
 export function DashboardPage() {
   const { user } = useAuthStore();
+  const accountingType = useAccountingType();
   const [period, setPeriod] = useState<DashboardPeriod>('currentMonth');
 
   const { data, isLoading } = useQuery({
@@ -40,6 +43,14 @@ export function DashboardPage() {
     queryFn: () => getRecurringSummaryApi(),
   });
   const recurringSummary: RecurringCostsSummary | undefined = recurringData?.data;
+
+  // Shareholder balance (only for GmbH / ACCRUAL)
+  const { data: shareholderBalance } = useQuery({
+    queryKey: ['shareholder-balance'],
+    queryFn: () => getShareholderBalanceApi(),
+    enabled: accountingType === 'ACCRUAL',
+    staleTime: 60_000,
+  });
 
   return (
     <div>
@@ -153,6 +164,41 @@ export function DashboardPage() {
               emptyMessage="Keine offenen Verbindlichkeiten"
             />
           </div>
+
+          {/* Shareholder Balance Widget (GmbH only) */}
+          {accountingType === 'ACCRUAL' && shareholderBalance && (
+            <div className="card p-4 md:p-6 mb-6 md:mb-8">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Building2 size={20} className="text-orange-600" />
+                  Gesellschafter-Verrechnungskonto
+                </h2>
+                <Link to="/shareholder-account" className="text-sm text-primary-600 hover:underline">
+                  Details
+                </Link>
+              </div>
+              <div className="grid grid-cols-3 gap-4 mt-3">
+                <div>
+                  <p className="text-xs text-gray-500">Offene Forderungen</p>
+                  <p className={`text-lg font-bold ${parseFloat(shareholderBalance.totalReceivable) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {formatCurrency(shareholderBalance.totalReceivable)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Offene Verbindlichkeiten</p>
+                  <p className="text-lg font-bold text-blue-600">
+                    {formatCurrency(shareholderBalance.totalPayable)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Netto-Saldo</p>
+                  <p className={`text-lg font-bold ${parseFloat(shareholderBalance.netBalance) > 0 ? 'text-red-600' : parseFloat(shareholderBalance.netBalance) < 0 ? 'text-blue-600' : 'text-green-600'}`}>
+                    {formatCurrency(shareholderBalance.netBalance)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Recurring Costs Widget (Laufende Kosten) */}
           {recurringSummary && recurringSummary.items.length > 0 && (

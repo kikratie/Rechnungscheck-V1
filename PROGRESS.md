@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 27. Februar 2026 (Session 19 — Phase 15: Inbox Triage + Split-View)
+**Letzte Aktualisierung:** 27. Februar 2026 (Session 21 — Phase 17: Genehmigungs-Regeln V2 mit Privat-Logik)
 
 ---
 
@@ -28,6 +28,8 @@
 | `extracted_data` | Versionierte KI-Extraktionsdaten | ✅ IMPLEMENTIERT |
 | `validation_results` | Separates Prüfprotokoll (Regel-Engine Output) | ✅ IMPLEMENTIERT |
 | `sequential_numbers` | Fortlaufende Nummerierung ER/AR-JJJJ-NNNNN | ✅ IMPLEMENTIERT (Phase 5) |
+| `deductibility_rules` | Genehmigungs-Regeln (VSt/BA %, ruleType, createsReceivable) | ✅ IMPLEMENTIERT (Phase 16+17) |
+| `shareholder_transactions` | Gesellschafter-Verrechnungskonto (GmbH) | ✅ IMPLEMENTIERT (Phase 17) |
 | `llm_config` | Admin-konfigurierbare LLM-Einstellungen | OFFEN — MVP nutzt env-Konfiguration |
 | `storage_config` | Admin-konfigurierbare Storage-Einstellungen | NIEDRIG — hardcoded reicht für MVP |
 
@@ -891,3 +893,221 @@ Neues Boolean-Feld `inboxCleared` (default `false`) auf Invoice statt neuem Stat
 - ✅ Prisma-Migration erstellt und angewandt
 - ✅ API-Endpunkte getestet: Login, Inbox-Filter (0 Items), Check-Filter (8 Items)
 - ✅ Server-Health: DB, Redis, LLM alle OK
+
+---
+
+## Phase 16: Genehmigungs-Regeln V1 (Dynamische Absetzbarkeits-Regeln + Approve/Archive-Trennung) ✅
+
+**27. Februar 2026** — Neues DeductibilityRule-System für strukturierte Rechnungsgenehmigung + APPROVED-Status als eigene Stufe vor Archivierung.
+
+### Konzeptdokument
+
+`docs/Konzept & Umsetzung_ Dynamische Genehmigungs-Regeln (V2 mit Privat-Logik).md` — V1-Teil (Standard-Regeln, CRUD, Genehmigungs-Dialog, Approve/Archive-Trennung)
+
+### DeductibilityRule System
+
+- [x] **DB-Schema**: `DeductibilityRule` Tabelle (tenantId, name, vatDeductionPercent, expenseDeductionPercent, accountNumber, isDefault, isSystem, sortOrder)
+- [x] **10 Standard-Regeln** (österreichisches Steuerrecht):
+  1. Voll abzugsfähig (100/100)
+  2. Nicht betrieblich privat (0/0)
+  3. Bewirtung 50% (50/100)
+  4. Bewirtung Werbezweck (100/100)
+  5. Repräsentation (0/50)
+  6. PKW 50% privat (50/50)
+  7. Handy 30% privat (70/70)
+  8. Internet 20% privat (80/80)
+  9. Arbeitszimmer 40% (40/40)
+  10. Reisekosten Verpflegung (0/100)
+- [x] **CRUD-API**: `GET/POST/PUT/DELETE /api/v1/deductibility-rules`, `POST /seed` Endpoint
+- [x] **Auto-Seeding**: Bei Registrierung werden Standard-Regeln erstellt
+- [x] **Regel-Engine**: `approvalRuleId` + `approvedVstPercent` + `approvedExpensePercent` auf Invoice
+- [x] **Genehmigungs-Dialog**: Regel-Dropdown mit VSt/BA-Vorschau, manuelle Überschreibung möglich
+- [x] **Batch-Genehmigung**: Einheitliche Regel für ausgewählte Rechnungen
+
+### APPROVED Status (Approve ≠ Archive)
+
+- [x] **Neuer Status**: `APPROVED` zwischen PROCESSED/REVIEW_REQUIRED und ARCHIVED
+- [x] **Getrennte Endpoints**:
+  - `POST /invoices/:id/approve` — Setzt APPROVED + Regel
+  - `POST /invoices/:id/archive` — APPROVED → ARCHIVED (Nummerierung + Stempel + S3)
+  - `POST /invoices/batch-approve` — Batch-Genehmigung
+  - `POST /invoices/batch-archive` — Batch-Archivierung
+- [x] **Archivierung nur ab APPROVED**: archiveInvoice prüft Status
+- [x] **Client**: Getrennte "Genehmigen" + "Archivieren" Buttons, APPROVED Badge (blau), Filter
+
+### Settings: Regelverwaltung
+
+- [x] Tabelle mit System/Custom Badge, VSt/BA %, Konto
+- [x] Create/Edit Dialog für Custom-Regeln
+- [x] System-Regeln sind nicht löschbar
+
+### Neue Dateien (Phase 16)
+
+| Datei | Zweck |
+|-------|-------|
+| `server/src/services/deductibilityRule.service.ts` | Regel CRUD + Seeding |
+| `server/src/routes/deductibilityRule.routes.ts` | REST-Endpoints |
+| `client/src/api/deductibilityRules.ts` | API-Client |
+| `prisma/migrations/20260227120000_add_deductibility_rules/` | DeductibilityRule Tabelle + Invoice-Felder |
+| `prisma/migrations/20260227150000_add_approved_status/` | APPROVED Status + approvalRule Relation |
+
+### Geänderte Dateien (Phase 16)
+
+| Datei | Änderung |
+|-------|----------|
+| `prisma/schema.prisma` | DeductibilityRule Model, ProcessingStatus +APPROVED, Invoice +5 Approval-Felder |
+| `shared/src/types.ts` | DeductibilityRuleItem, Invoice Types +approval Felder |
+| `shared/src/constants.ts` | DEFAULT_DEDUCTIBILITY_RULES, PROCESSING_STATUS +APPROVED |
+| `shared/src/validation.ts` | create/updateDeductibilityRuleSchema, approveInvoiceSchema erweitert |
+| `server/src/services/invoice.service.ts` | approveInvoice mit Regel-Logik, archiveInvoice nur ab APPROVED |
+| `server/src/services/archival.service.ts` | Stempel mit Regelname |
+| `server/src/routes/invoice.routes.ts` | Getrennte approve/archive Routes |
+| `server/src/app.ts` | DeductibilityRule Routes registriert |
+| `client/src/pages/InvoicesPage.tsx` | ApproveDialog, BatchApproveDialog, APPROVED Filter + Buttons |
+| `client/src/pages/SettingsPage.tsx` | DeductibilityRules Verwaltung |
+| `client/src/components/layout/AppLayout.tsx` | Nav unverändert |
+
+### Verifikation (Phase 16)
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+- ✅ Prisma-Migrationen erstellt und angewandt (2 Migrationen)
+
+---
+
+## Phase 17: Genehmigungs-Regeln V2 — Privat-Logik + GmbH-Fähigkeit ✅
+
+**27. Februar 2026** — Erweiterung der Genehmigungs-Regeln um `ruleType` (Standard/Privatentnahme/Privateinlage) + Gesellschafter-Verrechnungskonto für GmbH/Bilanzierer. **BMD-kritisch: Daten müssen 1:1 importierbar sein.**
+
+### Konzeptdokument
+
+`docs/Konzept & Umsetzung_ Dynamische Genehmigungs-Regeln (V2 mit Privat-Logik).md`
+
+### Kernkonzept: ruleType vs. privatePercent
+
+| Feld | Bedeutung | Beispiel |
+|------|-----------|---------|
+| `privatePercent` | Teilweise privat (Anteil %) | 30% Handy → 70% abzugsfähig |
+| `ruleType = private_withdrawal` | 100% privat, gesamte Rechnung | Konto 9600, 0 VSt, 0 BA |
+| `ruleType = private_deposit` | Vom Privatkonto bezahlt | Normaler Aufwand, Gegenkonto 9610 |
+
+### Buchhaltungs-Logik (BMD-Export)
+
+| ruleType | E/A-Rechner | GmbH (ACCRUAL) |
+|----------|-------------|----------------|
+| `standard` | Normaler Export (wie bisher) | Normaler Export (wie bisher) |
+| `private_withdrawal` | Konto 9600, 0 VSt, 0 BA | Konto 9600 + **Forderung an Gesellschafter** |
+| `private_deposit` | Normaler Aufwand + Gegenkonto 9610 | Normaler Aufwand + **Verbindlichkeit ggü. Gesellschafter** |
+
+### DB-Schema Änderungen
+
+- [x] **DeductibilityRule**: +`ruleType` (String, default "standard"), +`createsReceivable` (Boolean, default false)
+- [x] **ShareholderTransaction**: Neues Model (tenantId, userId, invoiceId?, transactionType RECEIVABLE/PAYABLE, amount Decimal(12,2), status OPEN/PAID, paidAt)
+- [x] **2 neue Enums**: ShareholderTransactionType, ShareholderTransactionStatus
+- [x] **Relationen**: Tenant, User, Invoice → ShareholderTransaction
+
+### 3 neue Standard-Regeln (+ 10 bestehende = 13 gesamt)
+
+| # | Name | VSt | BA | ruleType | createsReceivable |
+|---|------|-----|-----|----------|-------------------|
+| 11 | Privatentnahme (E/A) | 0% | 0% | private_withdrawal | false |
+| 12 | Forderung Gesellschafter (GmbH) | 0% | 0% | private_withdrawal | true |
+| 13 | Privateinlage | 100% | 100% | private_deposit | false |
+
+Bestehende Regel "Nicht betrieblich (privat)" → `ruleType: 'private_withdrawal'`
+
+### ShareholderTransaction Service (neu)
+
+- [x] `createTransaction()` — Erstellt Forderung/Verbindlichkeit (mit Audit-Log)
+- [x] `listTransactions(tenantId, opts?)` — Paginiert mit Status/Type-Filter
+- [x] `getOpenBalance(tenantId)` — Aggregiert: totalReceivable, totalPayable, netBalance, openCount
+- [x] `markAsPaid(tenantId, id, userId)` — Status → PAID (mit Audit-Log)
+- [x] `getTransactionsByInvoice(tenantId, invoiceId)` — Für Invoice-Detail
+
+### API-Endpoints (neu)
+
+- [x] `GET /api/v1/shareholder-transactions` — Liste mit Status/Type-Filter
+- [x] `GET /api/v1/shareholder-transactions/balance` — Offener Saldo
+- [x] `PATCH /api/v1/shareholder-transactions/:id/pay` — Als bezahlt markieren (ADMIN only)
+
+### Approval-Flow Erweiterung (Kernstück)
+
+- [x] `approveInvoice()`: Nach Genehmigung prüft `rule.ruleType` + `tenant.accountingType`:
+  - `private_withdrawal` + ACCRUAL + createsReceivable → RECEIVABLE ShareholderTransaction
+  - `private_deposit` + ACCRUAL → PAYABLE ShareholderTransaction
+  - E/A: Keine Seiteneffekte (Export handled by ruleType)
+
+### BMD-Export Anpassung (BMD-KRITISCH)
+
+- [x] **Privatentnahme**: Konto 9600, Gegenkonto Bank/Kassa, 0 VSt, 0 BA, kein Steuercode
+- [x] **Privateinlage**: Normales Aufwandskonto, Gegenkonto 9610, normale VSt/BA
+- [x] **Standard**: Unverändert
+- [x] **Neue Spalte**: "Buchungsart" (Standard/Privatentnahme/Privateinlage)
+
+### Archival-Stempel
+
+- [x] PDF-Stempel-Prefix bei ruleType:
+  - `private_withdrawal` → "⚠ Privatentnahme — {Regelname}"
+  - `private_deposit` → "↗ Privateinlage — {Regelname}"
+
+### Client: Genehmigungs-Dialog Info-Boxen
+
+- [x] **ApproveDialog + BatchApproveDialog**: ruleType-basierte Hinweise:
+  - `private_withdrawal` + E/A: "Privatentnahme → Konto 9600, kein VSt/BA"
+  - `private_withdrawal` + GmbH: "Erzeugt Forderung an Gesellschafter — verdeckte Gewinnausschüttung beachten!"
+  - `private_deposit` + E/A: "Privateinlage → Gegenkonto 9610"
+  - `private_deposit` + GmbH: "Erzeugt Verbindlichkeit gegenüber Gesellschafter"
+
+### Client: Verrechnungskonto-Seite (GmbH only)
+
+- [x] Route `/shareholder-account` (nur sichtbar bei `accountingType === 'ACCRUAL'`)
+- [x] 3 Saldo-Karten: Forderungen (rot), Verbindlichkeiten (blau), Netto-Saldo
+- [x] Filtertabs: Alle/Offen/Bezahlt
+- [x] Transaktions-Tabelle mit "Als bezahlt markieren" Button
+- [x] Navigation: "Verrechnungskonto" mit Scale-Icon in Sidebar (ACCRUAL only)
+
+### Client: Dashboard-Widget (GmbH only)
+
+- [x] "Gesellschafter-Verrechnungskonto" Widget (nur bei ACCRUAL)
+- [x] 3 Werte: Forderungen, Verbindlichkeiten, Netto-Saldo
+- [x] Farbcodiert: Rot (Forderungen > 0), Grün (0)
+- [x] Link zur Verrechnungskonto-Seite
+
+### Client: Settings Erweiterung
+
+- [x] Regeltabelle zeigt ruleType-Badges (Privatentnahme/Privateinlage) unter System/Custom Badge
+
+### Neue Dateien (Phase 17)
+
+| Datei | Zweck |
+|-------|-------|
+| `server/src/services/shareholderTransaction.service.ts` | ShareholderTransaction CRUD + Balance |
+| `server/src/routes/shareholderTransaction.routes.ts` | REST-Endpoints |
+| `client/src/api/shareholderTransactions.ts` | API-Client |
+| `client/src/pages/ShareholderAccountPage.tsx` | Verrechnungskonto-Seite (GmbH) |
+| `prisma/migrations/20260227200000_add_v2_deductibility_rules/` | ruleType + createsReceivable + ShareholderTransaction |
+
+### Geänderte Dateien (Phase 17)
+
+| Datei | Änderung |
+|-------|----------|
+| `prisma/schema.prisma` | +ruleType, +createsReceivable auf DeductibilityRule, +ShareholderTransaction Model + 2 Enums |
+| `shared/src/types.ts` | +RuleTypeValue, +ShareholderTransactionItem, +ShareholderBalanceSummary, DeductibilityRuleItem erweitert |
+| `shared/src/constants.ts` | +RULE_TYPES, +RULE_TYPE_LABELS, +3 neue Regeln, +Konto 3500, bestehende Regeln erweitert |
+| `shared/src/validation.ts` | Rule-Schemas +ruleType/createsReceivable, +markShareholderTransactionPaidSchema |
+| `server/src/services/deductibilityRule.service.ts` | Seed/Create/Update/Format für neue Felder |
+| `server/src/services/invoice.service.ts` | approveInvoice: ruleType-Logik → ShareholderTransaction erstellen |
+| `server/src/services/export.service.ts` | **BMD-KRITISCH**: 3 Code-Pfade nach ruleType, +Buchungsart Spalte |
+| `server/src/services/archival.service.ts` | Stempel mit ruleType-Prefix |
+| `server/src/app.ts` | shareholderTransaction Routes registriert |
+| `client/src/api/deductibilityRules.ts` | +ruleType, +createsReceivable in Create/Update |
+| `client/src/pages/InvoicesPage.tsx` | ApproveDialog + BatchApproveDialog: ruleType Info-Boxen |
+| `client/src/pages/DashboardPage.tsx` | +Gesellschafter-Verrechnungskonto Widget (ACCRUAL) |
+| `client/src/pages/SettingsPage.tsx` | +ruleType Badges in Regeltabelle |
+| `client/src/components/layout/AppLayout.tsx` | +Verrechnungskonto Nav-Item (ACCRUAL only) |
+| `client/src/App.tsx` | +/shareholder-account Route |
+
+### Verifikation (Phase 17)
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+- ✅ Prisma-Migration erstellt und angewandt
+- ✅ Prisma-Client regeneriert

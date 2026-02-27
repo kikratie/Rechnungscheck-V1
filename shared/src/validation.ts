@@ -196,7 +196,7 @@ export const invoiceFilterSchema = paginationSchema.extend({
   search: z.string().optional(),
   direction: z.enum(['INCOMING', 'OUTGOING']).optional(),
   processingStatus: z
-    .enum(['INBOX', 'UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'PENDING_CORRECTION', 'REJECTED', 'PARKED', 'ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED', 'ERROR', 'REPLACED'])
+    .enum(['INBOX', 'UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'PENDING_CORRECTION', 'REJECTED', 'PARKED', 'APPROVED', 'ARCHIVED', 'RECONCILED', 'RECONCILED_WITH_DIFFERENCE', 'EXPORTED', 'ERROR', 'REPLACED'])
     .optional(),
   validationStatus: z.enum(['PENDING', 'VALID', 'WARNING', 'INVALID']).optional(),
   vendorName: z.string().optional(),
@@ -326,13 +326,30 @@ export const createEigenbelegSchema = z.object({
 
 export const approveInvoiceSchema = z.object({
   comment: z.string().max(2000).optional().nullable(),
+  ruleId: z.string().uuid().optional().nullable(),
+  note: z.string().max(2000).optional().nullable(),
 });
 
 // ============================================================
-// Batch Approve (now triggers archival)
+// Batch Approve (sets rule + note, status → APPROVED)
 // ============================================================
 
 export const batchApproveSchema = z.object({
+  invoiceIds: z.array(z.string().uuid()).min(1).max(100),
+  comment: z.string().max(2000).optional().nullable(),
+  ruleId: z.string().uuid().optional().nullable(),
+  note: z.string().max(2000).optional().nullable(),
+});
+
+// ============================================================
+// Archive (separate from approve — assigns number, stamps, locks)
+// ============================================================
+
+export const archiveInvoiceSchema = z.object({
+  comment: z.string().max(2000).optional().nullable(),
+});
+
+export const batchArchiveSchema = z.object({
   invoiceIds: z.array(z.string().uuid()).min(1).max(100),
   comment: z.string().max(2000).optional().nullable(),
 });
@@ -573,4 +590,32 @@ export const adminCreateTenantSchema = z.object({
 export const adminUpdateTenantSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   isActive: z.boolean().optional(),
+});
+
+// ============================================================
+// Deductibility Rules (Genehmigungs-Regeln)
+// ============================================================
+
+export const createDeductibilityRuleSchema = z.object({
+  name: z.string().min(2, 'Name muss mindestens 2 Zeichen lang sein').max(100),
+  description: z.string().max(500).optional().nullable(),
+  inputTaxPercent: z.number().min(0).max(100),
+  expensePercent: z.number().min(0).max(100),
+  ruleType: z.enum(['standard', 'private_withdrawal', 'private_deposit']).optional().default('standard'),
+  createsReceivable: z.boolean().optional().default(false),
+});
+
+export const updateDeductibilityRuleSchema = z.object({
+  name: z.string().min(2).max(100).optional(),
+  description: z.string().max(500).optional().nullable(),
+  inputTaxPercent: z.number().min(0).max(100).optional(),
+  expensePercent: z.number().min(0).max(100).optional(),
+  ruleType: z.enum(['standard', 'private_withdrawal', 'private_deposit']).optional(),
+  createsReceivable: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
+// Shareholder Transaction Schemas
+export const markShareholderTransactionPaidSchema = z.object({
+  paidAt: z.string().datetime().optional(),
 });

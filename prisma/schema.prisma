@@ -42,8 +42,10 @@ model Tenant {
   cancelledNumbers   CancelledNumber[]
   userCompanyAccess  UserCompanyAccess[]
   accounts           Account[]
-  transactionBookings TransactionBooking[]
-  emailConnectors    EmailConnector[]
+  deductibilityRules      DeductibilityRule[]
+  transactionBookings     TransactionBooking[]
+  emailConnectors         EmailConnector[]
+  shareholderTransactions ShareholderTransaction[]
 
   @@map("tenants")
 }
@@ -74,6 +76,7 @@ model User {
   uploadedInvoices   Invoice[]       @relation("UploadedBy")
   extractedDataEdits ExtractedData[] @relation("EditedBy")
   companyAccess      UserCompanyAccess[]
+  shareholderTransactions ShareholderTransaction[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -214,6 +217,8 @@ model Invoice {
   archivedFileName    String?   // Neuer Dateiname: ER-2026-00001_Vendor_Date.pdf
   stampFailed         Boolean   @default(false) // true wenn PDF-Stempel fehlgeschlagen
   approvalComment     String?   // Optional: Begründung bei Genehmigung trotz Warnung/Ungültig
+  approvalRuleId      String?   // FK zur gewählten Abzugsregel
+  approvalNote        String?   // Freitext-Anmerkung (ergänzt Regel)
 
   // Zahlungsmethode (Bank oder Bar)
   paymentMethod         PaymentMethod @default(BANK)
@@ -265,12 +270,14 @@ model Invoice {
   uploadedBy        User?              @relation("UploadedBy", fields: [uploadedByUserId], references: [id])
   vendor            Vendor?            @relation(fields: [vendorId], references: [id])
   customer          Customer?          @relation(fields: [customerId], references: [id])
+  approvalRule      DeductibilityRule? @relation(fields: [approvalRuleId], references: [id])
   lineItems            InvoiceLineItem[]
   matchings            Matching[]
   documentVersions     DocumentVersion[]
   extractedData        ExtractedData[]
   validationResults    ValidationResult[]
   substituteDocuments  SubstituteDocument[]
+  shareholderTransactions ShareholderTransaction[]
 
   @@unique([tenantId, belegNr])
   @@unique([tenantId, archivalNumber])
@@ -460,6 +467,7 @@ enum ProcessingStatus {
   PENDING_CORRECTION
   REJECTED
   PARKED
+  APPROVED              // Genehmigt, aber noch nicht archiviert (editierbar)
   ARCHIVED
   RECONCILED
   RECONCILED_WITH_DIFFERENCE
@@ -903,6 +911,44 @@ enum AccountingType {
 }
 
 // ============================================================
+// SHAREHOLDER TRANSACTIONS (Gesellschafter-Verrechnungskonto)
+// ============================================================
+
+model ShareholderTransaction {
+  id              String   @id @default(uuid())
+  tenantId        String
+  userId          String                          // Welcher Gesellschafter/User
+  invoiceId       String?                         // Verknüpfte Rechnung (optional)
+  transactionType ShareholderTransactionType       // RECEIVABLE | PAYABLE
+  amount          Decimal  @db.Decimal(12, 2)
+  description     String?
+  status          ShareholderTransactionStatus @default(OPEN)
+  dueDate         DateTime?
+  paidAt          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  invoice Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([invoiceId])
+  @@map("shareholder_transactions")
+}
+
+enum ShareholderTransactionType {
+  RECEIVABLE  // Forderung AN Gesellschafter (er schuldet der Firma)
+  PAYABLE     // Verbindlichkeit GEGENÜBER Gesellschafter (Firma schuldet ihm)
+}
+
+enum ShareholderTransactionStatus {
+  OPEN
+  PAID
+}
+
+// ============================================================
 // EMAIL CONNECTORS
 // ============================================================
 
@@ -939,6 +985,33 @@ model EmailConnector {
   @@index([tenantId])
   @@index([isActive])
   @@map("email_connectors")
+}
+
+// ============================================================
+// DEDUCTIBILITY RULES (Genehmigungs-Regeln)
+// ============================================================
+
+model DeductibilityRule {
+  id                String   @id @default(uuid())
+  tenantId          String
+  name              String                      // z.B. "Bewirtung (Werbezweck)"
+  description       String?                     // Erklärung, was die Regel bewirkt
+  inputTaxPercent   Decimal  @db.Decimal(5, 2)  // Vorsteuer-Abzug (0-100)
+  expensePercent    Decimal  @db.Decimal(5, 2)  // Betriebsausgaben-Abzug (0-100)
+  ruleType          String   @default("standard") // 'standard', 'private_withdrawal', 'private_deposit'
+  createsReceivable Boolean  @default(false)    // TRUE → Forderung an Gesellschafter (GmbH)
+  isSystem          Boolean  @default(false)    // System-Regel = nicht editierbar
+  isActive          Boolean  @default(true)
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  invoices Invoice[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive])
+  @@map("deductibility_rules")
 }
 
 // ============================================================

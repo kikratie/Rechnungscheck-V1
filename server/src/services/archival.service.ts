@@ -33,6 +33,8 @@ interface StampData {
   archivedAt: Date;       // Approval timestamp
   approvedBy: string;     // "Max Mustermann"
   validationNotes: string[]; // RED/YELLOW checks als sachliche Notizen
+  approvalRuleName?: string | null;  // Name der gewählten Abzugsregel
+  approvalNote?: string | null;      // Freitext-Anmerkung
 }
 
 interface ArchiveResult {
@@ -56,6 +58,10 @@ interface InvoiceForArchival {
   archivalNumber: string | null;
   validationStatus: string;
   createdAt: Date; // Upload date (Eingangsdatum)
+  // Approval data (set during approve step)
+  approvalComment: string | null;
+  approvalRuleId: string | null;
+  approvalNote: string | null;
 }
 
 // ============================================================
@@ -210,12 +216,16 @@ export async function stampPdf(pdfBuffer: Buffer, stamp: StampData): Promise<Buf
   // Prepare notes (max 5 lines to keep stamp compact)
   const notes = stamp.validationNotes.slice(0, 5);
   const hasNotes = notes.length > 0;
+  const hasRule = !!stamp.approvalRuleName;
+  const hasApprovalNote = !!stamp.approvalNote;
 
-  // Dynamic box height based on note count
+  // Dynamic box height based on note count + approval rule info
   const baseHeight = 62; // archivalNumber + Eingang + Geprüft + Freigabe
+  const ruleHeight = hasRule ? 12 : 0;
+  const approvalNoteHeight = hasApprovalNote ? 12 : 0;
   const notesHeaderHeight = hasNotes ? 14 : 0;
   const notesHeight = notes.length * 11;
-  const boxHeight = baseHeight + notesHeaderHeight + notesHeight + 8;
+  const boxHeight = baseHeight + ruleHeight + approvalNoteHeight + notesHeaderHeight + notesHeight + 8;
   const boxWidth = 240;
   const margin = 8;
   const x = width - boxWidth - margin;
@@ -284,6 +294,30 @@ export async function stampPdf(pdfBuffer: Buffer, stamp: StampData): Promise<Buf
     color: lightColor,
   });
   lineY -= 6;
+
+  // Approval rule name (if set)
+  if (hasRule) {
+    lineY -= 6;
+    firstPage.drawText(`Regel: ${stamp.approvalRuleName!.substring(0, 45)}`, {
+      x: x + 8,
+      y: lineY,
+      size: 7.5,
+      font: helvetica,
+      color: textColor,
+    });
+  }
+
+  // Approval note (if set)
+  if (hasApprovalNote) {
+    lineY -= 6;
+    firstPage.drawText(`Anm.: ${stamp.approvalNote!.substring(0, 45)}`, {
+      x: x + 8,
+      y: lineY,
+      size: 7,
+      font: helvetica,
+      color: lightColor,
+    });
+  }
 
   // Notes section (sachliche Auflistung der Prüfungsergebnisse)
   if (hasNotes) {
@@ -384,11 +418,15 @@ async function archiveInvoiceInTransaction(
   userId: string | undefined,
   userName: string,
   comment?: string | null,
+  ruleId?: string | null,
+  approvalNote?: string | null,
+  approvalRuleName?: string | null,
 ): Promise<ArchiveResult> {
-  // Guard: only PROCESSED or REVIEW_REQUIRED invoices can be archived
-  if (invoice.processingStatus !== 'PROCESSED' && invoice.processingStatus !== 'REVIEW_REQUIRED') {
+  // Guard: only APPROVED invoices can be archived (or PROCESSED/REVIEW_REQUIRED for backward compat)
+  const archivableStatuses = ['APPROVED', 'PROCESSED', 'REVIEW_REQUIRED'];
+  if (!archivableStatuses.includes(invoice.processingStatus)) {
     throw new ConflictError(
-      `Rechnung kann nicht archiviert werden (Status: ${invoice.processingStatus}). Nur geprüfte Rechnungen sind archivierbar.`,
+      `Rechnung kann nicht archiviert werden (Status: ${invoice.processingStatus}). Nur genehmigte Rechnungen sind archivierbar.`,
     );
   }
 
@@ -436,6 +474,8 @@ async function archiveInvoiceInTransaction(
       archivedAt,
       approvedBy: userName,
       validationNotes,
+      approvalRuleName,
+      approvalNote,
     });
   } catch (err) {
     console.warn(`[Archival] PDF-Stempel fehlgeschlagen für ${invoice.id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -459,6 +499,8 @@ async function archiveInvoiceInTransaction(
       archivedFileName,
       stampFailed,
       approvalComment: comment || null,
+      approvalRuleId: ruleId || null,
+      approvalNote: approvalNote || null,
       inboxCleared: true,
       inboxClearedAt: archivedAt,
       isLocked: true,
@@ -499,11 +541,15 @@ const ARCHIVAL_SELECT = {
   invoiceDate: true, storagePath: true, mimeType: true,
   processingStatus: true, isLocked: true, archivalNumber: true,
   validationStatus: true, createdAt: true,
+  approvalComment: true, approvalRuleId: true, approvalNote: true,
 } as const;
 
 /**
  * Archives a single invoice. Full workflow:
  * sequential number → download → stamp PDF → upload to archive → update DB → audit log
+ *
+ * Approval data (rule, note, comment) is read from the invoice itself
+ * (set during the separate approve step).
  */
 export async function archiveInvoice(
   tenantId: string,
@@ -525,9 +571,31 @@ export async function archiveInvoice(
   if (!invoice) throw new NotFoundError('Rechnung', invoiceId);
   const userName = user ? `${user.firstName} ${user.lastName}` : 'System';
 
+  // Load rule name + type from already-saved approvalRuleId (set during approve step)
+  const ruleId = invoice.approvalRuleId;
+  const approvalNote = invoice.approvalNote;
+  let ruleName: string | null = null;
+  let ruleType: string | null = null;
+  if (ruleId) {
+    const rule = await prisma.deductibilityRule.findUnique({
+      where: { id: ruleId },
+      select: { name: true, ruleType: true },
+    });
+    ruleName = rule?.name || null;
+    ruleType = rule?.ruleType || null;
+  }
+
+  // Prefix rule name with Privatentnahme/Privateinlage marker for PDF stamp
+  const stampRuleName = ruleType === 'private_withdrawal'
+    ? `⚠ Privatentnahme — ${ruleName}`
+    : ruleType === 'private_deposit'
+    ? `↗ Privateinlage — ${ruleName}`
+    : ruleName;
+
   // Interactive transaction with 30s timeout (file operations may be slow)
+  const archivalComment = comment || invoice.approvalComment;
   const result = await prisma.$transaction(
-    async (tx) => archiveInvoiceInTransaction(tx, invoice, userId, userName, comment),
+    async (tx) => archiveInvoiceInTransaction(tx, invoice, userId, userName, archivalComment, ruleId, approvalNote, stampRuleName),
     { timeout: 30_000 },
   );
 
@@ -537,12 +605,14 @@ export async function archiveInvoice(
     userId,
     entityType: 'Invoice',
     entityId: invoiceId,
-    action: 'APPROVE_AND_ARCHIVE',
+    action: 'ARCHIVE',
     newData: {
       archivalNumber: result.archivalNumber,
       archivedStoragePath: result.archivedStoragePath,
       archivedFileName: result.archivedFileName,
-      approvalComment: comment || undefined,
+      approvalRuleId: ruleId || undefined,
+      approvalRuleName: ruleName || undefined,
+      approvalNote: approvalNote || undefined,
     },
   });
 
@@ -552,6 +622,7 @@ export async function archiveInvoice(
 /**
  * Archives multiple invoices in a single transaction.
  * Each gets the next sequential number (guaranteed sequential, no gaps within batch).
+ * Approval data (rule, note) is read from each invoice individually.
  */
 export async function batchArchiveInvoices(
   tenantId: string,
@@ -573,12 +644,13 @@ export async function batchArchiveInvoices(
   const userName = user ? `${user.firstName} ${user.lastName}` : 'System';
   const foundMap = new Map(invoices.map((i) => [i.id, i]));
   const skipped: string[] = [];
-  const toArchive: InvoiceForArchival[] = [];
+  const archivableStatuses = ['APPROVED', 'PROCESSED', 'REVIEW_REQUIRED'];
+  const toArchive: (InvoiceForArchival & { belegNr: number })[] = [];
 
   for (const id of invoiceIds) {
     const inv = foundMap.get(id);
     if (!inv) { skipped.push(id); continue; }
-    if (inv.processingStatus !== 'PROCESSED' && inv.processingStatus !== 'REVIEW_REQUIRED') {
+    if (!archivableStatuses.includes(inv.processingStatus)) {
       skipped.push(`BEL-${String(inv.belegNr).padStart(3, '0')} (${inv.processingStatus})`);
       continue;
     }
@@ -589,6 +661,17 @@ export async function batchArchiveInvoices(
     toArchive.push(inv);
   }
 
+  // Pre-load rule names + types for all invoices that have approvalRuleId
+  const ruleIds = [...new Set(toArchive.map(i => i.approvalRuleId).filter(Boolean))] as string[];
+  const ruleMap = new Map<string, { name: string; ruleType: string }>();
+  if (ruleIds.length > 0) {
+    const rules = await prisma.deductibilityRule.findMany({
+      where: { id: { in: ruleIds } },
+      select: { id: true, name: true, ruleType: true },
+    });
+    for (const r of rules) ruleMap.set(r.id, { name: r.name, ruleType: r.ruleType });
+  }
+
   const results: Array<{ invoiceId: string; archivalNumber: string }> = [];
 
   if (toArchive.length > 0) {
@@ -596,7 +679,18 @@ export async function batchArchiveInvoices(
     await prisma.$transaction(
       async (tx) => {
         for (const inv of toArchive) {
-          const res = await archiveInvoiceInTransaction(tx, inv, userId, userName, comment);
+          const ruleData = inv.approvalRuleId ? ruleMap.get(inv.approvalRuleId) : null;
+          let stampRuleName: string | null = ruleData?.name || null;
+          if (ruleData?.ruleType === 'private_withdrawal') {
+            stampRuleName = `⚠ Privatentnahme — ${ruleData.name}`;
+          } else if (ruleData?.ruleType === 'private_deposit') {
+            stampRuleName = `↗ Privateinlage — ${ruleData.name}`;
+          }
+          const archivalComment = comment || inv.approvalComment;
+          const res = await archiveInvoiceInTransaction(
+            tx, inv, userId, userName, archivalComment,
+            inv.approvalRuleId, inv.approvalNote, stampRuleName,
+          );
           results.push({ invoiceId: inv.id, archivalNumber: res.archivalNumber });
         }
       },
@@ -610,7 +704,7 @@ export async function batchArchiveInvoices(
         userId,
         entityType: 'Invoice',
         entityId: res.invoiceId,
-        action: 'APPROVE_AND_ARCHIVE',
+        action: 'ARCHIVE',
         newData: { archivalNumber: res.archivalNumber },
         metadata: { trigger: 'BATCH', batchSize: toArchive.length },
       });

@@ -23,6 +23,7 @@ import { UvaReportPage } from './pages/UvaReportPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { SuperAdminPage } from './pages/SuperAdminPage';
+import { ShareholderAccountPage } from './pages/ShareholderAccountPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useAuthStore();
@@ -111,6 +112,7 @@ export default function App() {
         <Route path="accounts" element={<AccountsPage />} />
         <Route path="matching" element={<MatchingPage />} />
         <Route path="export" element={<ExportPage />} />
+        <Route path="shareholder-account" element={<ShareholderAccountPage />} />
         <Route path="tax/uva" element={<UvaReportPage />} />
         <Route path="audit-log" element={<AuditLogPage />} />
         <Route path="settings" element={<SettingsPage />} />

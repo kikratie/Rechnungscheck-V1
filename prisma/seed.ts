@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
-import { DEFAULT_ACCOUNTS } from '../shared/dist/index.js';
+import { DEFAULT_ACCOUNTS, DEFAULT_DEDUCTIBILITY_RULES } from '../shared/dist/index.js';
 
 const prisma = new PrismaClient();
 
@@ -80,6 +80,21 @@ async function main() {
     skipDuplicates: true,
   });
   console.log(`${accountResult.count} Standard-Konten erstellt`);
+
+  // Standard-Genehmigungs-Regeln seeden
+  const ruleResult = await prisma.deductibilityRule.createMany({
+    data: DEFAULT_DEDUCTIBILITY_RULES.map((rule) => ({
+      tenantId: tenant.id,
+      name: rule.name,
+      description: rule.description,
+      inputTaxPercent: rule.inputTaxPercent,
+      expensePercent: rule.expensePercent,
+      isSystem: true,
+      sortOrder: rule.sortOrder,
+    })),
+    skipDuplicates: true,
+  });
+  console.log(`${ruleResult.count} Standard-Regeln erstellt`);
 
   // Admin User
   const adminPassword = await bcrypt.hash('Admin123!', 12);

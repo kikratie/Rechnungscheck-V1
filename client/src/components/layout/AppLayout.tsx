@@ -25,6 +25,7 @@ import {
   BookOpen,
   Receipt,
   Shield,
+  Scale,
 } from 'lucide-react';
 
 interface NavItem {
@@ -74,6 +75,9 @@ export function AppLayout() {
       label: 'Berichte & Export',
       items: [
         { to: '/export', label: 'Export', icon: Download, featureKey: 'export' },
+        ...(accountingType === 'ACCRUAL'
+          ? [{ to: '/shareholder-account', label: 'Verrechnungskonto', icon: Scale }]
+          : []),
         ...(accountingType === 'EA'
           ? [{ to: '/tax/uva', label: 'UVA-Bericht', icon: Receipt, featureKey: 'uvaReport' }]
           : []),

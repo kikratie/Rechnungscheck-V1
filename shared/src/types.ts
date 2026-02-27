@@ -131,6 +131,7 @@ export type ProcessingStatusType =
   | 'PENDING_CORRECTION'
   | 'REJECTED'
   | 'PARKED'
+  | 'APPROVED'
   | 'ARCHIVED'
   | 'RECONCILED'
   | 'RECONCILED_WITH_DIFFERENCE'
@@ -338,6 +339,9 @@ export interface InvoiceDetailExtended extends InvoiceDetail {
   archivedFileName: string | null;
   stampFailed: boolean;
   approvalComment: string | null;
+  approvalRuleId: string | null;
+  approvalNote: string | null;
+  approvalRule: DeductibilityRuleItem | null;
   // Correction request fields
   correctionRequestedAt: string | null;
   correctionNote: string | null;
@@ -726,6 +730,52 @@ export interface RecurringCostItem {
 export interface RecurringCostsSummary {
   monthlyTotal: string;
   items: RecurringCostItem[];
+}
+
+// ============================================================
+// Deductibility Rule Types
+// ============================================================
+
+export type RuleTypeValue = 'standard' | 'private_withdrawal' | 'private_deposit';
+export type ShareholderTransactionTypeValue = 'RECEIVABLE' | 'PAYABLE';
+export type ShareholderTransactionStatusValue = 'OPEN' | 'PAID';
+
+export interface DeductibilityRuleItem {
+  id: string;
+  tenantId: string;
+  name: string;
+  description: string | null;
+  inputTaxPercent: string;  // Decimal as string
+  expensePercent: string;   // Decimal as string
+  ruleType: RuleTypeValue;
+  createsReceivable: boolean;
+  isSystem: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface ShareholderTransactionItem {
+  id: string;
+  tenantId: string;
+  userId: string;
+  userName: string;
+  invoiceId: string | null;
+  invoiceBelegNr: number | null;
+  transactionType: ShareholderTransactionTypeValue;
+  amount: string;  // Decimal as string
+  description: string | null;
+  status: ShareholderTransactionStatusValue;
+  dueDate: string | null;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+export interface ShareholderBalanceSummary {
+  totalReceivable: string;
+  totalPayable: string;
+  netBalance: string;  // receivable - payable
+  openCount: number;
 }
 
 // ============================================================

@@ -18,6 +18,8 @@ import mailRoutes from './routes/mail.routes.js';
 import accountRoutes from './routes/account.routes.js';
 import emailConnectorRoutes from './routes/emailConnector.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import deductibilityRuleRoutes from './routes/deductibilityRule.routes.js';
+import shareholderTransactionRoutes from './routes/shareholderTransaction.routes.js';
 import { prisma } from './config/database.js';
 import { invoiceQueue } from './jobs/queue.js';
 import type { ApiResponse } from '@buchungsai/shared';
@@ -115,6 +117,8 @@ app.use('/api/v1/mail', mailRoutes);
 app.use('/api/v1/accounts', accountRoutes);
 app.use('/api/v1/email-connectors', emailConnectorRoutes);
 app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/deductibility-rules', deductibilityRuleRoutes);
+app.use('/api/v1/shareholder-transactions', shareholderTransactionRoutes);
 
 // 404 Handler
 app.use((_req, res) => {

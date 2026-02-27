@@ -19,9 +19,10 @@ import {
 import { changePasswordApi } from '../api/auth';
 import { downloadBlob } from '../api/exports';
 import { getMailStatusApi } from '../api/mail';
-import type { TenantProfile, BankAccountItem, BankAccountType, UserRoleType, FeatureVisibility } from '@buchungsai/shared';
-import { FEATURE_MODULES, DEFAULT_FEATURE_VISIBILITY } from '@buchungsai/shared';
-import { Mail, CheckCircle, AlertTriangle, Shield, Trash2, Download, UserPlus, X, Loader2, RefreshCw, Play, Pause, Plug, Plus, Users, KeyRound, ToggleLeft, ToggleRight } from 'lucide-react';
+import { listRulesApi, createRuleApi, updateRuleApi, deactivateRuleApi, seedRulesApi } from '../api/deductibilityRules';
+import type { TenantProfile, BankAccountItem, BankAccountType, UserRoleType, FeatureVisibility, RuleTypeValue } from '@buchungsai/shared';
+import { FEATURE_MODULES, DEFAULT_FEATURE_VISIBILITY, RULE_TYPE_LABELS } from '@buchungsai/shared';
+import { Mail, CheckCircle, AlertTriangle, Shield, Trash2, Download, UserPlus, X, Loader2, RefreshCw, Play, Pause, Plug, Plus, Users, KeyRound, ToggleLeft, ToggleRight, Scale, Edit3 } from 'lucide-react';
 import {
   listEmailConnectorsApi,
   createEmailConnectorApi,
@@ -602,6 +603,20 @@ export function SettingsPage() {
           </div>
         )}
 
+        {/* Genehmigungs-Regeln (only Admin) */}
+        {user?.role === 'ADMIN' && (
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Scale size={20} className="text-primary-600" />
+              Genehmigungs-Regeln
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Regeln für die steuerliche Abzugsfähigkeit. System-Regeln sind vordefiniert und nicht editierbar. Sie können eigene Regeln hinzufügen.
+            </p>
+            <DeductibilityRulesSection />
+          </div>
+        )}
+
         {/* DSGVO / Datenschutz */}
         <div className="card p-6">
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -640,6 +655,249 @@ const emptyConnectorForm: ConnectorFormData = {
   folder: 'INBOX',
   pollIntervalMinutes: 5,
 };
+
+// ============================================================
+// Deductibility Rules Section
+// ============================================================
+
+function DeductibilityRulesSection() {
+  const queryClient = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: '', description: '', inputTaxPercent: 100, expensePercent: 100 });
+
+  const { data: rules = [], isLoading } = useQuery({
+    queryKey: ['deductibility-rules-all'],
+    queryFn: () => listRulesApi({ activeOnly: false }),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: () => createRuleApi(form),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deductibility-rules-all'] });
+      queryClient.invalidateQueries({ queryKey: ['deductibility-rules'] });
+      setShowForm(false);
+      setForm({ name: '', description: '', inputTaxPercent: 100, expensePercent: 100 });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: () => updateRuleApi(editingId!, form),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deductibility-rules-all'] });
+      queryClient.invalidateQueries({ queryKey: ['deductibility-rules'] });
+      setEditingId(null);
+      setShowForm(false);
+      setForm({ name: '', description: '', inputTaxPercent: 100, expensePercent: 100 });
+    },
+  });
+
+  const deactivateMutation = useMutation({
+    mutationFn: (id: string) => deactivateRuleApi(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deductibility-rules-all'] });
+      queryClient.invalidateQueries({ queryKey: ['deductibility-rules'] });
+    },
+  });
+
+  const seedMutation = useMutation({
+    mutationFn: () => seedRulesApi(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deductibility-rules-all'] });
+      queryClient.invalidateQueries({ queryKey: ['deductibility-rules'] });
+    },
+  });
+
+  const startEdit = (rule: typeof rules[0]) => {
+    setEditingId(rule.id);
+    setForm({
+      name: rule.name,
+      description: rule.description || '',
+      inputTaxPercent: Number(rule.inputTaxPercent),
+      expensePercent: Number(rule.expensePercent),
+    });
+    setShowForm(true);
+  };
+
+  const handleSave = () => {
+    if (editingId) {
+      updateMutation.mutate();
+    } else {
+      createMutation.mutate();
+    }
+  };
+
+  if (isLoading) return <div className="text-sm text-gray-500">Lade Regeln...</div>;
+
+  return (
+    <div>
+      {/* Rules Table */}
+      <div className="overflow-x-auto mb-4">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-gray-500">
+              <th className="pb-2 font-medium">Name</th>
+              <th className="pb-2 font-medium text-center">VSt %</th>
+              <th className="pb-2 font-medium text-center">BA %</th>
+              <th className="pb-2 font-medium text-center">Typ</th>
+              <th className="pb-2 font-medium text-center">Status</th>
+              <th className="pb-2 font-medium text-right">Aktionen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rules.map((rule) => (
+              <tr key={rule.id} className={`border-b last:border-0 ${!rule.isActive ? 'opacity-40' : ''}`}>
+                <td className="py-2">
+                  <div className="font-medium">{rule.name}</div>
+                  {rule.description && <div className="text-xs text-gray-500">{rule.description}</div>}
+                </td>
+                <td className="py-2 text-center font-mono">{rule.inputTaxPercent}%</td>
+                <td className="py-2 text-center font-mono">{rule.expensePercent}%</td>
+                <td className="py-2 text-center">
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${rule.isSystem ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'}`}>
+                      {rule.isSystem ? 'System' : 'Custom'}
+                    </span>
+                    {rule.ruleType !== 'standard' && (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${rule.ruleType === 'private_withdrawal' ? 'bg-orange-100 text-orange-700' : 'bg-teal-100 text-teal-700'}`}>
+                        {RULE_TYPE_LABELS[rule.ruleType as RuleTypeValue] || rule.ruleType}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="py-2 text-center">
+                  {rule.isActive
+                    ? <span className="text-green-600 text-xs">Aktiv</span>
+                    : <span className="text-gray-400 text-xs">Inaktiv</span>
+                  }
+                </td>
+                <td className="py-2 text-right">
+                  {!rule.isSystem && rule.isActive && (
+                    <div className="flex gap-1 justify-end">
+                      <button
+                        onClick={() => startEdit(rule)}
+                        className="p-1 text-gray-400 hover:text-primary-600"
+                        title="Bearbeiten"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                      <button
+                        onClick={() => deactivateMutation.mutate(rule.id)}
+                        disabled={deactivateMutation.isPending}
+                        className="p-1 text-gray-400 hover:text-red-600"
+                        title="Deaktivieren"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add/Edit Form */}
+      {showForm && (
+        <div className="border rounded-lg p-4 mb-4 bg-gray-50">
+          <h3 className="text-sm font-semibold mb-3">{editingId ? 'Regel bearbeiten' : 'Neue Regel'}</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Name *</label>
+              <input
+                type="text"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="input-field text-sm"
+                placeholder="z.B. Bewirtung Kunden"
+                maxLength={100}
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Beschreibung</label>
+              <input
+                type="text"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                className="input-field text-sm"
+                placeholder="Erklärung zur Regel..."
+                maxLength={500}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Vorsteuer-Abzug %</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={form.inputTaxPercent}
+                onChange={(e) => setForm({ ...form, inputTaxPercent: Number(e.target.value) })}
+                className="input-field text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Betriebsausgabe %</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={form.expensePercent}
+                onChange={(e) => setForm({ ...form, expensePercent: Number(e.target.value) })}
+                className="input-field text-sm"
+              />
+            </div>
+          </div>
+          {(createMutation.isError || updateMutation.isError) && (
+            <p className="text-xs text-red-600 mt-2">Fehler beim Speichern</p>
+          )}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={handleSave}
+              disabled={!form.name.trim() || createMutation.isPending || updateMutation.isPending}
+              className="btn-primary text-sm py-1.5 px-4"
+            >
+              {(createMutation.isPending || updateMutation.isPending) ? <Loader2 size={14} className="animate-spin" /> : null}
+              {editingId ? 'Speichern' : 'Erstellen'}
+            </button>
+            <button
+              onClick={() => { setShowForm(false); setEditingId(null); setForm({ name: '', description: '', inputTaxPercent: 100, expensePercent: 100 }); }}
+              className="btn-secondary text-sm py-1.5 px-4"
+            >
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      <div className="flex gap-2">
+        {!showForm && (
+          <button
+            onClick={() => { setEditingId(null); setForm({ name: '', description: '', inputTaxPercent: 100, expensePercent: 100 }); setShowForm(true); }}
+            className="btn-primary text-sm py-1.5 px-4 flex items-center gap-1.5"
+          >
+            <Plus size={14} />
+            Neue Regel
+          </button>
+        )}
+        <button
+          onClick={() => seedMutation.mutate()}
+          disabled={seedMutation.isPending}
+          className="btn-secondary text-sm py-1.5 px-4 flex items-center gap-1.5"
+        >
+          {seedMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Standard-Regeln neu anlegen
+        </button>
+        {seedMutation.isSuccess && (
+          <span className="text-xs text-green-600 self-center">
+            {seedMutation.data.count} Regeln angelegt
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ============================================================
 // Feature Visibility Section
