@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listInvoicesApi,
@@ -25,9 +25,9 @@ import type { InvoiceFilters } from '../api/invoices';
 import type { ValidationCheck, TrafficLightStatus, RecurringIntervalType } from '@buchungsai/shared';
 import { RECURRING_INTERVALS } from '@buchungsai/shared';
 import {
-  FileText, Upload, Search, X, ChevronLeft, ChevronRight, Loader2,
+  FileText, Upload, Search, ChevronLeft, ChevronRight, Loader2,
   AlertTriangle, CheckCircle, XCircle, Clock, Eye, Download, Edit3,
-  ThumbsUp, ThumbsDown, Scale, FileCheck, Trash2, FilePlus2, ArrowRight, MinusCircle,
+  ThumbsUp, ThumbsDown, Scale, Trash2, FilePlus2, ArrowRight, MinusCircle,
   ArrowUp, ArrowDown, ArrowUpDown, Lock, Archive, Mail, SlidersHorizontal,
   PauseCircle, Play, Banknote, Repeat,
 } from 'lucide-react';
@@ -38,6 +38,9 @@ import { BelegFormDialog } from '../components/BelegFormDialog';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { FullScreenPanel } from '../components/mobile/FullScreenPanel';
 import { BottomSheet } from '../components/mobile/BottomSheet';
+import { InvoiceSplitView } from '../components/InvoiceSplitView';
+import { DocumentViewer } from '../components/DocumentViewer';
+import { ValidatedField } from '../components/ValidatedField';
 
 export function InvoicesPage() {
   const navigate = useNavigate();
@@ -61,7 +64,21 @@ export function InvoicesPage() {
   const [ocrExportLoading, setOcrExportLoading] = useState(false);
   const [showCorrectionDialog, setShowCorrectionDialog] = useState(false);
   const [correctionNote, setCorrectionNote] = useState('');
+  const [viewMode, setViewMode] = useState<'list' | 'split'>('list');
+  const [mobileTab, setMobileTab] = useState<'data' | 'doc'>('data');
   const isMobile = useIsMobile();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Auto-open invoice from URL ?id=...
+  useEffect(() => {
+    const idFromUrl = searchParams.get('id');
+    if (idFromUrl && idFromUrl !== selectedId) {
+      setSelectedId(idFromUrl);
+      setViewMode('split');
+      // Clean up URL param
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, selectedId, setSearchParams]);
 
   const cashPaymentMutation = useMutation({
     mutationFn: ({ id, date }: { id: string; date: string }) => markCashPaymentApi(id, date),
@@ -202,6 +219,159 @@ export function InvoicesPage() {
     }
   }
 
+  // Desktop: switch to split view when selecting an invoice
+  function handleSelectInvoice(id: string) {
+    setSelectedId(id);
+    setEditMode(false);
+    if (!isMobile) {
+      setViewMode('split');
+    }
+  }
+
+  function handleBackToList() {
+    setViewMode('list');
+    setSelectedId(null);
+    setEditMode(false);
+  }
+
+  // Desktop split view mode
+  if (!isMobile && viewMode === 'split' && selectedId) {
+    return (
+      <>
+        {/* Dialogs still need to render */}
+        {showUpload && (
+          <InvoiceUploadDialog
+            onClose={() => {
+              setShowUpload(false);
+              queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            }}
+            onSuccess={() => {
+              queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            }}
+          />
+        )}
+        {showErsatzbelegDialog && detail && (
+          <BelegFormDialog
+            context={{
+              mode: 'ersatzbeleg',
+              originalInvoiceId: selectedId,
+              originalBelegNr: detail.belegNr,
+              originalVendorName: detail.vendorName,
+            }}
+            onClose={() => setShowErsatzbelegDialog(false)}
+            onSuccess={(newInvoiceId) => {
+              setShowErsatzbelegDialog(false);
+              queryClient.invalidateQueries({ queryKey: ['invoices'] });
+              queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+              if (newInvoiceId) {
+                setSelectedId(newInvoiceId);
+              }
+            }}
+          />
+        )}
+        {showRejectDialog && (
+          <RejectDialog
+            invoiceId={selectedId}
+            onClose={() => setShowRejectDialog(false)}
+            onSuccess={() => {
+              setShowRejectDialog(false);
+              queryClient.invalidateQueries({ queryKey: ['invoices'] });
+              queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] });
+            }}
+            reason={rejectReason}
+            setReason={setRejectReason}
+          />
+        )}
+        {showEmailDialog && detail && (() => {
+          const isOutgoing = detail.direction === 'OUTGOING';
+          const recipientEmail = isOutgoing
+            ? (detail as unknown as { customer?: { email?: string } }).customer?.email || ''
+            : (detail as unknown as { vendor?: { email?: string } }).vendor?.email || '';
+          const invNr = detail.invoiceNumber || `BEL-${String(detail.belegNr).padStart(3, '0')}`;
+          const invDate = detail.invoiceDate ? new Date(detail.invoiceDate).toLocaleDateString('de-AT') : '';
+          const amount = detail.grossAmount ? `${parseFloat(detail.grossAmount).toLocaleString('de-AT', { style: 'currency', currency: detail.currency || 'EUR' })}` : '';
+          const dueDate = detail.dueDate ? new Date(detail.dueDate).toLocaleDateString('de-AT') : '';
+          const defaultSubject = isOutgoing
+            ? `Zahlungserinnerung — Rechnung ${invNr}`
+            : `Rückfrage zu Rechnung ${invNr}`;
+          const defaultBody = isOutgoing
+            ? `Sehr geehrte Damen und Herren,\n\nwir erlauben uns, Sie an die offene Rechnung ${invNr} vom ${invDate} über ${amount} hinzuweisen.${dueDate ? `\n\nZahlungsziel war der ${dueDate}. Wir bitten um umgehende Überweisung.` : ''}\n\nMit freundlichen Grüßen`
+            : `Sehr geehrte Damen und Herren,\n\nbezüglich Ihrer Rechnung ${invNr} vom ${invDate} über ${amount} möchten wir folgende Punkte klären:\n\n[Hier Ihre Anmerkungen einfügen]\n\nMit freundlichen Grüßen`;
+          return (
+            <SendEmailDialog
+              onClose={() => { setShowEmailDialog(false); setEmailPrefill(undefined); }}
+              onSuccess={() => { setShowEmailDialog(false); setEmailPrefill(undefined); }}
+              defaultTo={emailPrefill?.to || recipientEmail}
+              defaultSubject={emailPrefill?.subject || defaultSubject}
+              defaultBody={emailPrefill?.body || defaultBody}
+              entityType="Invoice"
+              entityId={selectedId}
+            />
+          );
+        })()}
+
+        <InvoiceSplitView
+          invoiceId={selectedId}
+          mimeType={detail?.mimeType}
+          originalFileName={detail?.originalFileName}
+          onBack={handleBackToList}
+          headerContent={detail && (
+            <>
+              {detail.archivalNumber ? (
+                <span className="font-mono text-sm font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded inline-flex items-center gap-1">
+                  <Lock size={12} />
+                  {detail.archivalNumber}
+                </span>
+              ) : (
+                <span className="font-mono text-sm font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded">
+                  BEL-{String(detail.belegNr).padStart(3, '0')}
+                </span>
+              )}
+              <ValidationBadge status={detail.validationStatus} />
+              <ProcessingBadge status={detail.processingStatus} />
+            </>
+          )}
+        >
+          <InvoiceDetailContent
+            selectedId={selectedId}
+            detail={detail}
+            detailLoading={detailLoading}
+            detailError={detailError}
+            editMode={editMode}
+            editFields={editFields}
+            setEditFields={setEditFields}
+            setEditMode={setEditMode}
+            setSelectedId={(id) => {
+              if (!id) handleBackToList();
+              else setSelectedId(id);
+            }}
+            setShowRejectDialog={setShowRejectDialog}
+            setRejectReason={setRejectReason}
+            setShowErsatzbelegDialog={setShowErsatzbelegDialog}
+            setShowEmailDialog={setShowEmailDialog}
+            setEmailPrefill={setEmailPrefill}
+            startEdit={startEdit}
+            navigate={navigate}
+            queryClient={queryClient}
+            showCashDialog={showCashDialog}
+            setShowCashDialog={setShowCashDialog}
+            cashDate={cashDate}
+            setCashDate={setCashDate}
+            cashPaymentMutation={cashPaymentMutation}
+            undoCashMutation={undoCashMutation}
+            showCorrectionDialog={showCorrectionDialog}
+            setShowCorrectionDialog={setShowCorrectionDialog}
+            correctionNote={correctionNote}
+            setCorrectionNote={setCorrectionNote}
+            correctionMutation={correctionMutation}
+            setRecurringMutation={setRecurringMutation}
+            useSplitView
+          />
+        </InvoiceSplitView>
+      </>
+    );
+  }
+
   return (
     <div className={isMobile ? '' : 'flex gap-6'}>
       {/* Upload dialog */}
@@ -258,7 +428,6 @@ export function InvoicesPage() {
         const recipientEmail = isOutgoing
           ? (detail as unknown as { customer?: { email?: string } }).customer?.email || ''
           : (detail as unknown as { vendor?: { email?: string } }).vendor?.email || '';
-        const tenantName = ''; // Will be in the template placeholder
         const invNr = detail.invoiceNumber || `BEL-${String(detail.belegNr).padStart(3, '0')}`;
         const invDate = detail.invoiceDate ? new Date(detail.invoiceDate).toLocaleDateString('de-AT') : '';
         const amount = detail.grossAmount ? `${parseFloat(detail.grossAmount).toLocaleString('de-AT', { style: 'currency', currency: detail.currency || 'EUR' })}` : '';
@@ -296,7 +465,7 @@ Mit freundlichen Grüßen`;
       })()}
 
       {/* Main list */}
-      <div className={!isMobile && selectedId ? 'flex-1 min-w-0' : 'w-full'}>
+      <div className="w-full">
         <div className="flex items-center justify-between mb-4 lg:mb-6">
           <div>
             <h1 className="text-xl lg:text-2xl font-bold text-gray-900">Rechnungen</h1>
@@ -658,7 +827,7 @@ Mit freundlichen Grüßen`;
                       key={inv.id}
                       className={`hover:bg-gray-50 cursor-pointer transition-colors ${selectedId === inv.id ? 'bg-primary-50' : ''} ${selectedIds.has(inv.id) ? 'bg-green-50' : ''}`}
                       style={{ boxShadow: `inset 4px 0 0 ${shadowColor}` }}
-                      onClick={() => { setSelectedId(inv.id); setEditMode(false); }}
+                      onClick={() => handleSelectInvoice(inv.id)}
                     >
                       <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                         {approvableStatuses.has(inv.processingStatus) ? (
@@ -780,90 +949,83 @@ Mit freundlichen Grüßen`;
         )}
       </div>
 
-      {/* Detail panel — FullScreenPanel on mobile, inline on desktop */}
-      {isMobile ? (
+      {/* Detail panel — FullScreenPanel on mobile (with document/data tabs) */}
+      {isMobile && (
         <FullScreenPanel
           isOpen={!!selectedId}
-          onClose={() => { setSelectedId(null); setEditMode(false); }}
+          onClose={() => { setSelectedId(null); setEditMode(false); setMobileTab('data'); }}
           title="Rechnungsdetails"
         >
           <div className="p-4">
-            {selectedId && <InvoiceDetailContent
-              selectedId={selectedId}
-              detail={detail}
-              detailLoading={detailLoading}
-              detailError={detailError}
-              editMode={editMode}
-              editFields={editFields}
-              setEditFields={setEditFields}
-              setEditMode={setEditMode}
-              setSelectedId={setSelectedId}
-              setShowRejectDialog={setShowRejectDialog}
-              setRejectReason={setRejectReason}
-              setShowErsatzbelegDialog={setShowErsatzbelegDialog}
-              setShowEmailDialog={setShowEmailDialog}
-              setEmailPrefill={setEmailPrefill}
-              startEdit={startEdit}
-              navigate={navigate}
-              queryClient={queryClient}
-              showCashDialog={showCashDialog}
-              setShowCashDialog={setShowCashDialog}
-              cashDate={cashDate}
-              setCashDate={setCashDate}
-              cashPaymentMutation={cashPaymentMutation}
-              undoCashMutation={undoCashMutation}
-              showCorrectionDialog={showCorrectionDialog}
-              setShowCorrectionDialog={setShowCorrectionDialog}
-              correctionNote={correctionNote}
-              setCorrectionNote={setCorrectionNote}
-              correctionMutation={correctionMutation}
-              setRecurringMutation={setRecurringMutation}
-            />}
-          </div>
-        </FullScreenPanel>
-      ) : selectedId ? (
-        <div className="w-[480px] shrink-0">
-          <div className="card p-6 sticky top-0 max-h-[calc(100vh-6rem)] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Details</h2>
-              <button onClick={() => { setSelectedId(null); setEditMode(false); }} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
+            {/* Tab toggle: Daten | Dokument */}
+            <div className="flex border-b border-gray-200 mb-4">
+              <button
+                onClick={() => setMobileTab('data')}
+                className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors ${
+                  mobileTab === 'data'
+                    ? 'text-primary-600 border-b-2 border-primary-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Daten
+              </button>
+              <button
+                onClick={() => setMobileTab('doc')}
+                className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors ${
+                  mobileTab === 'doc'
+                    ? 'text-primary-600 border-b-2 border-primary-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Dokument
               </button>
             </div>
-            <InvoiceDetailContent
-              selectedId={selectedId}
-              detail={detail}
-              detailLoading={detailLoading}
-              detailError={detailError}
-              editMode={editMode}
-              editFields={editFields}
-              setEditFields={setEditFields}
-              setEditMode={setEditMode}
-              setSelectedId={setSelectedId}
-              setShowRejectDialog={setShowRejectDialog}
-              setRejectReason={setRejectReason}
-              setShowErsatzbelegDialog={setShowErsatzbelegDialog}
-              setShowEmailDialog={setShowEmailDialog}
-              setEmailPrefill={setEmailPrefill}
-              startEdit={startEdit}
-              navigate={navigate}
-              queryClient={queryClient}
-              showCashDialog={showCashDialog}
-              setShowCashDialog={setShowCashDialog}
-              cashDate={cashDate}
-              setCashDate={setCashDate}
-              cashPaymentMutation={cashPaymentMutation}
-              undoCashMutation={undoCashMutation}
-              showCorrectionDialog={showCorrectionDialog}
-              setShowCorrectionDialog={setShowCorrectionDialog}
-              correctionNote={correctionNote}
-              setCorrectionNote={setCorrectionNote}
-              correctionMutation={correctionMutation}
-              setRecurringMutation={setRecurringMutation}
-            />
+
+            {mobileTab === 'data' ? (
+              selectedId && <InvoiceDetailContent
+                selectedId={selectedId}
+                detail={detail}
+                detailLoading={detailLoading}
+                detailError={detailError}
+                editMode={editMode}
+                editFields={editFields}
+                setEditFields={setEditFields}
+                setEditMode={setEditMode}
+                setSelectedId={setSelectedId}
+                setShowRejectDialog={setShowRejectDialog}
+                setRejectReason={setRejectReason}
+                setShowErsatzbelegDialog={setShowErsatzbelegDialog}
+                setShowEmailDialog={setShowEmailDialog}
+                setEmailPrefill={setEmailPrefill}
+                startEdit={startEdit}
+                navigate={navigate}
+                queryClient={queryClient}
+                showCashDialog={showCashDialog}
+                setShowCashDialog={setShowCashDialog}
+                cashDate={cashDate}
+                setCashDate={setCashDate}
+                cashPaymentMutation={cashPaymentMutation}
+                undoCashMutation={undoCashMutation}
+                showCorrectionDialog={showCorrectionDialog}
+                setShowCorrectionDialog={setShowCorrectionDialog}
+                correctionNote={correctionNote}
+                setCorrectionNote={setCorrectionNote}
+                correctionMutation={correctionMutation}
+                setRecurringMutation={setRecurringMutation}
+              />
+            ) : (
+              selectedId && (
+                <DocumentViewer
+                  invoiceId={selectedId}
+                  mimeType={detail?.mimeType}
+                  originalFileName={detail?.originalFileName}
+                  className="h-[calc(100vh-180px)] rounded-lg"
+                />
+              )
+            )}
           </div>
-        </div>
-      ) : null}
+        </FullScreenPanel>
+      )}
 
       {/* Mobile FAB for upload */}
       {isMobile && (
@@ -893,6 +1055,7 @@ function InvoiceDetailContent({
   showCashDialog, setShowCashDialog, cashDate, setCashDate, cashPaymentMutation, undoCashMutation,
   showCorrectionDialog, setShowCorrectionDialog, correctionNote, setCorrectionNote, correctionMutation,
   setRecurringMutation,
+  useSplitView = false,
 }: {
   selectedId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -931,6 +1094,7 @@ function InvoiceDetailContent({
   correctionMutation: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setRecurringMutation: any;
+  useSplitView?: boolean;
 }) {
   if (detailLoading) {
     return (
@@ -954,6 +1118,9 @@ function InvoiceDetailContent({
       </div>
     );
   }
+
+  // Validation checks for per-field coloring in split view
+  const checks: ValidationCheck[] = detail.validationResult?.checks ?? [];
 
   return (
     <div className="space-y-4 text-sm">
@@ -1100,27 +1267,84 @@ function InvoiceDetailContent({
           <div>
             <h3 className="font-medium text-gray-900 mb-2">{detail.direction === 'OUTGOING' ? 'Kunde' : 'Lieferant'}</h3>
             <dl className="space-y-1">
-              {detail.direction === 'OUTGOING' && detail.customerName ? (
-                <div className="flex justify-between text-sm">
-                  <dt className="text-gray-500">Name</dt>
-                  <dd className="text-right">
-                    {detail.customerId ? (
-                      <button
-                        onClick={() => navigate(`/customers?selected=${detail.customerId}`)}
-                        className="text-primary-600 hover:underline font-medium"
-                      >
-                        {detail.customerName}
-                      </button>
-                    ) : (
-                      <span>{detail.customerName}</span>
-                    )}
-                  </dd>
-                </div>
+              {useSplitView && checks.length > 0 ? (
+                <>
+                  <ValidatedField
+                    label="Name"
+                    value={detail.direction === 'OUTGOING' ? detail.customerName : detail.vendorName}
+                    fieldName={detail.direction === 'OUTGOING' ? 'recipientName' : 'issuerName'}
+                    checks={checks}
+                  />
+                  <ValidatedField
+                    label="UID"
+                    value={detail.direction === 'OUTGOING' ? detail.recipientUid : detail.vendorUid}
+                    fieldName={detail.direction === 'OUTGOING' ? 'recipientUid' : 'issuerUid'}
+                    checks={checks}
+                  />
+                  {detail.extractedData?.issuerAddress && (
+                    <ValidatedField
+                      label="Adresse"
+                      value={
+                        typeof detail.extractedData.issuerAddress === 'object'
+                          ? [
+                              (detail.extractedData.issuerAddress as Record<string, string>).street,
+                              `${(detail.extractedData.issuerAddress as Record<string, string>).zip ?? ''} ${(detail.extractedData.issuerAddress as Record<string, string>).city ?? ''}`.trim(),
+                              (detail.extractedData.issuerAddress as Record<string, string>).country,
+                            ].filter(Boolean).join(', ')
+                          : String(detail.extractedData.issuerAddress)
+                      }
+                      fieldName="issuerAddress"
+                      checks={checks}
+                    />
+                  )}
+                  {detail.extractedData?.issuerIban && (
+                    <ValidatedField
+                      label="IBAN"
+                      value={detail.extractedData.issuerIban}
+                      fieldName="issuerIban"
+                      checks={checks}
+                    />
+                  )}
+                  <DetailRow label="Kategorie" value={detail.category} />
+                  {detail.vendorId && (
+                    <div className="flex justify-between text-sm py-1.5 px-2">
+                      <dt className="text-gray-500">Lieferant</dt>
+                      <dd>
+                        <button
+                          onClick={() => navigate(`/vendors?selected=${detail.vendorId}`)}
+                          className="text-primary-600 hover:underline text-xs"
+                        >
+                          Details &rarr;
+                        </button>
+                      </dd>
+                    </div>
+                  )}
+                </>
               ) : (
-                <DetailRow label="Name" value={detail.vendorName} />
+                <>
+                  {detail.direction === 'OUTGOING' && detail.customerName ? (
+                    <div className="flex justify-between text-sm">
+                      <dt className="text-gray-500">Name</dt>
+                      <dd className="text-right">
+                        {detail.customerId ? (
+                          <button
+                            onClick={() => navigate(`/customers?selected=${detail.customerId}`)}
+                            className="text-primary-600 hover:underline font-medium"
+                          >
+                            {detail.customerName}
+                          </button>
+                        ) : (
+                          <span>{detail.customerName}</span>
+                        )}
+                      </dd>
+                    </div>
+                  ) : (
+                    <DetailRow label="Name" value={detail.vendorName} />
+                  )}
+                  <DetailRow label="UID" value={detail.direction === 'OUTGOING' ? detail.recipientUid : detail.vendorUid} />
+                  <DetailRow label="Kategorie" value={detail.category} />
+                </>
               )}
-              <DetailRow label="UID" value={detail.direction === 'OUTGOING' ? detail.recipientUid : detail.vendorUid} />
-              <DetailRow label="Kategorie" value={detail.category} />
             </dl>
           </div>
 
@@ -1128,43 +1352,101 @@ function InvoiceDetailContent({
           <div className="border-t pt-4">
             <h3 className="font-medium text-gray-900 mb-2">Rechnung</h3>
             <dl className="space-y-1">
-              <DetailRow label="Nummer" value={detail.invoiceNumber} />
-              <DetailRow label="Datum" value={detail.invoiceDate ? formatDate(detail.invoiceDate) : null} />
-              <DetailRow label="Fällig" value={detail.dueDate ? formatDate(detail.dueDate) : null} />
-              <DetailRow label="Datei" value={detail.originalFileName} />
+              {useSplitView && checks.length > 0 ? (
+                <>
+                  <ValidatedField label="Nummer" value={detail.invoiceNumber} fieldName="invoiceNumber" checks={checks} />
+                  <ValidatedField label="Datum" value={detail.invoiceDate ? formatDate(detail.invoiceDate) : null} fieldName="invoiceDate" checks={checks} />
+                  <ValidatedField label="Lieferdatum" value={detail.deliveryDate ? formatDate(detail.deliveryDate) : null} fieldName="deliveryDate" checks={checks} />
+                  <DetailRow label="Fällig" value={detail.dueDate ? formatDate(detail.dueDate) : null} />
+                  <DetailRow label="Datei" value={detail.originalFileName} />
+                </>
+              ) : (
+                <>
+                  <DetailRow label="Nummer" value={detail.invoiceNumber} />
+                  <DetailRow label="Datum" value={detail.invoiceDate ? formatDate(detail.invoiceDate) : null} />
+                  <DetailRow label="Fällig" value={detail.dueDate ? formatDate(detail.dueDate) : null} />
+                  <DetailRow label="Datei" value={detail.originalFileName} />
+                </>
+              )}
             </dl>
-            <ViewOriginalButton invoiceId={selectedId} replacesInvoiceId={detail.replacesInvoiceId} />
+            {!useSplitView && <ViewOriginalButton invoiceId={selectedId} replacesInvoiceId={detail.replacesInvoiceId} />}
           </div>
+
+          {/* Description — only in split view (validated field) */}
+          {useSplitView && checks.length > 0 && detail.extractedData?.description && (
+            <div className="border-t pt-4">
+              <h3 className="font-medium text-gray-900 mb-2">Leistung</h3>
+              <ValidatedField
+                label="Beschreibung"
+                value={detail.extractedData.description}
+                fieldName="description"
+                checks={checks}
+              />
+            </div>
+          )}
 
           {/* Amounts */}
           <div className="border-t pt-4">
             <h3 className="font-medium text-gray-900 mb-2">Beträge</h3>
             <dl className="space-y-1">
-              {Array.isArray(detail.vatBreakdown) && detail.vatBreakdown.length > 1 ? (
+              {useSplitView && checks.length > 0 ? (
                 <>
-                  {(detail.vatBreakdown as Array<{ rate: number; netAmount: number; vatAmount: number }>).map((line, i) => (
-                    <div key={i} className="flex justify-between text-sm">
-                      <dt className="text-gray-500">Netto ({line.rate}%)</dt>
-                      <dd className="flex gap-4">
-                        <span>{formatCurrency(line.netAmount, detail.currency)}</span>
-                        <span className="text-gray-400">USt {formatCurrency(line.vatAmount, detail.currency)}</span>
+                  {Array.isArray(detail.vatBreakdown) && detail.vatBreakdown.length > 1 ? (
+                    <>
+                      {(detail.vatBreakdown as Array<{ rate: number; netAmount: number; vatAmount: number }>).map((line, i) => (
+                        <div key={i} className="flex justify-between text-sm py-1.5 px-2">
+                          <dt className="text-gray-500">Netto ({line.rate}%)</dt>
+                          <dd className="flex gap-4">
+                            <span>{formatCurrency(line.netAmount, detail.currency)}</span>
+                            <span className="text-gray-400">USt {formatCurrency(line.vatAmount, detail.currency)}</span>
+                          </dd>
+                        </div>
+                      ))}
+                      <div className="border-t border-dashed my-1" />
+                    </>
+                  ) : null}
+                  <ValidatedField label="Netto" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} fieldName="netAmount" checks={checks} />
+                  <ValidatedField label={`USt-Satz`} value={detail.vatRate != null ? `${detail.vatRate}%` : null} fieldName="vatRate" checks={checks} />
+                  <ValidatedField label="USt-Betrag" value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} fieldName="vatAmount" checks={checks} />
+                  <ValidatedField label="Brutto" value={detail.grossAmount ? formatCurrency(detail.grossAmount, detail.currency) : null} fieldName="grossAmount" checks={checks} className="font-semibold" />
+                  {detail.privatePercent != null && detail.privatePercent > 0 && detail.grossAmount && (
+                    <div className="flex justify-between text-sm py-1.5 px-2 bg-gray-50 rounded-r border-l-2 border-gray-300">
+                      <dt className="text-gray-500">Betrieblich ({100 - detail.privatePercent}%)</dt>
+                      <dd className="font-medium text-gray-900">
+                        {formatCurrency((1 - detail.privatePercent / 100) * parseFloat(detail.grossAmount), detail.currency)}
                       </dd>
                     </div>
-                  ))}
-                  <div className="border-t border-dashed my-1" />
-                  <DetailRow label="Netto gesamt" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
-                  <DetailRow label="USt gesamt" value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
+                  )}
                 </>
               ) : (
                 <>
-                  <DetailRow label="Netto" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
-                  <DetailRow label={`USt (${detail.vatRate ?? '?'}%)`} value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
+                  {Array.isArray(detail.vatBreakdown) && detail.vatBreakdown.length > 1 ? (
+                    <>
+                      {(detail.vatBreakdown as Array<{ rate: number; netAmount: number; vatAmount: number }>).map((line, i) => (
+                        <div key={i} className="flex justify-between text-sm">
+                          <dt className="text-gray-500">Netto ({line.rate}%)</dt>
+                          <dd className="flex gap-4">
+                            <span>{formatCurrency(line.netAmount, detail.currency)}</span>
+                            <span className="text-gray-400">USt {formatCurrency(line.vatAmount, detail.currency)}</span>
+                          </dd>
+                        </div>
+                      ))}
+                      <div className="border-t border-dashed my-1" />
+                      <DetailRow label="Netto gesamt" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
+                      <DetailRow label="USt gesamt" value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
+                    </>
+                  ) : (
+                    <>
+                      <DetailRow label="Netto" value={detail.netAmount ? formatCurrency(detail.netAmount, detail.currency) : null} />
+                      <DetailRow label={`USt (${detail.vatRate ?? '?'}%)`} value={detail.vatAmount ? formatCurrency(detail.vatAmount, detail.currency) : null} />
+                    </>
+                  )}
+                  <div className="flex justify-between font-semibold pt-1">
+                    <dt>Brutto</dt>
+                    <dd>{detail.grossAmount ? formatCurrency(detail.grossAmount, detail.currency) : '—'}</dd>
+                  </div>
                 </>
               )}
-              <div className="flex justify-between font-semibold pt-1">
-                <dt>Brutto</dt>
-                <dd>{detail.grossAmount ? formatCurrency(detail.grossAmount, detail.currency) : '—'}</dd>
-              </div>
             </dl>
           </div>
 

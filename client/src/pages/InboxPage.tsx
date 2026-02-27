@@ -1,20 +1,34 @@
 import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listInvoicesApi, uploadInvoiceApi, deleteInvoiceApi } from '../api/invoices';
 import type { InvoiceListItem } from '@buchungsai/shared';
-import { Inbox, Upload, Download, Trash2, Loader2, FileText, AlertCircle, ArrowUpRight, Mail } from 'lucide-react';
+import { Inbox, Upload, Download, Trash2, Loader2, FileText, AlertCircle, ArrowUpRight, Mail, CheckCircle, XCircle, AlertTriangle, Clock, Eye } from 'lucide-react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import toast from 'react-hot-toast';
 
+// All statuses that count as "open" (not yet archived/reconciled/exported)
+const INBOX_STATUSES = 'INBOX,UPLOADED,PROCESSING,PROCESSED,REVIEW_REQUIRED,PENDING_CORRECTION,ERROR';
+
 export function InboxPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadDirection, setUploadDirection] = useState<'INCOMING' | 'OUTGOING'>('INCOMING');
 
   const { data, isLoading } = useQuery({
     queryKey: ['inbox-invoices'],
-    queryFn: () => listInvoicesApi({ processingStatus: 'INBOX,UPLOADED', limit: 100, sortBy: 'createdAt', sortOrder: 'desc' }),
+    queryFn: () => listInvoicesApi({ processingStatus: INBOX_STATUSES, limit: 100, sortBy: 'createdAt', sortOrder: 'desc' }),
+    refetchInterval: (query) => {
+      const items = query.state.data?.data;
+      if (!items) return false;
+      const hasProcessing = items.some(
+        (inv: { processingStatus: string }) =>
+          inv.processingStatus === 'UPLOADED' || inv.processingStatus === 'PROCESSING',
+      );
+      return hasProcessing ? 3000 : false;
+    },
   });
 
   const invoices = (data?.data ?? []) as InvoiceListItem[];
@@ -58,7 +72,10 @@ export function InboxPage() {
   const statusLabels: Record<string, string> = {
     INBOX: 'Eingang',
     UPLOADED: 'Warteschlange',
-    PROCESSING: 'Verarbeitung...',
+    PROCESSING: 'Verarbeitung…',
+    PROCESSED: 'Verarbeitet',
+    REVIEW_REQUIRED: 'Review nötig',
+    PENDING_CORRECTION: 'Korrektur nötig',
     ERROR: 'Fehler',
   };
   const statusLabel = (status: string) => statusLabels[status] || status;
@@ -68,8 +85,21 @@ export function InboxPage() {
       case 'INBOX': return 'bg-blue-100 text-blue-700';
       case 'UPLOADED': return 'bg-gray-100 text-gray-700';
       case 'PROCESSING': return 'bg-yellow-100 text-yellow-700';
+      case 'PROCESSED': return 'bg-green-100 text-green-700';
+      case 'REVIEW_REQUIRED': return 'bg-orange-100 text-orange-700';
+      case 'PENDING_CORRECTION': return 'bg-red-100 text-red-700';
       case 'ERROR': return 'bg-red-100 text-red-700';
       default: return 'bg-gray-100 text-gray-600';
+    }
+  };
+
+  const validationIcon = (status: string | null | undefined) => {
+    switch (status) {
+      case 'VALID': return <CheckCircle size={16} className="text-green-500" />;
+      case 'WARNING': return <AlertTriangle size={16} className="text-yellow-500" />;
+      case 'INVALID': return <XCircle size={16} className="text-red-500" />;
+      case 'PENDING': return <Clock size={16} className="text-gray-400" />;
+      default: return null;
     }
   };
 
@@ -148,20 +178,26 @@ export function InboxPage() {
       ) : (
         <div className="space-y-2">
           {invoices.map((inv) => (
-            <div key={inv.id} className="card p-4">
+            <div
+              key={inv.id}
+              className="card p-4 cursor-pointer hover:ring-2 hover:ring-primary-300 transition-shadow"
+              onClick={() => navigate(`/invoices?id=${inv.id}`)}
+            >
               <div className="flex items-center gap-3">
                 <div className="shrink-0">
                   {inv.processingStatus === 'ERROR' ? (
                     <AlertCircle size={20} className="text-red-500" />
+                  ) : inv.processingStatus === 'PROCESSING' || inv.processingStatus === 'UPLOADED' ? (
+                    <Loader2 size={20} className="text-yellow-500 animate-spin" />
                   ) : (
-                    <FileText size={20} className="text-gray-400" />
+                    validationIcon(inv.validationStatus) || <FileText size={20} className="text-gray-400" />
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm truncate">
                     {inv.direction === 'OUTGOING' ? (inv.customerName || inv.originalFileName) : (inv.vendorName || inv.originalFileName)}
                   </p>
-                  <div className="flex items-center gap-2 mt-0.5">
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
                       inv.direction === 'OUTGOING' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
                     }`}>
@@ -179,7 +215,7 @@ export function InboxPage() {
                       </span>
                     )}
                     {inv.grossAmount && (
-                      <span className="text-xs text-gray-500">
+                      <span className="text-xs font-medium text-gray-700">
                         {parseFloat(inv.grossAmount).toLocaleString('de-AT', { style: 'currency', currency: inv.currency || 'EUR' })}
                       </span>
                     )}
@@ -190,6 +226,16 @@ export function InboxPage() {
                     {new Date(inv.createdAt).toLocaleDateString('de-AT')}
                   </span>
                 )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/invoices?id=${inv.id}`);
+                  }}
+                  className="p-1.5 text-gray-400 hover:text-primary-600 rounded transition-colors shrink-0"
+                  title="Öffnen"
+                >
+                  <Eye size={16} />
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

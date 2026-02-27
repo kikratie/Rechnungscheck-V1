@@ -316,6 +316,7 @@ export interface InvoiceDetailExtended extends InvoiceDetail {
   extractedData: ExtractedDataItem | null;
   validationResult: ValidationResultItem | null;
   documentType: string;
+  mimeType: string;
   deliveryDate: string | null;
   isReverseCharge: boolean;
   recipientUid: string | null;

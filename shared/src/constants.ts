@@ -313,3 +313,36 @@ export const FEATURE_MODULES = {
 
 export const DEFAULT_FEATURE_VISIBILITY: Record<string, boolean> =
   Object.fromEntries(Object.keys(FEATURE_MODULES).map(k => [k, true]));
+
+// ============================================================
+// Validation Check → Extracted Field Mapping
+// ============================================================
+
+/** Maps validation rule IDs to the extracted data field(s) they validate */
+export const CHECK_TO_FIELDS: Record<string, string[]> = {
+  ISSUER_NAME: ['issuerName'],
+  ISSUER_ADDRESS: ['issuerAddress'],
+  ISSUER_UID: ['issuerUid'],
+  RECIPIENT_NAME: ['recipientName'],
+  RECIPIENT_UID: ['recipientUid'],
+  INVOICE_NUMBER: ['invoiceNumber'],
+  INVOICE_DATE: ['invoiceDate'],
+  DELIVERY_DATE: ['deliveryDate'],
+  DESCRIPTION: ['description'],
+  NET_AMOUNT: ['netAmount'],
+  VAT_RATE: ['vatRate'],
+  VAT_AMOUNT: ['vatAmount'],
+  GROSS_AMOUNT: ['grossAmount'],
+  MATH_CHECK: ['netAmount', 'vatAmount', 'grossAmount'],
+  VAT_RATE_VALID: ['vatRate'],
+  UID_SYNTAX: ['issuerUid'],
+  UID_VIES_CHECK: ['issuerUid'],
+  IBAN_SYNTAX: ['issuerIban'],
+  REVERSE_CHARGE: ['vatAmount'],
+  DUPLICATE_CHECK: ['invoiceNumber', 'issuerName'],
+  FOREIGN_VAT_CHECK: ['vatRate', 'issuerUid'],
+  PLZ_UID_CHECK: ['issuerUid', 'issuerAddress'],
+  HOSPITALITY_CHECK: ['description'],
+  LEGAL_FORM_CHECK: ['issuerName'],
+  CREDIT_NOTE_CHECK: ['grossAmount'],
+};
