@@ -32,6 +32,8 @@ router.get('/', async (req, res, next) => {
     }
     if (req.query.validationStatus) where.validationStatus = req.query.validationStatus;
     if (req.query.vendorName) where.vendorName = { contains: req.query.vendorName, mode: 'insensitive' };
+    if (req.query.inboxCleared === 'true') where.inboxCleared = true;
+    if (req.query.inboxCleared === 'false') where.inboxCleared = false;
     if (req.query.recurring === 'true') where.isRecurring = true;
     if (req.query.overdue === 'true') {
       where.dueDate = { lt: new Date() };
@@ -94,6 +96,7 @@ router.get('/', async (req, res, next) => {
           isRecurring: true,
           recurringInterval: true,
           recurringGroupId: true,
+          inboxCleared: true,
           recurringNote: true,
           createdAt: true,
         },
@@ -419,6 +422,57 @@ router.post('/batch-approve', validateBody(batchApproveSchema), async (req, res,
       req.body.comment as string | undefined,
     );
     res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/batch-triage — Triage multiple invoices (send to check)
+router.post('/batch-triage', async (req, res, next) => {
+  try {
+    const ids = req.body.invoiceIds as string[];
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'invoiceIds required' } });
+      return;
+    }
+    const result = await prisma.invoice.updateMany({
+      where: {
+        id: { in: ids },
+        tenantId: req.tenantId!,
+        processingStatus: { in: ['PROCESSED', 'REVIEW_REQUIRED', 'ERROR', 'PENDING_CORRECTION'] },
+        inboxCleared: false,
+      },
+      data: { inboxCleared: true, inboxClearedAt: new Date() },
+    });
+    res.json({ success: true, data: { triaged: result.count } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/invoices/:id/triage — Triage single invoice (send to check)
+router.post('/:id/triage', async (req, res, next) => {
+  try {
+    const invoice = await prisma.invoice.findFirst({
+      where: { id: req.params.id, tenantId: req.tenantId! },
+    });
+    if (!invoice) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Rechnung nicht gefunden' } });
+      return;
+    }
+    const triageableStatuses = ['PROCESSED', 'REVIEW_REQUIRED', 'ERROR', 'PENDING_CORRECTION'];
+    if (!triageableStatuses.includes(invoice.processingStatus)) {
+      res.status(409).json({
+        success: false,
+        error: { code: 'NOT_READY', message: 'Beleg wurde noch nicht verarbeitet' },
+      });
+      return;
+    }
+    await prisma.invoice.update({
+      where: { id: req.params.id },
+      data: { inboxCleared: true, inboxClearedAt: new Date() },
+    });
+    res.json({ success: true, data: { id: req.params.id, inboxCleared: true } });
   } catch (err) {
     next(err);
   }

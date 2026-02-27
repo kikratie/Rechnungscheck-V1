@@ -238,6 +238,10 @@ model Invoice {
   emailSubject   String?   // Betreff der E-Mail
   emailMessageId String?   // RFC 2822 Message-ID für Deduplizierung
 
+  // Inbox-Triage: true = im Eingang gesichtet und zur Prüfung freigegeben
+  inboxCleared   Boolean   @default(false)
+  inboxClearedAt DateTime?
+
   // Workflow
   isLocked       Boolean   @default(false)
   lockedAt       DateTime?
@@ -282,6 +286,7 @@ model Invoice {
   @@index([customerId])
   @@index([tenantId, emailMessageId])
   @@index([tenantId, isRecurring])
+  @@index([tenantId, inboxCleared])
   @@map("invoices")
 }
 

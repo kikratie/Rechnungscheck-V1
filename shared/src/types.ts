@@ -182,6 +182,7 @@ export interface InvoiceListItem {
   archivedAt: string | null;
   ingestionChannel: string;
   emailSender: string | null;
+  inboxCleared: boolean;
   isRecurring: boolean;
   recurringInterval: RecurringIntervalType | null;
   recurringGroupId: string | null;

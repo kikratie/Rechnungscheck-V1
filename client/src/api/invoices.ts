@@ -8,6 +8,7 @@ export interface InvoiceFilters {
   direction?: 'INCOMING' | 'OUTGOING';
   processingStatus?: string;
   validationStatus?: string;
+  inboxCleared?: boolean;
   overdue?: boolean;
   recurring?: boolean;
   sortBy?: string;
@@ -133,5 +134,15 @@ export async function setRecurringApi(id: string, data: { isRecurring: boolean; 
 
 export async function getRecurringSummaryApi() {
   const response = await apiClient.get<ApiResponse<RecurringCostsSummary>>('/invoices/recurring-summary');
+  return response.data;
+}
+
+export async function triageInvoiceApi(id: string) {
+  const response = await apiClient.post<ApiResponse<{ id: string; inboxCleared: boolean }>>(`/invoices/${id}/triage`);
+  return response.data;
+}
+
+export async function batchTriageInvoicesApi(invoiceIds: string[]) {
+  const response = await apiClient.post<ApiResponse<{ triaged: number }>>('/invoices/batch-triage', { invoiceIds });
   return response.data;
 }

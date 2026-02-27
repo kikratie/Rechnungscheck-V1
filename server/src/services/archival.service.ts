@@ -459,6 +459,8 @@ async function archiveInvoiceInTransaction(
       archivedFileName,
       stampFailed,
       approvalComment: comment || null,
+      inboxCleared: true,
+      inboxClearedAt: archivedAt,
       isLocked: true,
       lockedAt: archivedAt,
       lockedByUserId: userId || null,

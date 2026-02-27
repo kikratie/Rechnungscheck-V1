@@ -45,7 +45,7 @@ import { ValidatedField } from '../components/ValidatedField';
 export function InvoicesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [filters, setFilters] = useState<InvoiceFilters>({ page: 1, limit: 20, sortBy: 'belegNr', sortOrder: 'desc' });
+  const [filters, setFilters] = useState<InvoiceFilters>({ page: 1, limit: 20, sortBy: 'belegNr', sortOrder: 'desc', inboxCleared: true });
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(false);
