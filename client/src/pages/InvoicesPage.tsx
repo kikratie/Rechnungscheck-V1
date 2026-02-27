@@ -241,6 +241,7 @@ export function InvoicesPage() {
         {/* Dialogs still need to render */}
         {showUpload && (
           <InvoiceUploadDialog
+            inboxCleared
             onClose={() => {
               setShowUpload(false);
               queryClient.invalidateQueries({ queryKey: ['invoices'] });
@@ -377,6 +378,7 @@ export function InvoicesPage() {
       {/* Upload dialog */}
       {showUpload && (
         <InvoiceUploadDialog
+          inboxCleared
           onClose={() => {
             setShowUpload(false);
             queryClient.invalidateQueries({ queryKey: ['invoices'] });

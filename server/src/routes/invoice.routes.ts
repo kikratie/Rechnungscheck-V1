@@ -219,9 +219,10 @@ router.post('/', invoiceUpload.single('file'), async (req, res, next) => {
       return;
     }
 
-    // direction kommt als FormData-Feld neben dem File
+    // direction + inboxCleared kommen als FormData-Felder neben dem File
     const directionRaw = req.body.direction as string | undefined;
     const direction = directionRaw === 'OUTGOING' ? 'OUTGOING' as const : 'INCOMING' as const;
+    const skipInbox = req.body.inboxCleared === 'true';
 
     const invoice = await invoiceService.uploadInvoice({
       tenantId: req.tenantId!,
@@ -229,6 +230,15 @@ router.post('/', invoiceUpload.single('file'), async (req, res, next) => {
       file: req.file,
       direction,
     });
+
+    // If uploaded from Check page, mark as already triaged
+    if (skipInbox) {
+      await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: { inboxCleared: true, inboxClearedAt: new Date() },
+      });
+      invoice.inboxCleared = true;
+    }
 
     res.status(201).json({ success: true, data: invoice });
   } catch (err) {

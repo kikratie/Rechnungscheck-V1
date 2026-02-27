@@ -25,10 +25,11 @@ export async function getInvoiceApi(id: string) {
   return response.data;
 }
 
-export async function uploadInvoiceApi(file: File, direction: 'INCOMING' | 'OUTGOING' = 'INCOMING') {
+export async function uploadInvoiceApi(file: File, direction: 'INCOMING' | 'OUTGOING' = 'INCOMING', options?: { inboxCleared?: boolean }) {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('direction', direction);
+  if (options?.inboxCleared) formData.append('inboxCleared', 'true');
   const response = await apiClient.post<ApiResponse<InvoiceListItem>>('/invoices', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });

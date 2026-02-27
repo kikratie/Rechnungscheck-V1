@@ -14,6 +14,8 @@ interface InvoiceUploadDialogProps {
   defaultDirection?: 'INCOMING' | 'OUTGOING';
   showDirectionPicker?: boolean;
   title?: string;
+  /** If true, uploaded invoices skip inbox and go directly to Check */
+  inboxCleared?: boolean;
 }
 
 export function InvoiceUploadDialog({
@@ -22,6 +24,7 @@ export function InvoiceUploadDialog({
   defaultDirection = 'INCOMING',
   showDirectionPicker = true,
   title = 'Rechnungen hochladen',
+  inboxCleared = false,
 }: InvoiceUploadDialogProps) {
   const [dragOver, setDragOver] = useState(false);
   const [fileStates, setFileStates] = useState<FileUploadState[]>([]);
@@ -54,7 +57,7 @@ export function InvoiceUploadDialog({
         );
 
         try {
-          await uploadInvoiceApi(file, direction);
+          await uploadInvoiceApi(file, direction, inboxCleared ? { inboxCleared: true } : undefined);
           setFileStates((prev) =>
             prev.map((f, i) => (i === index ? { ...f, status: 'done' as const } : f)),
           );
