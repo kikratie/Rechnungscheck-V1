@@ -1,0 +1,26 @@
+{
+	# Email for Let's Encrypt notifications
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+{$DOMAIN:localhost} {
+	# Reverse proxy to Express app
+	reverse_proxy app:3001
+
+	# Compression
+	encode gzip zstd
+
+	# Security headers
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# Logging
+	log {
+		output stdout
+		format console
+	}
+}

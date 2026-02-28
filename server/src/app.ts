@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { env } from './config/env.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authRoutes } from './routes/auth.routes.js';
@@ -120,7 +122,18 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/deductibility-rules', deductibilityRuleRoutes);
 app.use('/api/v1/shareholder-transactions', shareholderTransactionRoutes);
 
-// 404 Handler
+// In production: serve the built client SPA
+if (env.NODE_ENV === 'production') {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const clientDist = path.resolve(__dirname, '../../client/dist');
+  app.use(express.static(clientDist, { maxAge: '1d' }));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
+
+// 404 Handler (only for unmatched /api/* routes in production)
 app.use((_req, res) => {
   const response: ApiResponse = {
     success: false,

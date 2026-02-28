@@ -47,6 +47,7 @@ export const updateTenantSchema = z.object({
   country: z.string().length(2).optional().nullable(),
   phone: z.string().max(30).optional().nullable(),
   email: z.string().email('Ungültige E-Mail-Adresse').optional().nullable(),
+  accountingType: z.enum(['EA', 'ACCRUAL']).optional(),
 });
 
 export const completeOnboardingSchema = z.object({

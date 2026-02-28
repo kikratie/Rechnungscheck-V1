@@ -20,9 +20,9 @@ import { changePasswordApi } from '../api/auth';
 import { downloadBlob } from '../api/exports';
 import { getMailStatusApi } from '../api/mail';
 import { listRulesApi, createRuleApi, updateRuleApi, deactivateRuleApi, seedRulesApi } from '../api/deductibilityRules';
-import type { TenantProfile, BankAccountItem, BankAccountType, UserRoleType, FeatureVisibility, RuleTypeValue } from '@buchungsai/shared';
-import { FEATURE_MODULES, DEFAULT_FEATURE_VISIBILITY, RULE_TYPE_LABELS } from '@buchungsai/shared';
-import { Mail, CheckCircle, AlertTriangle, Shield, Trash2, Download, UserPlus, X, Loader2, RefreshCw, Play, Pause, Plug, Plus, Users, KeyRound, ToggleLeft, ToggleRight, Scale, Edit3 } from 'lucide-react';
+import type { TenantProfile, BankAccountItem, BankAccountType, UserRoleType, FeatureVisibility, RuleTypeValue, AccountingTypeValue } from '@buchungsai/shared';
+import { FEATURE_MODULES, DEFAULT_FEATURE_VISIBILITY, RULE_TYPE_LABELS, ACCOUNTING_TYPES } from '@buchungsai/shared';
+import { Mail, CheckCircle, AlertTriangle, Shield, Trash2, Download, UserPlus, X, Loader2, RefreshCw, Play, Pause, Plug, Plus, Users, KeyRound, ToggleLeft, ToggleRight, Scale, Edit3, Building2, Calculator } from 'lucide-react';
 import {
   listEmailConnectorsApi,
   createEmailConnectorApi,
@@ -62,7 +62,7 @@ const emptyBankForm: BankAccountFormData = {
 };
 
 export function SettingsPage() {
-  const { user } = useAuthStore();
+  const { user, setUser } = useAuthStore();
   const queryClient = useQueryClient();
   const isAdmin = user?.role === 'ADMIN';
 
@@ -121,6 +121,17 @@ export function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['tenant'] });
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+    },
+  });
+
+  const accountingTypeMutation = useMutation({
+    mutationFn: (accountingType: AccountingTypeValue) =>
+      updateTenantApi({ accountingType } as Partial<TenantProfile>),
+    onSuccess: (_data, accountingType) => {
+      queryClient.invalidateQueries({ queryKey: ['tenant'] });
+      if (user) {
+        setUser({ ...user, accountingType });
+      }
     },
   });
 
@@ -268,6 +279,53 @@ export function SettingsPage() {
       {/* Passwort ändern */}
       <div className="card p-6 mb-6">
         <ChangePasswordSection />
+      </div>
+
+      {/* Buchhaltungsart */}
+      <div className="card p-6 mb-6">
+        <h2 className="text-lg font-semibold mb-1">Buchhaltungsart</h2>
+        <p className="text-sm text-gray-500 mb-4">Bestimmt Genehmigungs-Regeln, Export-Format und verfügbare Funktionen.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {(Object.entries(ACCOUNTING_TYPES) as [AccountingTypeValue, { label: string; description: string }][]).map(([key, { label, description }]) => {
+            const isSelected = (tenant?.accountingType ?? user?.accountingType ?? 'EA') === key;
+            return (
+              <button
+                key={key}
+                onClick={() => {
+                  if (!isAdmin || isSelected || accountingTypeMutation.isPending) return;
+                  if (confirm(`Buchhaltungsart auf "${label}" ändern? Dies beeinflusst Navigation, Genehmigungs-Regeln und Export.`)) {
+                    accountingTypeMutation.mutate(key);
+                  }
+                }}
+                disabled={!isAdmin || accountingTypeMutation.isPending}
+                className={`relative flex items-start gap-4 p-4 rounded-lg border-2 text-left transition-colors ${
+                  isSelected
+                    ? 'border-primary-600 bg-primary-50'
+                    : isAdmin ? 'border-gray-200 hover:border-gray-300 cursor-pointer' : 'border-gray-200 opacity-60'
+                }`}
+              >
+                <div className={`mt-0.5 p-2 rounded-lg ${isSelected ? 'bg-primary-100 text-primary-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {key === 'EA' ? <Calculator size={20} /> : <Building2 size={20} />}
+                </div>
+                <div className="flex-1">
+                  <div className="font-medium text-gray-900">{label}</div>
+                  <div className="text-sm text-gray-500 mt-0.5">{description}</div>
+                </div>
+                {isSelected && (
+                  <div className="absolute top-3 right-3">
+                    <CheckCircle size={18} className="text-primary-600" />
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {accountingTypeMutation.isPending && (
+          <p className="text-sm text-gray-500 mt-3 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Wird gespeichert...</p>
+        )}
+        {accountingTypeMutation.isSuccess && (
+          <p className="text-sm text-green-600 mt-3">Buchhaltungsart aktualisiert.</p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
