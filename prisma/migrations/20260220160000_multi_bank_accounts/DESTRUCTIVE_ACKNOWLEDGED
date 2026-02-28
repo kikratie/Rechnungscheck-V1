@@ -1,0 +1,1 @@
+Acknowledged: DROP COLUMN on tenants table during multi-bank migration. Column data was migrated to bank_accounts table.

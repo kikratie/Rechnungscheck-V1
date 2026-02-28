@@ -63,6 +63,40 @@ async function runPreflightChecks() {
   console.log(`[PREFLIGHT] Status: ${status}`, results);
 }
 
+/**
+ * Verify database schema is consistent: no pending or failed migrations.
+ * Prevents running code against a mismatched database schema.
+ */
+async function checkMigrationStatus() {
+  try {
+    const result = await prisma.$queryRaw<Array<{
+      migration_name: string;
+      finished_at: Date | null;
+      rolled_back_at: Date | null;
+    }>>`
+      SELECT migration_name, finished_at, rolled_back_at
+      FROM _prisma_migrations
+      WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL
+      ORDER BY started_at DESC
+    `;
+
+    if (result.length > 0) {
+      console.error('[SCHEMA] WARNUNG: Inkonsistente Migrationen gefunden:');
+      for (const row of result) {
+        const status = row.rolled_back_at ? 'ROLLED BACK' : 'NICHT ABGESCHLOSSEN';
+        console.error(`  - ${row.migration_name}: ${status}`);
+      }
+      console.error('[SCHEMA] Bitte "npx prisma migrate deploy" ausführen!');
+      // Don't exit — allow the app to start so the deploy pipeline can fix it
+    } else {
+      console.log('Datenbank-Schema konsistent (alle Migrationen angewandt)');
+    }
+  } catch {
+    // _prisma_migrations table may not exist on first deploy — that's OK
+    console.warn('[SCHEMA] Migration-Tabelle nicht lesbar (erster Start?)');
+  }
+}
+
 async function main() {
   // Datenbank-Verbindung testen
   try {
@@ -72,6 +106,9 @@ async function main() {
     console.error('Datenbank-Verbindung fehlgeschlagen:', error);
     process.exit(1);
   }
+
+  // Schema-Konsistenz prüfen
+  await checkMigrationStatus();
 
   // S3/MinIO Bucket sicherstellen
   try {

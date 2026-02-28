@@ -75,7 +75,7 @@ app.use(globalLimiter);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Health Check — prüft alle Abhängigkeiten
+// Health Check — prüft alle Abhängigkeiten + Schema-Konsistenz
 app.get('/api/v1/health', async (_req, res) => {
   const services: Record<string, 'ok' | 'error'> = {};
 
@@ -84,6 +84,20 @@ app.get('/api/v1/health', async (_req, res) => {
     await prisma.$queryRawUnsafe('SELECT 1');
     services.db = 'ok';
   } catch { services.db = 'error'; }
+
+  // Schema consistency: check for failed/pending migrations
+  let pendingMigrations = 0;
+  try {
+    const result = await prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*)::bigint as count FROM _prisma_migrations
+      WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL
+    `;
+    pendingMigrations = Number(result[0]?.count ?? 0);
+    services.schema = pendingMigrations === 0 ? 'ok' : 'error';
+  } catch {
+    // Table might not exist on very first start
+    services.schema = services.db === 'ok' ? 'ok' : 'error';
+  }
 
   // Redis (BullMQ)
   try {
@@ -100,7 +114,12 @@ app.get('/api/v1/health', async (_req, res) => {
 
   res.status(hasErrors ? 503 : 200).json({
     success: true,
-    data: { status, timestamp: new Date().toISOString(), services },
+    data: {
+      status,
+      timestamp: new Date().toISOString(),
+      services,
+      ...(pendingMigrations > 0 ? { pendingMigrations } : {}),
+    },
   });
 });
 

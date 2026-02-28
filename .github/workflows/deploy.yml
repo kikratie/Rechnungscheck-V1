@@ -1,0 +1,219 @@
+# =============================================================
+# Ki2Go Accounting — CI/CD Pipeline
+# =============================================================
+#
+# Trigger:  Push to main  → Build + Test + Deploy
+#           Pull Request   → Build + Test only
+#           Manual         → Full pipeline (workflow_dispatch)
+#
+# Safety:
+#   1. Tests MUST pass before Docker image is built
+#   2. Docker image MUST build before deploy starts
+#   3. Health check AFTER deploy — auto-rollback on failure
+#   4. Database backup BEFORE every deploy
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   SERVER_HOST       — Hetzner server IP (e.g., 168.119.xxx.xxx)
+#   SERVER_USER       — SSH user (e.g., root or deploy)
+#   SSH_PRIVATE_KEY   — Private SSH key for server access
+#
+# Server directory: /opt/ki2go
+# =============================================================
+
+name: CI/CD — Build, Test & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # =============================================================
+  # Step 1: Build + Test
+  # Runs on EVERY push and PR. If this fails, nothing deploys.
+  # =============================================================
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check migrations for destructive operations
+        run: node scripts/check-migrations-safe.mjs
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: Build all workspaces (shared → server → client)
+        run: npm run build
+
+      - name: Run tests
+        run: npm run test
+
+  # =============================================================
+  # Step 2: Build Docker Image + Push to GitHub Container Registry
+  # Only runs on main branch pushes (not on PRs).
+  # =============================================================
+  docker:
+    name: Build Docker Image
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.tags.outputs.sha_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare image tags (lowercase required by GHCR)
+        id: tags
+        run: |
+          REPO="${GITHUB_REPOSITORY,,}"
+          echo "sha_tag=ghcr.io/${REPO}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=ghcr.io/${REPO}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.tags.outputs.sha_tag }}
+            ${{ steps.tags.outputs.latest_tag }}
+
+  # =============================================================
+  # Step 3: Deploy to Hetzner Production Server
+  #
+  # Process:
+  #   1. Login to GHCR on server
+  #   2. Pull new image
+  #   3. Backup database (pg_dump, gzipped, keep last 10)
+  #   4. Run Prisma migrations
+  #   5. Restart app with new image
+  #   6. Health check (12 attempts, 10s apart = max 2 min)
+  #   7. On failure: automatic rollback to previous image
+  # =============================================================
+  deploy:
+    name: Deploy to Production
+    needs: docker
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    environment: production
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        timeout-minutes: 10
+        env:
+          IMAGE_TAG: ${{ needs.docker.outputs.image_tag }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
+          command_timeout: 10m
+          script: |
+            set -e
+            APP_DIR="/opt/ki2go"
+            BACKUP_DIR="/opt/backups"
+            COMPOSE_PROD="docker compose -f docker-compose.prod.yml"
+            cd "$APP_DIR"
+            echo ""
+            echo "============================================"
+            echo "  Ki2Go Deploy — $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "  Image: $IMAGE_TAG"
+            echo "============================================"
+            echo ""
+            echo "=== [1/7] Login to GHCR ==="
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            echo "=== [2/7] Pull new image ==="
+            docker pull "$IMAGE_TAG"
+            echo "=== [3/7] Backup database ==="
+            mkdir -p "$BACKUP_DIR"
+            if [ -f .env.production ]; then
+              set -a && source .env.production && set +a
+            fi
+            POSTGRES_RUNNING=$(${COMPOSE_PROD} ps postgres --format '{{.State}}' 2>/dev/null || echo "")
+            if echo "$POSTGRES_RUNNING" | grep -qi "running"; then
+              BACKUP_FILE="$BACKUP_DIR/db-$(date +%Y%m%d-%H%M%S).sql.gz"
+              ${COMPOSE_PROD} exec -T postgres pg_dump -U "${POSTGRES_USER:-buchungsai}" "${POSTGRES_DB:-buchungsai}" | gzip > "$BACKUP_FILE"
+              echo "  Backup: $BACKUP_FILE"
+              ls -t "$BACKUP_DIR"/db-*.sql.gz 2>/dev/null | tail -n +11 | xargs -r rm
+            else
+              echo "  Postgres not running — skipping backup (first deploy?)"
+            fi
+            echo "=== [4/7] Save rollback point ==="
+            PREVIOUS_IMAGE=$(cat .deploy-image 2>/dev/null || echo "")
+            if [ -n "$PREVIOUS_IMAGE" ]; then
+              echo "  Previous: $PREVIOUS_IMAGE"
+            else
+              echo "  First deploy — no rollback available"
+            fi
+            echo "=== [5/7] Run database migrations ==="
+            printf 'services:\n  app:\n    image: "%s"\n' "$IMAGE_TAG" > docker-compose.deploy.yml
+            cp .env.production .env 2>/dev/null || true
+            COMPOSE_FULL="docker compose -f docker-compose.prod.yml -f docker-compose.deploy.yml"
+            ${COMPOSE_FULL} run --rm app npx prisma migrate deploy --schema prisma/schema.prisma
+            echo "=== [6/7] Restart services ==="
+            ${COMPOSE_FULL} up -d --no-build --remove-orphans
+            echo "=== [7/7] Health check (max 2 min) ==="
+            HEALTHY=false
+            APP_CONTAINER=$(${COMPOSE_FULL} ps -q app 2>/dev/null || echo "")
+            if [ -n "$APP_CONTAINER" ]; then
+              for i in $(seq 1 12); do
+                sleep 10
+                STATUS=$(docker inspect --format='{{.State.Health.Status}}' "$APP_CONTAINER" 2>/dev/null || echo "starting")
+                echo "  Check $i/12: $STATUS"
+                if [ "$STATUS" = "healthy" ]; then
+                  HEALTHY=true
+                  break
+                fi
+              done
+            fi
+            if [ "$HEALTHY" = true ]; then
+              echo "$IMAGE_TAG" > .deploy-image
+              docker image prune -f > /dev/null 2>&1 || true
+              echo ""
+              echo "============================================"
+              echo "  DEPLOY SUCCESSFUL"
+              echo "  Image: $IMAGE_TAG"
+              echo "============================================"
+            else
+              echo ""
+              echo "============================================"
+              echo "  DEPLOY FAILED — AUTOMATIC ROLLBACK"
+              echo "============================================"
+              echo "--- App logs (last 30 lines) ---"
+              ${COMPOSE_FULL} logs --tail=30 app 2>/dev/null || true
+              echo "--- End logs ---"
+              if [ -n "$PREVIOUS_IMAGE" ]; then
+                echo "Rolling back to: $PREVIOUS_IMAGE"
+                printf 'services:\n  app:\n    image: "%s"\n' "$PREVIOUS_IMAGE" > docker-compose.deploy.yml
+                ${COMPOSE_FULL} up -d --no-build
+                echo "Rollback complete."
+              else
+                echo "No previous image — cannot rollback"
+              fi
+              exit 1
+            fi

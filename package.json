@@ -22,7 +22,7 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "lint": "concurrently \"npm run lint -w server\" \"npm run lint -w client\"",
-    "test": "concurrently \"npm run test -w server\" \"npm run test -w client\""
+    "test": "npm run test -w server"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

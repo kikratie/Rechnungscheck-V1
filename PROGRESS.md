@@ -1,6 +1,6 @@
 # PROGRESS.md – Ki2Go Accounting
 
-**Letzte Aktualisierung:** 27. Februar 2026 (Session 21 — Phase 17: Genehmigungs-Regeln V2 mit Privat-Logik)
+**Letzte Aktualisierung:** 28. Februar 2026 (Session 22 — Phase 18: Production Deployment Setup + Settings)
 
 ---
 
@@ -1111,3 +1111,222 @@ Bestehende Regel "Nicht betrieblich (privat)" → `ruleType: 'private_withdrawal
 - ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
 - ✅ Prisma-Migration erstellt und angewandt
 - ✅ Prisma-Client regeneriert
+
+---
+
+## Phase 18: Production Deployment Setup + Buchhaltungsart-Einstellung ✅
+
+**28. Februar 2026** — Production-ready Docker-Setup für Hetzner Cloud + Settings-Erweiterung.
+
+### Zusammenfassung
+
+App ist MVP-complete. Gap-Analyse ergab 11 fehlende Features, von denen **keines** ein Go-Live-Blocker ist. Deployment-Infrastruktur für Hetzner Cloud CX22 (~4,51€/Monat, DSGVO-konform) erstellt.
+
+### Buchhaltungsart in Settings
+
+- [x] **Zod-Schema**: `accountingType` in `updateTenantSchema` (shared/validation.ts)
+- [x] **Settings UI**: "Buchhaltungsart" Sektion mit 2 Radio-Cards (EA / ACCRUAL)
+  - Calculator-Icon für E/A-Rechner, Building2-Icon für Bilanzierung
+  - Beschreibung + Checkmark für aktive Auswahl
+  - Bestätigungs-Dialog vor Umstellung
+  - Loading/Success-States, Auth-Store Sync nach Update
+
+### Production Deployment Infrastruktur
+
+#### Architektur
+```
+Internet → Caddy (HTTPS :443) → Express (:3001) → Static SPA + API
+Docker Compose: Caddy + App + PostgreSQL 16 + Redis 7 + MinIO
+```
+
+#### Dateien
+
+- [x] **Dockerfile** (Multi-Stage Build):
+  - Stage 1: `node:22-alpine` Builder — npm ci, prisma generate, npm run build
+  - Stage 2: `node:22-alpine` Production — npm ci --omit=dev, nur dist-Artefakte
+  - Prisma generate VOR build (kritisch für TypeScript-Compilation)
+  - Native Module Rebuild (sharp, mupdf) für Alpine
+
+- [x] **docker-compose.prod.yml** (5 Services):
+  - `caddy`: Reverse Proxy + Auto-HTTPS (Let's Encrypt), Ports 80/443/443-udp
+  - `app`: Express API + Static SPA, healthcheck, depends_on mit condition: service_healthy
+  - `postgres`: PostgreSQL 16 Alpine, Volume-Mount, Health Check
+  - `redis`: Redis 7 Alpine, requirepass, Volume-Mount
+  - `minio`: MinIO S3-kompatibler Storage, Console auf Port 9001
+
+- [x] **Caddyfile**: Auto-HTTPS, reverse_proxy, gzip/zstd, Security Headers
+
+- [x] **.env.production.example**: Vollständiges ENV-Template (DB, Redis, JWT, S3, SMTP, Rate Limiting)
+
+- [x] **deploy.sh**: 5-Schritt Deploy (git pull → build → migrate → up → health check)
+
+- [x] **.dockerignore**: node_modules, .env, .git, docs, tests ausgeschlossen
+
+- [x] **server/src/app.ts**: Static File Serving in Production
+  - `express.static(clientDist)` mit `maxAge: '1d'`
+  - SPA-Fallback: alle nicht-API-Routen → `index.html`
+  - Nur aktiv wenn `NODE_ENV === 'production'`
+
+### Seed-Fix
+
+- [x] `prisma/seed.ts`: `ruleType` und `createsReceivable` Felder in createMany-Mapping hinzugefügt (fehlten nach Phase 17)
+
+### Docker-Build verifiziert
+
+- ✅ `docker build -t ki2go-test .` — Erfolgreich (530MB)
+- ✅ Prisma generate vor Build — TypeScript-Compilation fehlerfrei
+
+### Neue Dateien (Phase 18)
+
+| Datei | Zweck |
+|-------|-------|
+| `Dockerfile` | Multi-Stage Production Build |
+| `docker-compose.prod.yml` | 5-Service Production Stack |
+| `Caddyfile` | Reverse Proxy + Auto-HTTPS |
+| `.env.production.example` | Environment Template |
+| `deploy.sh` | Deployment Script |
+| `.dockerignore` | Docker Build Ignore |
+
+### Geänderte Dateien (Phase 18)
+
+| Datei | Änderung |
+|-------|----------|
+| `server/src/app.ts` | +path/fileURLToPath Imports, +Static File Serving Block |
+| `shared/src/validation.ts` | +accountingType in updateTenantSchema |
+| `client/src/pages/SettingsPage.tsx` | +Buchhaltungsart Sektion mit Radio-Cards |
+| `prisma/seed.ts` | +ruleType/createsReceivable in DeductibilityRule Seed |
+
+### Verifikation (Phase 18)
+
+- ✅ `npm run build` — shared + server + client kompilieren ohne Fehler
+- ✅ Docker-Image erfolgreich gebaut
+- ✅ API getestet: accountingType Update funktioniert (EA ↔ ACCRUAL)
+- ✅ Commit `6ea0a75` pushed to origin/main
+
+---
+
+## Phase 19: CI/CD Pipeline (GitHub Actions) ✅
+
+**28. Februar 2026** — Automatische Deployments via GitHub Actions. Jeder Push auf `main` deployed automatisch auf den Hetzner-Server — nur wenn Build + Tests erfolgreich.
+
+### Sicherheitskonzept (3 Stufen)
+
+```
+git push to main
+    ↓
+[1] Build & Test    ← npm ci → prisma generate → npm run build → npm run test
+    ↓ (nur wenn GRÜN)
+[2] Docker Image    ← Build + Push zu GitHub Container Registry (GHCR)
+    ↓ (nur wenn GRÜN)
+[3] Deploy          ← SSH → Pull → DB-Backup → Migrate → Restart → Health Check
+    ↓ (wenn FAIL)
+[!] AUTO-ROLLBACK   ← Vorherige Image-Version wird wiederhergestellt
+```
+
+### Schutzmaßnahmen
+
+| Schutz | Beschreibung |
+|--------|-------------|
+| **Tests vor Deploy** | Build + Tests müssen bestehen, sonst kein Docker-Build |
+| **DB-Backup** | Automatischer `pg_dump` (gzipped) VOR jedem Deploy, letzte 10 behalten |
+| **Health Check** | 12 Versuche × 10 Sekunden = max 2 Minuten Wartezeit |
+| **Auto-Rollback** | Bei fehlgeschlagenem Health Check wird das vorherige Image wiederhergestellt |
+| **Image-Versionierung** | Jedes Deploy hat eigenen SHA-Tag, kein "latest only" |
+| **PR-Tests** | Pull Requests lösen nur Build+Test aus (kein Deploy) |
+| **Manual Trigger** | `workflow_dispatch` für manuelles Re-Deploy |
+
+### GitHub Actions Pipeline (deploy.yml)
+
+3 Jobs, streng sequentiell:
+
+1. **test** — `npm ci` → `prisma generate` → `npm run build` → `npm run test`
+2. **docker** — Login zu GHCR → Docker Build + Push (SHA-Tag + latest)
+3. **deploy** — SSH → Pull Image → DB-Backup → Migrate → Restart → Health Check → Rollback bei Fehler
+
+### Docker-Image-Management
+
+- Images werden in **GitHub Container Registry** (GHCR) gespeichert
+- Jedes Image bekommt 2 Tags: `ghcr.io/<owner>/<repo>:<full-sha>` + `:latest`
+- Auf dem Server: `docker-compose.deploy.yml` Override-Datei für Image-Tag
+- `.deploy-image` Datei speichert das aktuell laufende Image (für Rollback)
+
+### Erforderliche GitHub Secrets
+
+| Secret | Beschreibung |
+|--------|-------------|
+| `SERVER_HOST` | Hetzner Server IP-Adresse |
+| `SERVER_USER` | SSH-Benutzer (z.B. `root` oder `deploy`) |
+| `SSH_PRIVATE_KEY` | Privater SSH-Key für Server-Zugang |
+
+`GITHUB_TOKEN` wird automatisch von GitHub bereitgestellt (für GHCR Push + Pull).
+
+### deploy.sh (Manueller Fallback)
+
+Aktualisiert mit:
+- [x] Automatischer `.env.production` → `.env` Kopie (für Compose-Variable-Substitution)
+- [x] DB-Backup vor Deploy (gzipped, Rotation)
+- [x] Verbesserter Health Check (12 Versuche statt 1)
+- [x] Proper Exit Codes bei Fehler
+
+### Neue Dateien (Phase 19)
+
+| Datei | Zweck |
+|-------|-------|
+| `.github/workflows/deploy.yml` | CI/CD Pipeline (Build → Test → Docker → Deploy) |
+
+### Geänderte Dateien (Phase 19)
+
+| Datei | Änderung |
+|-------|----------|
+| `deploy.sh` | +DB-Backup, +env sourcing, +verbesserter Health Check |
+
+### Server-Einrichtung (einmalig, nach Hetzner-Server-Erstellung)
+
+```bash
+# 1. Docker installieren (Ubuntu 24.04)
+curl -fsSL https://get.docker.com | sh
+
+# 2. App-Verzeichnis erstellen
+mkdir -p /opt/ki2go /opt/backups
+cd /opt/ki2go
+
+# 3. Repository klonen
+git clone <repo-url> .
+
+# 4. Environment konfigurieren
+cp .env.production.example .env.production
+nano .env.production  # Secrets eintragen
+
+# 5. Erster Deploy (manuell)
+bash deploy.sh
+
+# Danach: Jeder git push auf main deployed automatisch via GitHub Actions
+```
+
+### GitHub-Einrichtung (einmalig)
+
+1. Repository Settings → Secrets and Variables → Actions
+2. Drei Secrets anlegen: `SERVER_HOST`, `SERVER_USER`, `SSH_PRIVATE_KEY`
+3. Optional: Settings → Environments → `production` → Protection Rules (z.B. Manual Approval)
+
+---
+
+## Feature-Vollständigkeit (Gap-Analyse vom 28.02.2026)
+
+**Implementierungsgrad: ~75-80% des CONCEPT.md**
+
+### 11 fehlende Features (keines ist Go-Live-Blocker)
+
+| # | Feature | Aufwand | Priorität |
+|---|---------|---------|-----------|
+| 1 | Guided Tour + Tooltips | 2-3h | Mittel |
+| 2 | WhatsApp/Scan Eingangskanal | 3-4h | Niedrig |
+| 3 | Ersatzbeleg PDF-Generierung | 2h | Mittel |
+| 4 | Notfall-Analyse (Anomalie-Erkennung) | 4-5h | Niedrig |
+| 5 | LLM Config UI (Admin) | 2h | Niedrig |
+| 6 | Multi-Bank (mehr als 1 Bankkonto) | 3-4h | Mittel |
+| 7 | Dashboard Drag & Drop Widgets | 3h | Niedrig |
+| 8 | Workflow-Automatisierung (Auto-Archivierung) | 2h | Niedrig |
+| 9 | Mandanten-Onboarding Wizard | 2-3h | Mittel |
+| 10 | Performance-Monitoring | 1-2h | Niedrig |
+| 11 | Steuererklärung E1a/K1 Vorausfüllung | 5-6h | Hoch (post-MVP) |
