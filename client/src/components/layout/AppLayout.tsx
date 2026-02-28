@@ -26,13 +26,18 @@ import {
   Receipt,
   Shield,
   Scale,
+  HelpCircle,
 } from 'lucide-react';
+import { GuidedTour } from '../GuidedTour';
+import { dashboardTourSteps } from '../../config/tourSteps';
+import { useGuidedTour } from '../../hooks/useGuidedTour';
 
 interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
   featureKey?: string;
+  dataTour?: string;
 }
 
 interface NavGroup {
@@ -51,15 +56,16 @@ export function AppLayout() {
   const isTaxAdvisor = user?.role === 'TAX_ADVISOR';
   const isSuperAdmin = !!user?.isSuperAdmin;
   const isFeatureVisible = useFeatureFilter();
+  const { startTour: startDashboardTour } = useGuidedTour('dashboard');
 
   // Build navigation groups based on accountingType, filtered by feature visibility
   const navGroups: NavGroup[] = [
     {
       label: 'Hauptprozess',
       items: [
-        { to: '/inbox', label: 'A: Rechnungseingang', icon: Inbox, featureKey: 'inbox' },
-        { to: '/invoices', label: 'B: Rechnungs-Check', icon: FileSearch, featureKey: 'invoiceCheck' },
-        { to: '/matching', label: 'C: Zahlungs-Check', icon: ArrowLeftRight, featureKey: 'paymentCheck' },
+        { to: '/inbox', label: 'A: Rechnungseingang', icon: Inbox, featureKey: 'inbox', dataTour: 'nav-inbox' },
+        { to: '/invoices', label: 'B: Rechnungs-Check', icon: FileSearch, featureKey: 'invoiceCheck', dataTour: 'nav-check' },
+        { to: '/matching', label: 'C: Zahlungs-Check', icon: ArrowLeftRight, featureKey: 'paymentCheck', dataTour: 'nav-matching' },
       ],
     },
     {
@@ -74,7 +80,7 @@ export function AppLayout() {
     {
       label: 'Berichte & Export',
       items: [
-        { to: '/export', label: 'Export', icon: Download, featureKey: 'export' },
+        { to: '/export', label: 'Export', icon: Download, featureKey: 'export', dataTour: 'nav-export' },
         ...(accountingType === 'ACCRUAL'
           ? [{ to: '/shareholder-account', label: 'Verrechnungskonto', icon: Scale }]
           : []),
@@ -87,7 +93,7 @@ export function AppLayout() {
       label: 'System',
       items: [
         { to: '/audit-log', label: 'Audit-Log', icon: ScrollText, featureKey: 'auditLog' },
-        { to: '/settings', label: 'Einstellungen', icon: Settings },
+        { to: '/settings', label: 'Einstellungen', icon: Settings, dataTour: 'nav-settings' },
       ],
     },
     ...(isSuperAdmin ? [{
@@ -202,6 +208,7 @@ export function AppLayout() {
                     <NavLink
                       key={item.to}
                       to={item.to}
+                      data-tour={item.dataTour}
                       className={({ isActive }) =>
                         `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                           isActive
@@ -219,7 +226,7 @@ export function AppLayout() {
             ))}
           </nav>
 
-          {/* User Info + Logout */}
+          {/* User Info + Help + Logout */}
           <div className="p-4 border-t border-gray-800">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
@@ -228,13 +235,22 @@ export function AppLayout() {
                 </p>
                 <p className="text-xs text-gray-400 truncate">{user?.email}</p>
               </div>
-              <button
-                onClick={handleLogout}
-                className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors"
-                title="Abmelden"
-              >
-                <LogOut size={18} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={startDashboardTour}
+                  className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors"
+                  title="Tour starten"
+                >
+                  <HelpCircle size={18} />
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors"
+                  title="Abmelden"
+                >
+                  <LogOut size={18} />
+                </button>
+              </div>
             </div>
           </div>
         </aside>
@@ -287,6 +303,9 @@ export function AppLayout() {
         {/* Bottom tab bar on mobile */}
         {isMobile && <BottomTabBar />}
       </div>
+
+      {/* Guided Tour — shows on first visit */}
+      <GuidedTour tourId="dashboard" steps={dashboardTourSteps} />
     </div>
   );
 }

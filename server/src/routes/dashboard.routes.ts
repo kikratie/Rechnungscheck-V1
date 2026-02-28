@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/auth.js';
 import { requireTenant } from '../middleware/tenantContext.js';
 import { prisma } from '../config/database.js';
 import { getDashboardStats, isValidPeriod } from '../services/dashboard.service.js';
+import { detectAnomalies } from '../services/anomaly.service.js';
 import type { DashboardPeriod } from '@buchungsai/shared';
 
 const router = Router();
@@ -55,6 +56,17 @@ router.get('/number-gaps', async (req, res, next) => {
         count: cancelledNumbers.length,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/dashboard/anomalies — Anomaly detection alerts
+router.get('/anomalies', async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const alerts = await detectAnomalies(tenantId);
+    res.json({ success: true, data: alerts });
   } catch (err) {
     next(err);
   }

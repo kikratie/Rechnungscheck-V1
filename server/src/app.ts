@@ -24,6 +24,7 @@ import deductibilityRuleRoutes from './routes/deductibilityRule.routes.js';
 import shareholderTransactionRoutes from './routes/shareholderTransaction.routes.js';
 import { prisma } from './config/database.js';
 import { invoiceQueue } from './jobs/queue.js';
+import { metricsMiddleware, getMetrics } from './middleware/metrics.js';
 import type { ApiResponse } from '@buchungsai/shared';
 
 const app = express();
@@ -70,6 +71,9 @@ const globalLimiter = rateLimit({
 
 app.use('/api/v1/invoices', uploadLimiter);
 app.use(globalLimiter);
+
+// Performance Metrics
+app.use(metricsMiddleware);
 
 // Body Parsing
 app.use(express.json({ limit: '1mb' }));

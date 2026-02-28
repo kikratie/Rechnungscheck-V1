@@ -10,6 +10,8 @@ import { validateBody } from '../middleware/validate.js';
 import { prisma } from '../config/database.js';
 import { ForbiddenError, NotFoundError, ConflictError } from '../utils/errors.js';
 import { adminCreateTenantSchema, adminUpdateTenantSchema } from '@buchungsai/shared';
+import { getMetrics } from '../middleware/metrics.js';
+import { env as appEnv } from '../config/env.js';
 import type { ApiResponse } from '@buchungsai/shared';
 
 const router = Router();
@@ -228,6 +230,26 @@ router.put('/tenants/:id', validateBody(adminUpdateTenantSchema), async (req, re
   } catch (err) {
     next(err);
   }
+});
+
+// GET /api/v1/admin/metrics — Server performance metrics
+router.get('/metrics', (_req, res) => {
+  res.json({ success: true, data: getMetrics() } satisfies ApiResponse);
+});
+
+// GET /api/v1/admin/llm-config — Current LLM configuration
+router.get('/llm-config', (_req, res) => {
+  res.json({
+    success: true,
+    data: {
+      provider: 'openai',
+      model: appEnv.OPENAI_MODEL || 'gpt-4o',
+      apiKeyConfigured: !!appEnv.OPENAI_API_KEY,
+      apiKeyPreview: appEnv.OPENAI_API_KEY
+        ? `sk-...${appEnv.OPENAI_API_KEY.slice(-4)}`
+        : null,
+    },
+  } satisfies ApiResponse);
 });
 
 export default router;

@@ -4,6 +4,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import {
   Shield, Building2, Users, FileText, Search, Plus, X,
   Loader2, CheckCircle2, XCircle, Eye, ToggleLeft, ToggleRight,
+  Activity, Brain, Key, RefreshCw,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -14,8 +15,10 @@ import {
   createAdminTenantApi,
   updateAdminTenantApi,
   getAdminStatsApi,
+  getAdminMetricsApi,
+  getAdminLlmConfigApi,
 } from '../api/admin';
-import type { AdminTenantListItem } from '../api/admin';
+import type { AdminTenantListItem, ServerMetrics, LlmConfig } from '../api/admin';
 
 type ViewMode = 'list' | 'create';
 type StatusFilter = 'all' | 'active' | 'inactive';
@@ -62,6 +65,18 @@ export function SuperAdminPage() {
     queryKey: ['admin', 'tenant', selectedId],
     queryFn: () => getAdminTenantDetailApi(selectedId!),
     enabled: !!selectedId,
+  });
+
+  const { data: metrics, refetch: refetchMetrics } = useQuery({
+    queryKey: ['admin', 'metrics'],
+    queryFn: getAdminMetricsApi,
+    staleTime: 30_000,
+  });
+
+  const { data: llmConfig } = useQuery({
+    queryKey: ['admin', 'llm-config'],
+    queryFn: getAdminLlmConfigApi,
+    staleTime: 120_000,
   });
 
   // Mutations
@@ -400,6 +415,99 @@ export function SuperAdminPage() {
           </div>
         </div>
       )}
+
+      {/* Server Metrics + LLM Config */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        {/* Performance Metrics */}
+        {metrics && (
+          <div className="card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Activity size={18} className="text-green-600" />
+                <h3 className="font-semibold text-sm">Server-Performance</h3>
+              </div>
+              <button
+                onClick={() => refetchMetrics()}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                title="Aktualisieren"
+              >
+                <RefreshCw size={14} />
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-3">
+              <div className="bg-gray-50 rounded-lg p-2 text-center">
+                <p className="text-lg font-bold text-gray-800">{metrics.requests.total.toLocaleString()}</p>
+                <p className="text-xs text-gray-500">Requests</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-2 text-center">
+                <p className="text-lg font-bold text-gray-800">{metrics.requests.errorRate}</p>
+                <p className="text-xs text-gray-500">Fehlerrate</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-2 text-center">
+                <p className="text-lg font-bold text-gray-800">{metrics.uptime.human}</p>
+                <p className="text-xs text-gray-500">Uptime</p>
+              </div>
+            </div>
+            {metrics.topRoutes.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-1.5">Top-Routen</p>
+                <div className="space-y-1 max-h-32 overflow-auto">
+                  {metrics.topRoutes.slice(0, 5).map((route) => (
+                    <div key={route.path} className="flex items-center justify-between text-xs">
+                      <span className="text-gray-600 font-mono truncate max-w-[180px]">{route.path}</span>
+                      <div className="flex items-center gap-3 text-gray-500 shrink-0">
+                        <span>{route.count}x</span>
+                        <span>{route.avgMs.toFixed(0)}ms</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* LLM Configuration */}
+        {llmConfig && (
+          <div className="card p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Brain size={18} className="text-purple-600" />
+              <h3 className="font-semibold text-sm">KI-Konfiguration</h3>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                <div>
+                  <p className="text-xs text-gray-500">Provider</p>
+                  <p className="font-medium text-sm">{llmConfig.provider}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-500">Modell</p>
+                  <p className="font-medium text-sm">{llmConfig.model}</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Key size={14} className="text-gray-400" />
+                  <span className="text-sm">API-Key</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {llmConfig.apiKeyConfigured ? (
+                    <>
+                      <CheckCircle2 size={14} className="text-green-500" />
+                      <span className="text-sm text-green-700 font-mono">{llmConfig.apiKeyPreview}</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle size={14} className="text-red-400" />
+                      <span className="text-sm text-red-600">Nicht konfiguriert</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Mobile: FullScreenPanel for detail */}
       {isMobile && (

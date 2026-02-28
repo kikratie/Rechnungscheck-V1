@@ -82,3 +82,43 @@ export async function switchTenantApi(tenantId: string) {
   const response = await apiClient.post<ApiResponse<{ tenantId: string; tenantName: string }>>('/admin/switch-tenant', { tenantId });
   return response.data.data!;
 }
+
+// GET /admin/metrics — Server performance metrics
+export interface ServerMetrics {
+  uptime: { ms: number; human: string; startedAt: string };
+  requests: { total: number; errors: number; errorRate: string };
+  topRoutes: Array<{ path: string; count: number; avgMs: number; maxMs: number; errors: number }>;
+}
+
+export async function getAdminMetricsApi() {
+  const response = await apiClient.get<ApiResponse<ServerMetrics>>('/admin/metrics');
+  return response.data.data!;
+}
+
+// GET /admin/llm-config — LLM configuration
+export interface LlmConfig {
+  provider: string;
+  model: string;
+  apiKeyConfigured: boolean;
+  apiKeyPreview: string | null;
+}
+
+export async function getAdminLlmConfigApi() {
+  const response = await apiClient.get<ApiResponse<LlmConfig>>('/admin/llm-config');
+  return response.data.data!;
+}
+
+// GET /dashboard/anomalies — Anomaly detection
+export interface AnomalyAlert {
+  type: string;
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  description: string;
+  invoiceIds: string[];
+  detectedAt: string;
+}
+
+export async function getAnomaliesApi() {
+  const response = await apiClient.get<ApiResponse<AnomalyAlert[]>>('/dashboard/anomalies');
+  return response.data.data!;
+}

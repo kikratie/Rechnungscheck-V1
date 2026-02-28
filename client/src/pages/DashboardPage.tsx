@@ -3,10 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/authStore';
 import { getDashboardStatsApi } from '../api/dashboard';
 import { getRecurringSummaryApi } from '../api/invoices';
+import { getAnomaliesApi } from '../api/admin';
+import type { AnomalyAlert } from '../api/admin';
 import {
   TrendingUp, TrendingDown, Wallet, Landmark,
   FileText, Building2, ArrowLeftRight,
   CheckCircle, XCircle, Clock, Loader2, Repeat, AlertTriangle,
+  ShieldAlert, Info,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -50,6 +53,13 @@ export function DashboardPage() {
     queryFn: () => getShareholderBalanceApi(),
     enabled: accountingType === 'ACCRUAL',
     staleTime: 60_000,
+  });
+
+  // Anomaly detection
+  const { data: anomalies } = useQuery({
+    queryKey: ['anomalies'],
+    queryFn: getAnomaliesApi,
+    staleTime: 120_000,
   });
 
   return (
@@ -271,6 +281,24 @@ export function DashboardPage() {
             </div>
           )}
 
+          {/* Anomaly Alerts Widget */}
+          {anomalies && anomalies.length > 0 && (
+            <div className="card p-4 md:p-6 mb-6 md:mb-8">
+              <div className="flex items-center gap-2 mb-4">
+                <ShieldAlert size={20} className="text-amber-600" />
+                <h2 className="text-lg font-semibold">Anomalie-Erkennung</h2>
+                <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
+                  {anomalies.length} {anomalies.length === 1 ? 'Hinweis' : 'Hinweise'}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {anomalies.map((alert: AnomalyAlert, idx: number) => (
+                  <AnomalyAlertCard key={idx} alert={alert} />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Secondary Stats (compact) */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
             <MiniStat label="Rechnungen" value={stats.totalInvoices} />
@@ -478,6 +506,30 @@ function ActivityIcon({ type }: { type: string }) {
     default:
       return <Clock size={14} className="text-gray-400" />;
   }
+}
+
+function AnomalyAlertCard({ alert }: { alert: AnomalyAlert }) {
+  const severityConfig = {
+    critical: { bg: 'bg-red-50 border-red-200', icon: <XCircle size={16} className="text-red-500" />, badge: 'bg-red-100 text-red-700' },
+    warning: { bg: 'bg-amber-50 border-amber-200', icon: <AlertTriangle size={16} className="text-amber-500" />, badge: 'bg-amber-100 text-amber-700' },
+    info: { bg: 'bg-blue-50 border-blue-200', icon: <Info size={16} className="text-blue-500" />, badge: 'bg-blue-100 text-blue-700' },
+  };
+  const config = severityConfig[alert.severity];
+
+  return (
+    <div className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 ${config.bg}`}>
+      <div className="mt-0.5 shrink-0">{config.icon}</div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-0.5">
+          <p className="font-medium text-sm">{alert.title}</p>
+          <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${config.badge}`}>
+            {alert.severity === 'critical' ? 'Kritisch' : alert.severity === 'warning' ? 'Warnung' : 'Info'}
+          </span>
+        </div>
+        <p className="text-xs text-gray-600">{alert.description}</p>
+      </div>
+    </div>
+  );
 }
 
 // ========== Formatters ==========

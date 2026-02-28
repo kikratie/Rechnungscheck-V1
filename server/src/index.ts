@@ -9,6 +9,7 @@ import { processInvoiceJob } from './jobs/invoiceProcessor.job.js';
 import { syncEmailConnector } from './services/emailSync.service.js';
 import { registerAllActiveConnectors } from './services/emailConnector.service.js';
 import { archiveInvoice } from './services/archival.service.js';
+import { createAutoArchiveWorker, scheduleAutoArchive } from './jobs/autoArchiveJob.js';
 
 /**
  * Pre-flight checks: verify OCR dependencies are functional before accepting work.
@@ -148,6 +149,10 @@ async function main() {
     console.warn('[EmailSync] Fehler beim Registrieren der Connectors:', (err as Error).message);
   }
 
+  // Auto-Archive Worker + Schedule (APPROVED → ARCHIVED after 7 days)
+  const autoArchiveWorker = createAutoArchiveWorker();
+  await scheduleAutoArchive();
+
   // Server starten
   app.listen(env.PORT, () => {
     console.log(`\nBuchungsAI Server läuft auf http://localhost:${env.PORT}`);
@@ -160,6 +165,7 @@ async function main() {
     console.log('\nServer wird heruntergefahren...');
     await worker.close();
     await emailSyncWorker.close();
+    await autoArchiveWorker.close();
     await prisma.$disconnect();
     process.exit(0);
   }
