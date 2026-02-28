@@ -89,6 +89,8 @@ async function main() {
       description: rule.description,
       inputTaxPercent: rule.inputTaxPercent,
       expensePercent: rule.expensePercent,
+      ruleType: rule.ruleType,
+      createsReceivable: rule.createsReceivable,
       isSystem: true,
       sortOrder: rule.sortOrder,
     })),
